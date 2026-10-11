@@ -1,0 +1,11 @@
+--- a/wgpu-native/Cargo.toml
++++ b/wgpu-native/Cargo.toml
+@@ -39,7 +39,7 @@
+ version = "29.0.1"
+ 
+ [lib]
+-crate-type = ["cdylib", "staticlib"]
++crate-type = ["rlib"]
+ 
+ [features]
+ default = ["wgsl", "spirv", "glsl", "dx12", "metal", "vulkan", "gles"]

@@ -1,0 +1,65 @@
+# =============================================================================================
+# Containerfile.riscv64 - the NATIVE-UNDER-QEMU FALLBACK build machine for linux-riscv64
+# =============================================================================================
+#
+# NOT USED BY build.sh TODAY, NOT BUILT. linux-riscv64 is CROSS-compiled in the x86_64 image
+# (Containerfile.x86_64: clang + lld against this architecture's own glibc sysroot, taken from the
+# SAME pinned image as below), which gives the same glibc floor in ~70 s instead of hours of Rust
+# under qemu. This file is the documented way back if the cross route ever stops working (a crate
+# that compiles C for the target with flags clang rejects, a sysroot problem):
+#
+#     podman build --platform linux/riscv64 -f Containerfile.riscv64 -t codebrix-wgpu-build-riscv64 \
+#         --build-arg BASE_IMAGE=<pins.env IMAGE_..._DIGEST form> --build-arg RUST_TOOLCHAIN=<pins.env> .
+#
+# and run container-build.sh in it with TARGET_TRIPLE empty (a native build), the stage and the
+# cargo cache volume mounted exactly as build.sh does for the x86_64 image. Expect the image build
+# (rustup + dnf under qemu) to take tens of minutes and the fat-LTO compile hours.
+#
+# WHAT IT ADDS to the digest-pinned manylinux image (Rocky Linux 10, gcc 14, glibc 2.39) - the network step, at image build:
+#   clang + clang-libs (libclang for wgpu-native's bindgen) via dnf, rustup + RUST_TOOLCHAIN
+#   (profile minimal) under /usr/local/cargo + /usr/local/rustup.
+# =============================================================================================
+
+ARG BASE_IMAGE=quay.io/pypa/manylinux_2_39_riscv64@sha256:04b3acc69a6cebb10ac1252587d202acce6445d91c783d3f92229bb2b2483069
+FROM ${BASE_IMAGE}
+ARG RUST_TOOLCHAIN=1.93
+
+LABEL org.opencontainers.image.title="codebrix-wgpu-build-riscv64"
+LABEL org.opencontainers.image.description="codebrix_wgpu native build machine (linux-riscv64, native-under-qemu fallback): manylinux + clang + Rust"
+LABEL org.opencontainers.image.source="CodeBrix.WebGpu/wgpu-native-tools/linux/Containerfile.riscv64"
+LABEL codebrix.webgpu.natives=1
+
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH \
+    CARGO_TERM_COLOR=never \
+    RUSTUP_AUTO_INSTALL=0
+
+RUN set -eu; \
+    dnf install -y --setopt=install_weak_deps=False clang clang-libs; \
+    dnf clean all; rm -rf /var/cache/dnf
+
+RUN set -eu; \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh; \
+    sh /tmp/rustup-init.sh -y --no-modify-path --profile minimal --default-toolchain "${RUST_TOOLCHAIN}"; \
+    rm -f /tmp/rustup-init.sh; \
+    chmod -R a+rwX /usr/local/cargo /usr/local/rustup
+
+RUN set -eu; \
+    for t in cc clang cargo rustc file nm objdump readelf strip ldd sha256sum patch; do \
+        command -v "$t" > /dev/null 2>&1 || { echo "ERROR: $t is missing from the image." >&2; exit 1; }; \
+    done; \
+    mkdir -p /usr/local/share/codebrix-wgpu-build; \
+    out=/usr/local/share/codebrix-wgpu-build/toolchain.txt; \
+    { \
+      echo "os      : $(grep -m1 PRETTY_NAME /etc/os-release | cut -d= -f2- | tr -d '\"')"; \
+      echo "machine : $(uname -m)"; \
+      echo "cc      : $(cc --version | sed -n 1p)"; \
+      echo "glibc   : $(ldd --version | sed -n 1p)"; \
+      echo "clang   : $(clang --version | sed -n 1p)"; \
+      echo "rustc   : $(rustc --version)"; \
+      echo "cargo   : $(cargo --version)"; \
+    } > "$out"; \
+    cat "$out"; echo "toolchain: ok"
+
+WORKDIR /work

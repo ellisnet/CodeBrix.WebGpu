@@ -1,0 +1,84 @@
+copyright: Fixture
+name: ext
+enum_prefix: 0x0003
+doc: A tiny extension specification.
+constants: []
+typedefs:
+  - name: ticket
+    doc: A 64-bit ticket.
+    type: uint64
+enums:
+  - name: s_type
+    doc: Extension struct tags.
+    extended: true
+    entries:
+      - null
+      - name: ext_extras
+        doc: Tags @ref WGPUExtExtras.
+  - name: ext_mode
+    doc: An extension enum numbered in the extension block.
+    entries:
+      - name: first
+        doc: TODO
+      - name: second
+        doc: TODO
+  - name: log_level
+    namespace: webgpu
+    doc: An extension enum numbered in the core block.
+    entries:
+      - name: off
+        doc: TODO
+        value: 0
+      - name: v6__0
+        doc: A double underscore keeps a literal underscore.
+        value: 5
+bitflags: []
+structs:
+  - name: ext_extras
+    doc: Extension extras.
+    type: extension
+    extends:
+      - sample_descriptor
+    members:
+      - name: ticket
+        doc: TODO
+        type: typedef.ticket
+callbacks:
+  - name: log
+    doc: A legacy callback.
+    style: immediate
+    args:
+      - name: level
+        doc: The level.
+        type: enum.log_level
+      - name: userdata
+        doc: The single user data pointer.
+        type: c_void
+        pointer: mutable
+functions:
+  - name: set_log_callback
+    doc: Installs the logger.
+    args:
+      - name: callback
+        doc: The callback.
+        type: callback.log
+      - name: userdata
+        doc: Passed back.
+        type: c_void
+        pointer: mutable
+objects:
+  - name: thing
+    doc: More thing methods.
+    extended: true
+    methods:
+      - name: poll
+        doc: Polls.
+        returns:
+          doc: True when idle.
+          type: bool
+        args:
+          - name: ticket
+            doc: TODO
+            type: typedef.ticket
+            pointer: immutable
+            optional: true

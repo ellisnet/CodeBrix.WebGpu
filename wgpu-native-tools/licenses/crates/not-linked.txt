@@ -1,0 +1,56 @@
+# crates.io packages of codebrix-wgpu/Cargo.lock that do NOT link into codebrix_wgpu on any of
+# the nine targets (build scripts and their dependencies, proc-macros, crates of other platforms or
+# of features that are off). Written by compose-license-wgpunative.sh --refresh from the RustTools
+# audit; --check uses it to prove every lock entry is accounted for.
+aho-corasick 1.1.4
+autocfg 1.5.1
+bindgen 0.72.1
+bumpalo 3.20.3
+bytemuck_derive 1.10.2
+cexpr 0.6.0
+cfg_aliases 0.2.1
+clang-sys 1.8.1
+crunchy 0.2.4
+document-features 0.2.12
+either 1.16.0
+futures-core 0.3.32
+futures-task 0.3.32
+futures-util 0.3.32
+gl_generator 0.14.0
+glob 0.3.3
+itertools 0.13.0
+jni-sys-macros 0.4.1
+js-sys 0.3.102
+khronos_api 3.1.0
+litrs 1.0.0
+memchr 2.8.2
+minimal-lexical 0.2.1
+nom 7.1.3
+paste 1.0.15
+pin-project-lite 0.2.17
+pkg-config 0.3.33
+prettyplease 0.2.37
+proc-macro2 1.0.106
+quote 1.0.45
+redox_syscall 0.5.18
+regex 1.12.4
+regex-automata 0.4.14
+regex-syntax 0.8.11
+rustc-hash 2.1.2
+rustversion 1.0.22
+shlex 1.3.0
+slab 0.4.12
+slotmap 1.1.1
+syn 2.0.118
+thiserror-impl 2.0.18
+version_check 0.9.5
+wasm-bindgen 0.2.125
+wasm-bindgen-macro 0.2.125
+wasm-bindgen-macro-support 0.2.125
+wasm-bindgen-shared 0.2.125
+web-sys 0.3.102
+wgpu-core-deps-emscripten 29.0.3
+windows-implement 0.60.2
+windows-interface 0.59.3
+xml-rs 0.8.28
+zerocopy-derive 0.8.52

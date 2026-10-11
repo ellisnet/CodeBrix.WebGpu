@@ -1,0 +1,57 @@
+# ==============================================================================
+# wgpu-native-tools/.gitignore
+# ==============================================================================
+#
+# LINE 1 IS LOAD-BEARING - DO NOT DELETE IT.
+#
+# The repository-root .gitignore is the standard Visual Studio / .NET one. It
+# ignores names that also occur inside the vendored wgpu-native tree and in this
+# tooling, for example:
+#
+#     *.env              -> linux/pins.env
+#     [Bb]uild/  [Dd]ebug/  [Rr]elease/  [Oo]ut/  [Ll]og/ ...
+#     (run `git check-ignore` on the trees after any upstream bump - see below)
+#
+# Without the "!*" below, such files would be silently left out of every
+# commit, and the vendored snapshot would no longer match its archives in
+# upstream-downloads/. A nested .gitignore takes precedence over the ones above
+# it, so re-including everything here and then re-ignoring only what this
+# folder genuinely produces is the correct fix - and it keeps the root
+# .gitignore untouched. (Same arrangement as CodeBrix.Audio.FlacWriter's
+# flac-native-tools and CodeBrix.VideoEncoding.Av1's av1-native-tools.)
+#
+# Verify at any time with:
+#     git ls-files --others --ignored --exclude-standard wgpu-native-tools/wgpu-native
+#     git check-ignore -v wgpu-native-tools/linux/pins.env
+#         -> should print nothing (i.e. the file is NOT ignored)
+# ==============================================================================
+
+# Re-include everything under this folder, overriding the root .gitignore.
+!*
+!*/
+
+# --- what this folder really does produce, and must not commit ---------------
+
+# Built native libraries, unstripped copies, smoke-test binaries, BUILD-INFO,
+# the host build for the managed tests. ONE tree, shared by every platform
+# build, so all RIDs land side by side.
+#
+# THE LEADING SLASH MATTERS: without it the pattern would match ANY directory
+# named "output" at any depth. The trailing /* (not a bare /output/) leaves the
+# directory visible so the README negation below can work.
+/output/*
+!/output/README.txt
+!/output/SHA256SUMS
+
+# Local scratch that the scripts may leave behind (staged sources, cargo target
+# folders, image build contexts with the cross sysroots, the podman API socket).
+*.tmp
+*.log
+build-scratch/
+
+# The driver's .NET build output.
+/driver/bin/
+/driver/obj/
+
+# Finder droppings (the "!*" above overrides any inherited .DS_Store rule).
+.DS_Store

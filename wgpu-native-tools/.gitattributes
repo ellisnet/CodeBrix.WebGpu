@@ -1,0 +1,23 @@
+# The vendored wgpu-native tree (webgpu-headers included) must stay byte-identical to its archives in
+# upstream-downloads/ on every commit and every checkout. The repository root sets
+# "* text=auto eol=lf", which would normalise files at `git add`. -text switches every conversion off.
+wgpu-native/** -text
+# The licence text shipped beside every native binary must be byte-identical on all nine RIDs,
+# whichever OS checked the repository out and ran the build. Its inputs (the crates' licence files,
+# published by their authors - two of them with CRLF line endings - and the standard texts) too.
+licenses/** -text
+licenses/*.sh text eol=lf
+# Shell scripts, the shared pins and the patches must keep LF to run / apply (Windows checkouts included).
+*.sh text eol=lf
+*.env text eol=lf
+*.patch text eol=lf
+# The C sources compiled on every platform.
+*.c text eol=lf
+*.h text eol=lf
+# Native binaries are never text.
+*.so binary
+*.dylib binary
+*.dll binary
+*.pdb binary
+*.tar binary
+*.tar.gz binary

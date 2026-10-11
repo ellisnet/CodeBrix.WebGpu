@@ -1,0 +1,89 @@
+================================================================================
+wgpu-native-tools/wgpu-native - VENDORED UPSTREAM SOURCE
+================================================================================
+
+WHAT THIS FOLDER IS
+--------------------------------------------------------------------------------
+wgpu-native/ is an unmodified copy of two official upstream archives:
+
+  wgpu-native/                    wgpu-native v29.0.1.1 (gfx-rs) - the C API of
+                                  wgpu over wgpu-core 29.0.3. Not on crates.io
+                                  (its package version is 0.0.0), hence vendored.
+  wgpu-native/ffi/webgpu-headers/ webgpu-headers @ 673658bc2bd70ec39fc55ebe6bb0173cf6d0a603
+                                  - webgpu.h, webgpu.yml (the binding generator's
+                                  input), schema.json; the git SUBMODULE wgpu-native
+                                  v29.0.1.1 pins. The release archive carries the
+                                  submodule folder EMPTY, so it is fetched from its
+                                  own repository at exactly that commit.
+
+Everything else the build compiles comes from crates.io, pinned by
+codebrix-wgpu/Cargo.lock (version + sha256 checksum of every crate; the
+2026-10-11 ruling: crates.io crates are "NuGet packages for Rust" and are not
+vendored). No git-sourced or out-of-repository crate is in the lock.
+
+No build step downloads either tree. refresh-upstream.sh is the only script
+that does (to bump or re-verify them); the archives are kept byte for byte in
+upstream-downloads/ so the trees can be re-verified with no network.
+
+This file lives BESIDE the tree, not inside it, so wgpu-native/ stays
+byte-identical to its archives (not even an added file).
+
+UPSTREAM IDENTITY - wgpu-native
+--------------------------------------------------------------------------------
+Project        : wgpu-native - https://github.com/gfx-rs/wgpu-native
+Release        : v29.0.1.1 (2026-06-23); wgpu-core / wgpu-types / wgpu-hal / naga
+                 29.0.3 in its Cargo.lock; rust-toolchain.toml channel "1.93";
+                 rust-version 1.87
+Archive        : upstream-downloads/wgpu-native-29.0.1.1.tar.gz
+                 (https://github.com/gfx-rs/wgpu-native/archive/refs/tags/v29.0.1.1.tar.gz)
+SHA-256        : 6008651e1d10022d4ded15b69405b4ba88577be5d623938ba98ad241b2cbf818
+Licence        : "MIT OR Apache-2.0" (LICENSE.MIT, LICENSE.APACHE) - used under MIT
+                 (PART 1 of LICENSE-WgpuNative.txt)
+Not used       : examples/ (its vendor/glfw submodule folder stays EMPTY - examples
+                 only, never built), Makefile, meson.build, checks.py, .github/
+
+UPSTREAM IDENTITY - webgpu-headers
+--------------------------------------------------------------------------------
+Project        : webgpu-headers - https://github.com/webgpu-native/webgpu-headers
+Commit         : 673658bc2bd70ec39fc55ebe6bb0173cf6d0a603 (the ffi/webgpu-headers
+                 submodule of wgpu-native v29.0.1.1, read from GitHub's contents API)
+Archive        : upstream-downloads/webgpu-headers-673658bc2bd70ec39fc55ebe6bb0173cf6d0a603.tar.gz
+                 (https://github.com/webgpu-native/webgpu-headers/archive/<commit>.tar.gz)
+SHA-256        : 6754c6c2465c79a954f7c04c7890c9f00b7ecce8addbe01b5056e860ba3933e6
+Licence        : BSD-3-Clause (LICENSE) - PART 2 of LICENSE-WgpuNative.txt
+Not used       : gen/ (the Go generator - the C# binding generator replaces it), tests/
+
+NOT MODIFIED - VERIFIED 2026-10-11
+--------------------------------------------------------------------------------
+  * Both archives match upstream-downloads/SHA256SUMS (sha256sum -c: OK).
+  * Unpacking both (webgpu-headers into ffi/webgpu-headers/) gives a tree that is
+    `diff -r`-identical to wgpu-native/ and whose 97 files have identical sha256s.
+  * refresh-upstream.sh v29.0.1.1 --into <scratch> (fresh downloads from GitHub,
+    the submodule commit resolved through the API) produced archives with the
+    SAME sha256s and a tree `diff -r`-identical to wgpu-native/; both patches
+    apply; C API delta: none (228 functions, 114 structs, 70 enums).
+
+No file in wgpu-native/ has been modified, renamed, reformatted, added or
+deleted, and none ever should be. The build needs two changes, kept in
+patches/*.patch and applied to a scratch copy by every script (see
+patches/README.txt): 0001 crate-type rlib, 0002 the codebrix_bridge module line.
+
+COMMITTING wgpu-native/: wgpu-native/.gitignore and
+wgpu-native/ffi/webgpu-headers/.gitignore are part of the archives; a nested
+.gitignore wins over ours. Check after any bump that nothing of the tree is
+ignored:
+    git ls-files --others --ignored --exclude-standard wgpu-native-tools/wgpu-native
+(empty on 2026-10-11).
+
+VERIFYING THE SNAPSHOT AGAINST ITS ARCHIVES (no network needed)
+--------------------------------------------------------------------------------
+    cd wgpu-native-tools
+    (cd upstream-downloads && sha256sum -c SHA256SUMS)
+    mkdir -p /tmp/wv && tar -xzf upstream-downloads/wgpu-native-29.0.1.1.tar.gz -C /tmp/wv
+    rmdir /tmp/wv/wgpu-native-29.0.1.1/ffi/webgpu-headers
+    tar -xzf upstream-downloads/webgpu-headers-673658bc2bd70ec39fc55ebe6bb0173cf6d0a603.tar.gz -C /tmp/wv
+    mv /tmp/wv/webgpu-headers-673658bc2bd70ec39fc55ebe6bb0173cf6d0a603 /tmp/wv/wgpu-native-29.0.1.1/ffi/webgpu-headers
+    diff -r /tmp/wv/wgpu-native-29.0.1.1 wgpu-native          # expect no output
+
+Re-checking against upstream (network): ./refresh-upstream.sh v29.0.1.1 --into /tmp/wr
+then diff -r /tmp/wr wgpu-native.

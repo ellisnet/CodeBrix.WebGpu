@@ -1,0 +1,335 @@
+# This is the main CI workflow to test that the package can be build on various platforms
+
+name: CI
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches-ignore: []
+
+env:
+  CI_RUST_VERSION: "1.91"
+  CI_RUST_MSRV: "1.87"
+  CARGO_INCREMENTAL: false
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+  RUSTFLAGS: -Dwarnings
+  RUSTDOCFLAGS: -Dwarnings
+  CACHE_SUFFIX: b
+  WGPU_ANDROID_NDK_VERSION: r29 # 29.0.14206865"
+
+jobs:
+  # A build that does some "meta" checks on the code integrity where the Rust compiler can't.
+  integrity-build:
+    name: Code integrity checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - name: Set up Python
+        uses: actions/setup-python@v6
+      - run: python checks.py
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+      - name: Install Rust toolchain
+        uses: cwfitzgerald/repo-common/.github/actions/install-rust@trunk
+        with:
+          version: ${{ env.CI_RUST_VERSION }}
+          components: rustfmt
+      - name: Run rustfmt
+        run: |
+          cargo fmt -- --check
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: ""
+      RUSTDOCFLAGS: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+      - name: Install Rust toolchain
+        uses: cwfitzgerald/repo-common/.github/actions/install-rust@trunk
+        with:
+          version: ${{ env.CI_RUST_MSRV }}
+      - name: Check with default features
+        run: cargo check
+      - name: Check without default features
+        run: cargo check --no-default-features
+
+  deny:
+    name: Deny
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: taiki-e/install-action@cargo-deny
+      - name: Run cargo-deny
+        run: cargo deny --all-features check
+
+  clippy:
+    name: Clippy ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_BUILD_TARGET: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux
+          - name: Linux x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            # Macos
+          - name: Macos 14 x86_64
+            os: macos-14
+            target: x86_64-apple-darwin
+          - name: Macos 14 aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+          - name: Macos 15 aarch64
+            os: macos-15
+            target: aarch64-apple-darwin
+            # Windows
+          - name: Windows gnu x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-gnu
+          - name: Windows msvc x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          # - name: Windows gnu i686
+          #   os: windows-latest
+          #   target: i686-pc-windows-gnu
+          - name: Windows msvc i686
+            os: windows-latest
+            target: i686-pc-windows-msvc
+          # Android
+          - name: Android aarch64
+            os: ubuntu-latest
+            target: aarch64-linux-android
+            setup_env: |
+              set -x
+              ANDROID_NDK_HOME=$HOME/wgpu-deps/ndk/android-ndk-$WGPU_ANDROID_NDK_VERSION
+              ANDROID_TARGET=aarch64-linux-android21
+              ANDROID_SYSROOT=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot
+              BINDGEN_ARGS="--target=$ANDROID_TARGET --sysroot=$ANDROID_SYSROOT"
+              CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/$ANDROID_TARGET-clang
+
+              echo "CC=$CC" >> $GITHUB_ENV
+              echo "CXX=$CC++" >> $GITHUB_ENV
+              echo "CLANG_PATH=$CC" >> $GITHUB_ENV
+              echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$CC" >> $GITHUB_ENV
+
+              echo "LLVM_CONFIG_PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-config" >> $GITHUB_ENV
+              echo "BINDGEN_EXTRA_CLANG_ARGS=$BINDGEN_ARGS" >> $GITHUB_ENV
+          - name: Android armv7
+            os: ubuntu-latest
+            target: armv7-linux-androideabi
+            setup_env: |
+              set -x
+              ANDROID_NDK_HOME=$HOME/wgpu-deps/ndk/android-ndk-$WGPU_ANDROID_NDK_VERSION
+              ANDROID_TARGET=armv7a-linux-androideabi21
+              ANDROID_SYSROOT=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot
+              BINDGEN_ARGS="--target=$ANDROID_TARGET --sysroot=$ANDROID_SYSROOT"
+              CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/$ANDROID_TARGET-clang
+
+              echo "CC=$CC" >> $GITHUB_ENV
+              echo "CXX=$CC++" >> $GITHUB_ENV
+              echo "CLANG_PATH=$CC" >> $GITHUB_ENV
+              echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER=$CC" >> $GITHUB_ENV
+
+              echo "LLVM_CONFIG_PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-config" >> $GITHUB_ENV
+              echo "BINDGEN_EXTRA_CLANG_ARGS=$BINDGEN_ARGS" >> $GITHUB_ENV
+              echo "BINDGEN_EXTRA_CLANG_ARGS_armv7-linux-androideabi=$BINDGEN_ARGS" >> $GITHUB_ENV
+              echo "BINDGEN_EXTRA_CLANG_ARGS_armv7_linux_androideabi=$BINDGEN_ARGS" >> $GITHUB_ENV
+          # iOS
+          - name: iOS stable
+            os: macos-14
+            target: aarch64-apple-ios
+            setup_env: |
+              set -x
+              DEVELOPER_DIR=$(xcode-select -p)
+              SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || xcrun --show-sdk-path)
+              CC=$(xcrun --sdk iphoneos --find clang)
+
+              if [ ! -d "$SDKROOT" ]; then
+                echo "Warning: SDKROOT ($SDKROOT) does not exist"
+                ls -la /Applications || true
+              fi
+
+              echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> $GITHUB_ENV
+              echo "SDKROOT=$SDKROOT" >> $GITHUB_ENV
+              echo "CC=$CC" >> $GITHUB_ENV
+              echo "CARGO_TARGET_AARCH64_APPLE_IOS_LINKER=$CC" >> $GITHUB_ENV
+              echo "BINDGEN_EXTRA_CLANG_ARGS=-isysroot $SDKROOT" >> $GITHUB_ENV
+              echo "CFLAGS=-isysroot $SDKROOT" >> $GITHUB_ENV
+              echo "LDFLAGS=-isysroot $SDKROOT" >> $GITHUB_ENV
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+      - if: matrix.target == 'i686-pc-windows-gnu'
+        name: Setup msys2 (i686)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          pacboy: >-
+            toolchain:p
+      - name: Install Rust toolchain
+        uses: cwfitzgerald/repo-common/.github/actions/install-rust@trunk
+        with:
+          version: ${{ env.CI_RUST_VERSION }}
+          components: clippy
+          targets: ${{ matrix.target }}
+      # - if: matrix.target == 'i686-pc-windows-gnu'
+      #   name: Setup bindgen env (i686 gnu)
+      #   run: |
+      #     BINDGEN_TARGET=i686-pc-windows-gnu
+      #     MINGW32_ROOT=C:/msys64/mingw32
+      #     MINGW32_INCLUDE=$MINGW32_ROOT/include
+      #     MINGW32_TRIPLE_INCLUDE=$MINGW32_ROOT/i686-w64-mingw32/include
+      #     BINDGEN_ARGS="--target=$BINDGEN_TARGET --sysroot=$MINGW32_ROOT -isystem $MINGW32_INCLUDE -isystem $MINGW32_TRIPLE_INCLUDE"
+
+      #     echo "LIBCLANG_PATH=C:/Program Files/LLVM/bin" >> $GITHUB_ENV
+      #     echo "CLANG_PATH=C:/Program Files/LLVM/bin/clang.exe" >> $GITHUB_ENV
+      #     echo "C_INCLUDE_PATH=$MINGW32_INCLUDE:$MINGW32_TRIPLE_INCLUDE" >> $GITHUB_ENV
+      #     echo "CPLUS_INCLUDE_PATH=$MINGW32_INCLUDE:$MINGW32_TRIPLE_INCLUDE" >> $GITHUB_ENV
+      #     echo "BINDGEN_EXTRA_CLANG_ARGS=$BINDGEN_ARGS" >> $GITHUB_ENV
+      #     echo "BINDGEN_EXTRA_CLANG_ARGS_i686-pc-windows-gnu=$BINDGEN_ARGS" >> $GITHUB_ENV
+      #     echo "BINDGEN_EXTRA_CLANG_ARGS_i686_pc_windows_gnu=$BINDGEN_ARGS" >> $GITHUB_ENV
+      #   shell: bash
+      - name: Setup caching
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: clippy-${{ matrix.target }}-${{ env.CACHE_SUFFIX }}
+      - if: contains(matrix.target, 'android')
+        name: Setup Android NDK
+        run: |
+          mkdir -p $HOME/wgpu-deps/ndk
+          cd $HOME/wgpu-deps/ndk
+          curl -LO https://dl.google.com/android/repository/android-ndk-$WGPU_ANDROID_NDK_VERSION-linux.zip
+          unzip android-ndk-$WGPU_ANDROID_NDK_VERSION-linux.zip
+          rm android-ndk-$WGPU_ANDROID_NDK_VERSION-linux.zip
+      - name: Setup Environment
+        run: ${{ matrix.setup_env }}
+      - name: Run clippy
+        run: cargo clippy
+        shell: bash
+
+  examples:
+    name: Examples ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    env:
+      CARGO_BUILD_TARGET: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            shell: bash
+            setup_env: |
+              set -x;
+              sudo apt update -y
+              sudo apt install -y \
+                cmake ninja-build clang \
+                xorg-dev libwayland-dev libxkbcommon-dev wayland-protocols \
+                libegl1-mesa-dev mesa-vulkan-drivers
+          - name: Macos
+            os: macos-14
+            target: aarch64-apple-darwin
+            shell: bash
+            setup_env: brew install cmake ninja
+          - name: Windows gnu
+            os: windows-latest
+            target: x86_64-pc-windows-gnu
+            shell: msys2 {0}
+          - name: Windows msvc
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            shell: cmd
+            setup_env: choco install -y make
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+      - if: contains(matrix.target, 'windows-msvc')
+        name: Setup msvc
+        uses: ilammy/msvc-dev-cmd@v1
+      - if: contains(matrix.target, 'windows-gnu')
+        name: Setup msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make
+            git
+          pacboy: >-
+            toolchain:p
+            cmake:p
+            ninja:p
+            rust:p
+      - if: "!contains(matrix.target, 'windows-gnu')"
+        name: Install Rust toolchain
+        uses: cwfitzgerald/repo-common/.github/actions/install-rust@trunk
+        with:
+          version: ${{ env.CI_RUST_VERSION }}
+          targets: ${{ matrix.target }}
+      - name: Setup caching
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: examples-${{ matrix.target }}-${{ env.CACHE_SUFFIX }}
+      - name: Setup Environment
+        run: ${{ matrix.setup_env }}
+      - name: Run tests
+        run: cargo test
+      - name: Build examples debug
+        run: |
+          make example-capture
+          make example-compute
+          make example-triangle
+          make example-enumerate_adapters
+          make example-texture_arrays
+          make example-immediates
+      - name: Run examples debug
+        run: |
+          make run-example-capture
+          make run-example-compute
+          make run-example-enumerate_adapters
+          make run-example-immediates
+      - name: Build examples release
+        run: |
+          make example-capture-release
+          make example-compute-release
+          make example-triangle-release
+          make example-enumerate_adapters-release
+          make example-texture_arrays-release
+          make example-immediates-release
+      - name: Run examples release
+        run: |
+          make run-example-capture-release
+          make run-example-compute-release
+          make run-example-enumerate_adapters-release
+          make run-example-immediates-release

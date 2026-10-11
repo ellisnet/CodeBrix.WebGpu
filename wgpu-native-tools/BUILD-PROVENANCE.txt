@@ -1,0 +1,265 @@
+================================================================================
+wgpu-native-tools/BUILD-PROVENANCE.txt
+what was actually built, when, by what, and with what result
+================================================================================
+
+WHY THIS FILE EXISTS
+--------------------------------------------------------------------------------
+A binary in a package is anonymous. This file is how anyone later can tell which
+native library came from which source, which toolchain and which build machine.
+Every time a binary is adopted into ../src/CodeBrix.WebGpu.Native/runtimes/
+<rid>/native/, its section here is updated from that build's
+output/<rid>/BUILD-INFO.txt.
+
+Common to every entry below
+--------------------------------------------------------------------------------
+  Source          : wgpu-native/ - the unmodified wgpu-native v29.0.1.1 release
+                    archive with webgpu-headers @ 673658bc2bd70ec39fc55ebe6bb0173cf6d0a603
+                    in ffi/webgpu-headers/ (upstream-downloads/; see UPSTREAM.txt),
+                    plus OUR crate codebrix-wgpu/ (the wgpuCodebrix* functions of
+                    specs/codebrix.yml, C header codebrix-wgpu/include/codebrix_wgpu.h,
+                    API version 1). wgpu 29.0.3 (wgpu-core / wgpu-types / wgpu-hal /
+                    naga) via wgpu-native v29.0.1.1.
+  Crates          : codebrix-wgpu/Cargo.lock = wgpu-native's own lock + the
+                    codebrix-wgpu package (cargo pruned 5 entries nothing links:
+                    serde, serde_core, serde_derive, macro_rules_attribute(-proc_macro);
+                    NO version changed). Every build: --locked; crates.io only.
+  Patches applied : 0001-wgpu-native-crate-type-rlib.patch (crate-type ["rlib"]),
+                    0002-wgpu-native-codebrix-bridge-module.patch (one #[path] child
+                    module line: codebrix-wgpu/bridge/bridge.rs) - to a SCRATCH copy
+                    only; see patches/README.txt for why 0002 exists.
+  Profile         : release - opt-level 3, lto "fat", codegen-units 1, panic "abort",
+                    debug true (stripped by the scripts, never by cargo)
+  Features        : wgpu-native's defaults (wgsl, spirv, glsl, dx12, metal, vulkan,
+                    gles); compiled backends per OS (wgpu-core's own cfg rules):
+                    Linux / Android "vulkan,gles"; Windows "dx12,vulkan,gles";
+                    macOS "metal" (wgpuCodebrixGetBuildInfo reports it).
+  Exports         : EXACTLY specs/expected-exports.txt - 243 functions: the 228
+                    #[no_mangle] functions of wgpu-native (webgpu.h + wgpu.h,
+                    re-exported from its rlib by our cdylib - proven by nm on every
+                    RID) + the 15 wgpuCodebrix* functions. Nothing else: no Rust std
+                    or crate symbol leaks (rustc's own cdylib export list). Checked
+                    by every gate (missing AND extra).
+  ELF link args   : (codebrix-wgpu/build.rs) -soname libcodebrix_wgpu.so,
+                    --build-id=sha1, -z noexecstack, --compress-debug-sections=zlib;
+                    Android also -z max-page-size=16384 -z common-page-size=16384
+  Shipped names   : libcodebrix_wgpu.so / codebrix_wgpu.dll / libcodebrix_wgpu.dylib
+                    (unversioned; DllImport("codebrix_wgpu") probes exactly those)
+  Licence beside  : LICENSE-WgpuNative.txt = licenses/LICENSE-WgpuNative.txt
+  every binary      (108,936 bytes, sha256 b14697c11fd0a055...c56aa5b), composed ONCE
+                    by licenses/compose-license-wgpunative.sh from Cargo.lock:
+                    wgpu-native MIT + webgpu-headers BSD-3 + the 82 crates.io crates
+                    that link into the library on any RID; byte-identical on every RID.
+  Smoke test      : smoke-test.c, built for the TARGET, run against the STAGED
+                    (stripped) file, loaded by path - see README.txt "THE SMOKE TEST".
+                    47 checks with a GPU adapter; without one (most containers) the
+                    GPU part prints SKIPPED and 22 checks run.
+
+Linux (the three linux-* entries)
+--------------------------------------------------------------------------------
+  Route           : linux/build.sh -> (1) CodeBrix.RustTools.Docker 1.0.283.434 via
+                    driver/ (linux-build): engine check, image, labelled container,
+                    source copy, `cargo fetch` (network; fills the cargo cache volume
+                    codebrix-wgpu-cargo-cache), licence audit in the container
+                    (LicensePolicy.Permissive: PASSED), `cargo build --release --locked
+                    --offline` = the REPRODUCIBILITY TWIN; (2) THE SHIPPED COMPILE:
+                    `podman run --network none` of the same image, same /work paths,
+                    the same cache volume (linux/container-build.sh) - RustTools.Docker
+                    has no network-off option (FIXLIST 2026-10-11); (3) the gate in the
+                    TARGET's own pinned manylinux image, --network none
+                    (linux/container-gate.sh; qemu-user for arm64 / riscv64).
+  Build image     : codebrix-wgpu-build-x86_64 (linux/Containerfile.x86_64) = the
+                    pinned manylinux_2_28_x86_64 (AlmaLinux 8.10, glibc 2.28,
+                    gcc-toolset 14.2.1, GNU ld 2.41) + clang/lld 21.1.8 (dnf) + rustup
+                    1.29.1 with rustc/cargo 1.93.1 (01f6ddf75 2026-02-11) + targets
+                    aarch64 / riscv64gc + cross sysroots from the pinned
+                    manylinux_2_28_aarch64 (glibc 2.28, gcc 14 support files) and
+                    manylinux_2_39_riscv64 (glibc 2.39, gcc 14) images
+                    (linux/export-sysroot.sh). Image id b4600095633a.
+  Cross route     : linux-arm64 and linux-riscv64 are CROSS-compiled in that x86_64
+                    image (cargo --target; linker / CC = the GNU-named wrappers =
+                    clang --target=<arch>-redhat-linux --sysroot=/opt/sysroot/<arch>
+                    -fuse-ld=lld) - no Rust under emulation at all; ~70 s per RID.
+                    Only the gate runs under qemu. (Native-under-qemu fallback: not
+                    needed, not built; Containerfile.aarch64 / .riscv64 are not part
+                    of this route - see README.txt.)
+  Build host      : Dell Precision 7770, LMDE 7, x86_64, podman 5.4.2; 2026-10-11 UTC
+  Compiler        : rustc 1.93.1 on all five built RIDs (readelf -p .comment of each
+                    unstripped twin says "rustc version 1.93.1").
+  Reproducibility : all three: the RustTools.Docker build and the --network none
+                    build are BYTE-IDENTICAL (unstripped). Rust flags:
+                    --remap-path-prefix=/work=wgpu-native-tools,
+                    --remap-path-prefix=/usr/local/cargo/registry=cargo-registry.
+  Gate            : ELF class/machine, SONAME, no RPATH/RUNPATH/TEXTREL, GNU_STACK RW,
+                    exact export set, NEEDED system-only (no libvulkan / libGL / libEGL
+                    - wgpu dlopens them) + ldd -r, glibc floor CHECKED, build-id equal
+                    stripped/unstripped, licence file exact, smoke test (+ on linux-x64
+                    the staged file on the build host's Intel UHD 770 Vulkan driver).
+  Warnings        : 0 (codebrix-wgpu and every crate)
+
+================================================================================
+linux-x64                                                         BUILT + PASSED
+================================================================================
+Compiled         : 2026-10-11 03:16:05 UTC (68 s, --network none, native x86_64)
+File             : libcodebrix_wgpu.so (SONAME libcodebrix_wgpu.so)
+Build-id         : 3f15490e32e2d0d1178041cfc47f3454da11ef13
+Size (stripped)  : 6143048 bytes
+Size (unstripped): 23826656 bytes (zlib-compressed DWARF) -> unstripped/linux-x64/
+SHA256           : b4bb9e6477b5c9c04bab01fe4a1f69447e31eca16361a19f9af7c268f8d3a345
+SHA256 unstripped: 9f9813bc61fb61d5f81145695fbbd9c5f897f99ae5b546c6e8f2d8bd269fa0b0
+glibc floor      : 2.28 (allowed <= 2.28)
+Dynamic deps     : ld-linux-x86-64.so.2 libc.so.6 libdl.so.2 libgcc_s.so.1 libm.so.6 libpthread.so.0
+Reproducible     : YES (RustTools.Docker twin byte-identical)
+Smoke test       : PASSED in the gate container (22 checks; GPU part SKIPPED - the
+                   AlmaLinux 8 image has no GPU driver) AND on the build host
+                   (47 checks: Intel UHD Vulkan - compute, render, Vulkan info,
+                   VkImage wrap, AdoptVulkanDevice, transitions, 0 live objects)
+
+================================================================================
+linux-arm64                                                       BUILT + PASSED
+================================================================================
+Compiled         : 2026-10-11 03:18:42 UTC (73 s, --network none, CROSS from x86_64)
+File             : libcodebrix_wgpu.so (SONAME libcodebrix_wgpu.so)
+Build-id         : d531bc846391c4db8fe0c6497ce31860ab70fdc6
+Size (stripped)  : 5425424 bytes
+Size (unstripped): 23729488 bytes -> unstripped/linux-arm64/
+SHA256           : befa17191b2932c204b650f20be79ee4aa1d59519d1a773237e63b003e493323
+SHA256 unstripped: 8e02bdb0be266633211973f19d5182ecde8fe1168714de1a0287967c13b39499
+glibc floor      : 2.28 (allowed <= 2.28)
+Dynamic deps     : libc.so.6 libdl.so.2 libgcc_s.so.1 libm.so.6 libpthread.so.0
+Reproducible     : YES (RustTools.Docker twin byte-identical)
+Smoke test       : PASSED in manylinux_2_28_aarch64 under qemu-aarch64 (22 checks;
+                   GPU part SKIPPED - no driver in the image)
+
+================================================================================
+linux-riscv64                                                     BUILT + PASSED
+================================================================================
+Compiled         : 2026-10-11 03:21:57 UTC (68 s, --network none, CROSS from x86_64)
+File             : libcodebrix_wgpu.so (SONAME libcodebrix_wgpu.so)
+Build-id         : b2609569fa672771084e9b3553da39ce66be883c
+Size (stripped)  : 5419776 bytes
+Size (unstripped): 23847744 bytes -> unstripped/linux-riscv64/
+SHA256           : 8bac063270a1710a19ebea0c3509a6d62228a041bfb5a5ee300d7bacf298c24b
+SHA256 unstripped: 9ed140fdeea268062c0782ab3b985e2b5161e2a9cdc92240e48efcaeea9767c7
+glibc floor      : 2.34 (allowed <= 2.39)
+Dynamic deps     : ld-linux-riscv64-lp64d.so.1 libc.so.6 libgcc_s.so.1 libm.so.6
+Reproducible     : YES (RustTools.Docker twin byte-identical)
+Smoke test       : PASSED in manylinux_2_39_riscv64 under qemu-riscv64 - 41 checks
+                   INCLUDING the GPU part: the Rocky 10 image carries Mesa, so wgpu
+                   found llvmpipe (LLVM 21.1.8) on its GL backend and ran the compute
+                   doubling and the render-pass clear + readback correctly.
+
+Android (the two android-* entries)
+--------------------------------------------------------------------------------
+  Route           : android/build.sh -> CodeBrix.RustTools 1.0.283.434 via driver/
+                    (android-build): RustWorkbench.BuildAndroidAsync with
+                    AndroidLinkProfile.ForNdk(NDK 30.0.16248370, API 33) - the NDK's
+                    <triple>33-clang as linker and C compiler, llvm-ar; plus
+                    BINDGEN_EXTRA_CLANG_ARGS_<triple>="--sysroot=<ndk sysroot>
+                    --target=<triple>33" (AndroidLinkProfile sets none - FIXLIST);
+                    `cargo build --release --locked --target <triple>`; llvm-strip.
+  Toolchain       : rustc / cargo 1.93.1 (01f6ddf75 2026-02-11) - the pinned
+                    RUST_TOOLCHAIN, as on Linux: android/build.sh exports
+                    RUSTUP_TOOLCHAIN=1.93 by default and refuses to run without it
+                    (installed on the build host by Jeremy, 2026-10-11). (A first run
+                    the same evening with the host's stable 1.99.0 was superseded by
+                    this one and is not shipped.)
+  Reproducibility : both: a second build into a fresh target folder byte-identical.
+  Gate            : layout-check.c (ABI static asserts, cross-compiled), ELF64/machine,
+                    every PT_LOAD 16 KB aligned, no W+X, Android API note 33, NEEDED
+                    libandroid/libc/libdl/libm only, no TEXTREL/RPATH/RUNPATH, SONAME,
+                    exact exports (stripped AND unstripped), build-id equal, licence
+                    exact, and the smoke test on a REAL DEVICE over adb
+                    (/data/local/tmp/codebrix-wgpu-smoke, removed afterwards).
+
+================================================================================
+android-arm64                                                     BUILT + PASSED
+================================================================================
+Built            : 2026-10-11 UTC (android/build.sh, rustc 1.93.1)
+ABI / API        : arm64-v8a / 33
+File             : libcodebrix_wgpu.so (SONAME libcodebrix_wgpu.so)
+Build-id         : 7043a21e31da9d89318e28433730e586c56f751e
+Size (stripped)  : 5289976 bytes
+Size (unstripped): 23376704 bytes -> unstripped/android-arm64/
+SHA256           : ec7240097423c8c0e39150a6062611b9d9a3abb760c266eae23a9f1521ea35ed
+SHA256 unstripped: eba969564cd2fad27dbbeb89d424f40f45eb1fc0f72473fa821bbabb17f99e48
+PT_LOAD align    : 0x4000 x4 (16 KB page-size ready)
+NEEDED           : libandroid.so libc.so libdl.so libm.so
+Reproducible     : YES (a second build into a fresh target folder byte-identical)
+Device smoke test: PASSED on 98271FFBA0048D (Pixel 4 XL, arm64-v8a, Adreno 640 Vulkan),
+                   47 checks incl. AdoptVulkanDevice + VkImage wrap; files removed after
+
+================================================================================
+android-x64                                                       BUILT + PASSED
+================================================================================
+Built            : 2026-10-11 UTC (android/build.sh, rustc 1.93.1)
+ABI / API        : x86_64 / 33
+File             : libcodebrix_wgpu.so (SONAME libcodebrix_wgpu.so)
+Build-id         : 3b1d83cbdc54c5a6f30d9155552fcc33a7cd7c68
+Size (stripped)  : 5985432 bytes
+Size (unstripped): 23358024 bytes -> unstripped/android-x64/
+SHA256           : e06ec9d4a7d4ac07a3ca964676151531e80b1ca40e84e2d31e25a1c283fd24a0
+SHA256 unstripped: 4e04b5fcf0c69a96cb0dbe4006e0ee9fae73f31ca06c01446e730ebf4caa72c1
+PT_LOAD align    : 0x4000 x4 (16 KB page-size ready)
+NEEDED           : libandroid.so libc.so libdl.so libm.so
+Reproducible     : YES (a second build into a fresh target folder byte-identical)
+Device smoke test: PASSED on 192.168.86.225:5555 (HP laptop, model 87FE, x86_64,
+                   Intel Xe Vulkan), 47 checks; files removed after
+
+Windows (the two win-* entries)
+--------------------------------------------------------------------------------
+  Route           : windows/build-win-x64.ps1 / build-win-arm64.ps1 (dot-source
+                    build-common.ps1): cargo +1.93 build --release --locked --target
+                    x86_64-pc-windows-msvc / aarch64-pc-windows-msvc inside the Visual
+                    Studio developer environment (MSVC link.exe), static CRT
+                    (+crt-static), /Brepro, --remap-path-prefix; the .pdb from
+                    debug = true; smoke test compiled with cl.exe /MT for the target.
+                    win-arm64 route Auto: native on an ARM64 host, cross (x64_arm64)
+                    on an x64 host (-AdoptCrossBuild to adopt with the smoke test unrun).
+  Scripts         : written on Linux 2026-10-11 from the FlacWriter / Av1 scripts
+                    (which ran on Jeremy's x64 Windows 11 machine); NOT YET RUN.
+  Gate            : PE machine (header + dumpbin), exact exports (dumpbin /exports vs
+                    specs\expected-exports.txt), dependents Windows system DLLs only
+                    and no VC runtime, licence file, LoadLibrary smoke test by full path;
+                    -CheckReproducible builds twice.
+
+================================================================================
+win-x64                                                            NOT YET BUILT
+================================================================================
+Run on Jeremy's x64 Windows box:   cd wgpu-native-tools\windows ; .\build-win-x64.ps1
+then replace this block from output\win-x64\BUILD-INFO.txt.
+
+================================================================================
+win-arm64                                                          NOT YET BUILT
+================================================================================
+Run:   .\build-win-arm64.ps1   (x64 host: cross, add -AdoptCrossBuild; the smoke test
+then stays UNRUN until output\win-arm64\smoke-test.exe + codebrix_wgpu.dll +
+specs\expected-exports.txt are run on an ARM64 Windows device - see the script header).
+
+macOS (the two osx-* entries)
+--------------------------------------------------------------------------------
+  Route           : macos/build-osx-arm64.sh / build-osx-x64.sh (source
+                    build-common.sh): cargo +1.93 build --release --locked --target
+                    aarch64-apple-darwin / x86_64-apple-darwin with Apple's linker and
+                    SDK, MACOSX_DEPLOYMENT_TARGET=11.0 for BOTH; dsymutil, strip -x,
+                    ad-hoc codesign; thin dylibs, never universal.
+  Scripts         : written on Linux 2026-10-11 from the Vorbis / Av1 scripts; NOT YET RUN.
+  Expected        : the Vorbis finding (ld derives LC_UUID from output that includes
+                    N_OSO stab timestamps) may make two builds differ; REPRODUCIBLE=1
+                    records it.
+  Gate            : thin Mach-O of the right arch (file + lipo), exact exports
+                    (nm -gU vs specs/expected-exports.txt), install name
+                    @rpath/libcodebrix_wgpu.dylib, system-only dependencies (/usr/lib,
+                    /System/Library/Frameworks: Metal, QuartzCore, Foundation ...), no
+                    LC_RPATH, deployment target CHECKED, valid ad-hoc signature, licence
+                    exact, LC_UUID equal stripped/unstripped, smoke test.
+
+================================================================================
+osx-arm64                                                          NOT YET BUILT
+================================================================================
+Run on Jeremy's Apple Silicon Mac:   cd wgpu-native-tools/macos && ./build-osx-arm64.sh
+
+================================================================================
+osx-x64                                                            NOT YET BUILT
+================================================================================
+Run on the same Mac (Rosetta 2 verifies):   ./build-osx-x64.sh

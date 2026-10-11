@@ -1,0 +1,682 @@
+copyright: |
+  Copyright (c) 2026 Jeremy Ellis and contributors
+
+  SPDX-License-Identifier: MIT
+name: codebrix
+enum_prefix: 0x000C
+doc: |
+  CodeBrix extensions to the wgpu-native C API.
+
+  This file is the ONLY contract for the functions the codebrix_wgpu native library exports beyond
+  webgpu.h (webgpu.yml) and wgpu.h (specs/wgpu.yml). It is written in the webgpu-headers YAML schema
+  (wgpu-native/ffi/webgpu-headers/schema.json) so that ONE generator renders the C header, the Rust
+  export table and the C# binding for all three specifications. C names follow the same rule as the
+  other two files: `wgpu` + PascalCase(name), so `codebrix_get_api_version` is `wgpuCodebrixGetApiVersion`.
+
+  Why these functions exist: CodeBrix.WebGpu.Skia shares ONE GPU device between wgpu and a SkiaSharp
+  GRContext so that wgpu can render straight into the texture an SKSurface owns (zero copy). wgpu-native
+  only exposes the Metal objects behind a device/queue/texture (wgpuDeviceGetNativeMetalDevice,
+  wgpuQueueGetNativeMetalCommandQueue, wgpuTextureGetNativeMetalTexture); the Vulkan and Direct3D 12
+  equivalents, the reverse direction (wrapping an application's existing device or texture as wgpu
+  objects) and an explicit texture state transition are added here. They are implemented over
+  wgpu-core's `*_as_hal` / `create_*_from_hal` APIs and wgpu-hal's `raw_*` / `*_from_raw` accessors.
+
+  Platform rule: every function below is EXPORTED ON EVERY RUNTIME IDENTIFIER, so the export set is
+  identical on all nine. A function for a backend the platform does not have (Vulkan on macOS, Direct3D
+  12 anywhere but Windows, Metal anywhere but macOS) returns `WGPUStatus_Error` and sets no output;
+  a getter called on a device that is on a different backend does the same. Use
+  `codebrix_device_get_backend` first.
+
+  Versioning: `codebrix_get_api_version` returns CODEBRIX_API_VERSION (the `api_version` constant
+  below). The managed side refuses a library whose value differs. Bump it whenever a function, struct
+  or enum here changes shape or meaning. Adding a function also changes the export set, which means
+  all nine natives must be rebuilt before the next publish.
+
+  Threading: the same rules as the wgpu-native objects the functions take.
+
+constants:
+  - name: api_version
+    value: 1
+    doc: |
+      The version of this contract. Returned by @ref wgpuCodebrixGetApiVersion.
+
+typedefs: []
+
+enums:
+  - name: codebrix_texture_state
+    doc: |
+      The state (Vulkan: image layout + access; Direct3D 12: resource state) a texture is in or is to
+      be transitioned to. These are wgpu-core's internal texture uses, named for the foreign-API owner
+      that needs to know them. Used by @ref wgpuCodebrixCommandEncoderTransitionTexture and as the
+      `initialState` of every `CreateTextureFrom*` function.
+    entries:
+      - name: undefined
+        doc: |
+          Unknown / uninitialised. Vulkan `VK_IMAGE_LAYOUT_UNDEFINED`. Only valid as an initial state.
+      - name: copy_src
+        doc: |
+          Source of a copy. Vulkan `TRANSFER_SRC_OPTIMAL`; D3D12 `COPY_SOURCE`.
+      - name: copy_dst
+        doc: |
+          Destination of a copy. Vulkan `TRANSFER_DST_OPTIMAL`; D3D12 `COPY_DEST`.
+      - name: shader_resource
+        doc: |
+          Sampled / read in a shader. Vulkan `SHADER_READ_ONLY_OPTIMAL`; D3D12 `PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE`.
+      - name: storage_read_write
+        doc: |
+          Storage texture, read and write. Vulkan `GENERAL`; D3D12 `UNORDERED_ACCESS`.
+      - name: color_target
+        doc: |
+          Render pass colour attachment. Vulkan `COLOR_ATTACHMENT_OPTIMAL`; D3D12 `RENDER_TARGET`.
+          This is the state a SkiaSharp GRContext expects a render target in when it takes over drawing.
+      - name: depth_stencil_read
+        doc: |
+          Depth/stencil attachment, read only. Vulkan `DEPTH_STENCIL_READ_ONLY_OPTIMAL`; D3D12 `DEPTH_READ`.
+      - name: depth_stencil_write
+        doc: |
+          Depth/stencil attachment, writable. Vulkan `DEPTH_STENCIL_ATTACHMENT_OPTIMAL`; D3D12 `DEPTH_WRITE`.
+      - name: present
+        doc: |
+          Ready to present. Vulkan `PRESENT_SRC_KHR`; D3D12 `PRESENT`.
+
+bitflags: []
+
+structs:
+  - name: codebrix_name
+    doc: |
+      One name in a list of names (a Vulkan extension name). A single-member struct so that
+      `array<struct.codebrix_name>` renders as the standard count + pointer pair; its layout is exactly
+      one @ref WGPUStringView.
+    type: standalone
+    members:
+      - name: name
+        doc: |
+          The name, as a string view.
+        type: string_with_default_empty
+
+  - name: codebrix_build_info
+    doc: |
+      What this native library was built from. Every string is static and valid for the life of the
+      process; never free them. Filled by @ref wgpuCodebrixGetBuildInfo.
+    type: standalone
+    members:
+      - name: api_version
+        doc: |
+          Same value as @ref wgpuCodebrixGetApiVersion.
+        type: uint32
+      - name: wgpu_native_version
+        doc: |
+          The wgpu-native release this library wraps, as a dotted string (e.g. "29.0.1.1").
+        type: out_string
+      - name: wgpu_core_version
+        doc: |
+          The wgpu-core crate version compiled in (e.g. "29.0.3").
+        type: out_string
+      - name: backends
+        doc: |
+          Comma-separated backend feature names compiled in, in wgpu-native's feature spelling
+          (e.g. "vulkan,gles" on Linux, "dx12,vulkan,gles" on Windows, "metal" on macOS).
+        type: out_string
+      - name: target_triple
+        doc: |
+          The Rust target triple the library was built for (e.g. "x86_64-unknown-linux-gnu").
+        type: out_string
+      - name: profile
+        doc: |
+          The cargo profile ("release").
+        type: out_string
+
+  - name: codebrix_vulkan_device_info
+    doc: |
+      The Vulkan objects behind a wgpu device. All handles are the raw `VkInstance`, `VkPhysicalDevice`,
+      `VkDevice` and `VkQueue` values; they stay owned by wgpu and are valid while the device is alive.
+      Exactly what SkiaSharp's `GRVkBackendContext` needs to create a `GRContext` on the same device.
+      Filled by @ref wgpuCodebrixDeviceGetVulkanInfo.
+    type: standalone
+    members:
+      - name: instance
+        doc: |
+          `VkInstance`.
+        type: c_void
+        pointer: mutable
+      - name: physical_device
+        doc: |
+          `VkPhysicalDevice`.
+        type: c_void
+        pointer: mutable
+      - name: device
+        doc: |
+          `VkDevice`.
+        type: c_void
+        pointer: mutable
+      - name: queue
+        doc: |
+          `VkQueue` - the queue wgpu submits to.
+        type: c_void
+        pointer: mutable
+      - name: queue_family_index
+        doc: |
+          The family index of `queue`.
+        type: uint32
+      - name: queue_index
+        doc: |
+          The index of `queue` within its family.
+        type: uint32
+      - name: instance_api_version
+        doc: |
+          The Vulkan API version the instance was created with (`VK_MAKE_API_VERSION` packed).
+        type: uint32
+      - name: get_instance_proc_addr
+        doc: |
+          The `vkGetInstanceProcAddr` entry point wgpu loaded Vulkan through, as a plain function
+          pointer. SkiaSharp's `GRVkGetProcedureAddressDelegate` can be built over it.
+        type: c_void
+        pointer: mutable
+      - name: enabled_instance_extensions
+        doc: |
+          The instance extension names wgpu enabled. Static strings; valid for the life of the device.
+        type: array<struct.codebrix_name>
+      - name: enabled_device_extensions
+        doc: |
+          The device extension names wgpu enabled. Static strings; valid for the life of the device.
+        type: array<struct.codebrix_name>
+
+  - name: codebrix_vulkan_texture_info
+    doc: |
+      The Vulkan image behind a wgpu texture. Filled by @ref wgpuCodebrixTextureGetVulkanInfo.
+    type: standalone
+    members:
+      - name: image
+        doc: |
+          `VkImage`. Owned by wgpu; valid while the texture is alive.
+        type: c_void
+        pointer: mutable
+      - name: format
+        doc: |
+          The `VkFormat` value of the image.
+        type: uint32
+      - name: sample_count
+        doc: |
+          `VkSampleCountFlagBits` of the image.
+        type: uint32
+
+  - name: codebrix_d3d12_device_info
+    doc: |
+      The Direct3D 12 objects behind a wgpu device. COM pointers; they stay owned by wgpu and are valid
+      while the device is alive (take your own reference if you keep them). Exactly what SkiaSharp's
+      `GRD3DBackendContext` needs. Filled by @ref wgpuCodebrixDeviceGetD3d12Info.
+    type: standalone
+    members:
+      - name: adapter
+        doc: |
+          `IDXGIAdapter*`.
+        type: c_void
+        pointer: mutable
+      - name: device
+        doc: |
+          `ID3D12Device*`.
+        type: c_void
+        pointer: mutable
+      - name: queue
+        doc: |
+          `ID3D12CommandQueue*` - the queue wgpu submits to.
+        type: c_void
+        pointer: mutable
+
+  - name: codebrix_d3d12_texture_info
+    doc: |
+      The Direct3D 12 resource behind a wgpu texture. Filled by @ref wgpuCodebrixTextureGetD3d12Info.
+    type: standalone
+    members:
+      - name: resource
+        doc: |
+          `ID3D12Resource*`. Owned by wgpu; valid while the texture is alive.
+        type: c_void
+        pointer: mutable
+      - name: format
+        doc: |
+          The `DXGI_FORMAT` value of the resource.
+        type: uint32
+      - name: sample_count
+        doc: |
+          Samples per pixel.
+        type: uint32
+
+  - name: codebrix_vulkan_adopt_descriptor
+    doc: |
+      An application-owned Vulkan device to wrap as a wgpu adapter + device, for
+      @ref wgpuCodebrixInstanceAdoptVulkanDevice. The application keeps ownership of every object and
+      must keep them alive until the wgpu device is released. wgpu requires the device to have been
+      created with the extensions and features it would have asked for itself (wgpu-hal's
+      `required_device_extensions` / `physical_device_features` for the requested feature set); the
+      function fails with `WGPUStatus_Error` and a message through the instance's log callback when
+      something required is missing.
+    type: standalone
+    members:
+      - name: instance
+        doc: |
+          `VkInstance`.
+        type: c_void
+        pointer: mutable
+      - name: physical_device
+        doc: |
+          `VkPhysicalDevice`.
+        type: c_void
+        pointer: mutable
+      - name: device
+        doc: |
+          `VkDevice`.
+        type: c_void
+        pointer: mutable
+      - name: queue_family_index
+        doc: |
+          The family index of the graphics+compute queue wgpu is to submit to.
+        type: uint32
+      - name: queue_index
+        doc: |
+          The queue index within that family.
+        type: uint32
+      - name: instance_api_version
+        doc: |
+          The Vulkan API version the instance was created with.
+        type: uint32
+      - name: get_instance_proc_addr
+        doc: |
+          `vkGetInstanceProcAddr`, as a plain function pointer. wgpu loads every other entry point
+          through it; it never loads the Vulkan loader itself for an adopted device.
+        type: c_void
+        pointer: mutable
+      - name: enabled_instance_extensions
+        doc: |
+          The instance extensions the instance was created with.
+        type: array<struct.codebrix_name>
+      - name: enabled_device_extensions
+        doc: |
+          The device extensions the device was created with.
+        type: array<struct.codebrix_name>
+      - name: required_features
+        doc: |
+          The wgpu features the adopted device must expose (`WGPUFeatureName` values). May be empty.
+        type: array<enum.feature_name>
+
+  - name: codebrix_d3d12_adopt_descriptor
+    doc: |
+      An application-owned Direct3D 12 device to wrap as a wgpu adapter + device, for
+      @ref wgpuCodebrixInstanceAdoptD3d12Device. The application keeps ownership; wgpu adds its own COM
+      references.
+    type: standalone
+    members:
+      - name: adapter
+        doc: |
+          `IDXGIAdapter*` the device was created on.
+        type: c_void
+        pointer: mutable
+      - name: device
+        doc: |
+          `ID3D12Device*`.
+        type: c_void
+        pointer: mutable
+      - name: queue
+        doc: |
+          `ID3D12CommandQueue*` (a DIRECT queue) wgpu is to submit to.
+        type: c_void
+        pointer: mutable
+      - name: required_features
+        doc: |
+          The wgpu features the adopted device must expose. May be empty.
+        type: array<enum.feature_name>
+
+  - name: codebrix_metal_adopt_descriptor
+    doc: |
+      An application-owned Metal device to wrap as a wgpu adapter + device, for
+      @ref wgpuCodebrixInstanceAdoptMetalDevice. The application keeps ownership; wgpu retains what it
+      uses.
+    type: standalone
+    members:
+      - name: device
+        doc: |
+          `id<MTLDevice>`.
+        type: c_void
+        pointer: mutable
+      - name: required_features
+        doc: |
+          The wgpu features the adopted device must expose. May be empty.
+        type: array<enum.feature_name>
+
+callbacks: []
+
+functions:
+  - name: codebrix_get_api_version
+    doc: |
+      Returns the `api_version` constant this library was built from. Call it before anything else and
+      refuse the library if it is not the value this binding was generated from.
+    returns:
+      doc: |
+        CODEBRIX_API_VERSION.
+      type: uint32
+
+  - name: codebrix_get_build_info
+    doc: |
+      Fills @ref WGPUCodebrixBuildInfo. Never fails.
+    args:
+      - name: info
+        doc: |
+          Receives the build information.
+        type: struct.codebrix_build_info
+        pointer: mutable
+
+  - name: codebrix_get_struct_layout
+    doc: |
+      Reports the native `sizeof` and `alignof` of a struct declared in webgpu.yml, wgpu.yml or this
+      file, by its C type name (e.g. "WGPUTextureDescriptor"). The managed binding checks every
+      generated struct against this at load time; a mismatch means the binding and the native disagree
+      and nothing else may be called.
+    returns:
+      doc: |
+        `WGPUStatus_Success`, or `WGPUStatus_Error` when the name is unknown.
+      type: enum.status
+    args:
+      - name: struct_name
+        doc: |
+          The C type name.
+        type: string_with_default_empty
+      - name: size
+        doc: |
+          Receives `sizeof`.
+        type: usize
+        pointer: mutable
+      - name: alignment
+        doc: |
+          Receives `alignof`.
+        type: usize
+        pointer: mutable
+
+  - name: codebrix_device_get_backend
+    doc: |
+      The backend the device runs on. The same value `wgpuAdapterGetInfo` reports for the device's
+      adapter, without needing the adapter.
+    returns:
+      doc: |
+        The backend, or `WGPUBackendType_Undefined` for a null device.
+      type: enum.backend_type
+    args:
+      - name: device
+        doc: |
+          The device.
+        type: object.device
+
+  - name: codebrix_device_get_vulkan_info
+    doc: |
+      Fills @ref WGPUCodebrixVulkanDeviceInfo for a device on the Vulkan backend.
+    returns:
+      doc: |
+        `WGPUStatus_Success`, or `WGPUStatus_Error` when the device is not on Vulkan or the library has
+        no Vulkan backend.
+      type: enum.status
+    args:
+      - name: device
+        doc: |
+          The device.
+        type: object.device
+      - name: info
+        doc: |
+          Receives the Vulkan objects.
+        type: struct.codebrix_vulkan_device_info
+        pointer: mutable
+
+  - name: codebrix_texture_get_vulkan_info
+    doc: |
+      Fills @ref WGPUCodebrixVulkanTextureInfo for a texture on the Vulkan backend.
+    returns:
+      doc: |
+        `WGPUStatus_Success` or `WGPUStatus_Error`.
+      type: enum.status
+    args:
+      - name: texture
+        doc: |
+          The texture.
+        type: object.texture
+      - name: info
+        doc: |
+          Receives the Vulkan image.
+        type: struct.codebrix_vulkan_texture_info
+        pointer: mutable
+
+  - name: codebrix_device_get_d3d12_info
+    doc: |
+      Fills @ref WGPUCodebrixD3d12DeviceInfo for a device on the Direct3D 12 backend.
+    returns:
+      doc: |
+        `WGPUStatus_Success`, or `WGPUStatus_Error` when the device is not on Direct3D 12 or the library
+        has no Direct3D 12 backend.
+      type: enum.status
+    args:
+      - name: device
+        doc: |
+          The device.
+        type: object.device
+      - name: info
+        doc: |
+          Receives the Direct3D 12 objects.
+        type: struct.codebrix_d3d12_device_info
+        pointer: mutable
+
+  - name: codebrix_texture_get_d3d12_info
+    doc: |
+      Fills @ref WGPUCodebrixD3d12TextureInfo for a texture on the Direct3D 12 backend.
+    returns:
+      doc: |
+        `WGPUStatus_Success` or `WGPUStatus_Error`.
+      type: enum.status
+    args:
+      - name: texture
+        doc: |
+          The texture.
+        type: object.texture
+      - name: info
+        doc: |
+          Receives the Direct3D 12 resource.
+        type: struct.codebrix_d3d12_texture_info
+        pointer: mutable
+
+  - name: codebrix_device_create_texture_from_vulkan_image
+    doc: |
+      Wraps an application-owned `VkImage` as a wgpu texture (wgpu-hal `texture_from_raw`). The
+      descriptor must describe the image exactly (size, format, mip levels, array layers, samples,
+      usage); the image stays owned by the application and must outlive the returned texture. The
+      texture is assumed to be in `initialState` when wgpu first touches it.
+    returns:
+      doc: |
+        The texture, or NULL on failure (not Vulkan, or a descriptor that does not match the image).
+      type: object.texture
+    args:
+      - name: device
+        doc: |
+          The device, which must be on Vulkan.
+        type: object.device
+      - name: image
+        doc: |
+          `VkImage`.
+        type: c_void
+        pointer: mutable
+      - name: descriptor
+        doc: |
+          Describes the image.
+        type: struct.texture_descriptor
+        pointer: immutable
+      - name: initial_state
+        doc: |
+          The state the image is in now.
+        type: enum.codebrix_texture_state
+
+  - name: codebrix_device_create_texture_from_d3d12_resource
+    doc: |
+      Wraps an application-owned `ID3D12Resource` as a wgpu texture. Same rules as
+      @ref wgpuCodebrixDeviceCreateTextureFromVulkanImage; wgpu takes its own COM reference.
+    returns:
+      doc: |
+        The texture, or NULL on failure.
+      type: object.texture
+    args:
+      - name: device
+        doc: |
+          The device, which must be on Direct3D 12.
+        type: object.device
+      - name: resource
+        doc: |
+          `ID3D12Resource*`.
+        type: c_void
+        pointer: mutable
+      - name: descriptor
+        doc: |
+          Describes the resource.
+        type: struct.texture_descriptor
+        pointer: immutable
+      - name: initial_state
+        doc: |
+          The state the resource is in now.
+        type: enum.codebrix_texture_state
+
+  - name: codebrix_device_create_texture_from_metal_texture
+    doc: |
+      Wraps an application-owned `id<MTLTexture>` as a wgpu texture. Same rules as
+      @ref wgpuCodebrixDeviceCreateTextureFromVulkanImage; wgpu retains the texture. (Metal has no
+      explicit states; `initialState` is accepted for symmetry and ignored.)
+    returns:
+      doc: |
+        The texture, or NULL on failure.
+      type: object.texture
+    args:
+      - name: device
+        doc: |
+          The device, which must be on Metal.
+        type: object.device
+      - name: texture
+        doc: |
+          `id<MTLTexture>`.
+        type: c_void
+        pointer: mutable
+      - name: descriptor
+        doc: |
+          Describes the texture.
+        type: struct.texture_descriptor
+        pointer: immutable
+      - name: initial_state
+        doc: |
+          Ignored on Metal.
+        type: enum.codebrix_texture_state
+
+  - name: codebrix_command_encoder_transition_texture
+    doc: |
+      Records an explicit transition of the whole texture into `state` (wgpu-core
+      `command_encoder_transition_resources`). Use it before handing a wgpu texture to a foreign owner
+      (a SkiaSharp GRContext expects `ColorTarget` for a render target it draws into) and after taking
+      it back, so both owners agree on the image layout / resource state. Submitting the encoder's
+      command buffer performs the transition.
+    returns:
+      doc: |
+        `WGPUStatus_Success`, or `WGPUStatus_Error` when the texture's usage does not permit `state`.
+      type: enum.status
+    args:
+      - name: command_encoder
+        doc: |
+          The encoder to record into (not inside a pass).
+        type: object.command_encoder
+      - name: texture
+        doc: |
+          The texture.
+        type: object.texture
+      - name: state
+        doc: |
+          The target state.
+        type: enum.codebrix_texture_state
+
+  - name: codebrix_instance_adopt_vulkan_device
+    doc: |
+      Creates a wgpu adapter and device over an application-owned Vulkan device
+      (wgpu-hal `Instance::from_raw` + `expose_adapter` + `Adapter::device_from_raw`, registered in the
+      instance through wgpu-core's `create_adapter_from_hal` / `create_device_from_hal`). The queue is
+      reached with `wgpuDeviceGetQueue` as usual. Release the device and adapter normally; the
+      application's Vulkan objects are never destroyed by wgpu.
+    returns:
+      doc: |
+        `WGPUStatus_Success`, or `WGPUStatus_Error` (reason through the log callback).
+      type: enum.status
+    args:
+      - name: instance
+        doc: |
+          The wgpu instance that will own the adapter and device.
+        type: object.instance
+      - name: descriptor
+        doc: |
+          The Vulkan objects.
+        type: struct.codebrix_vulkan_adopt_descriptor
+        pointer: immutable
+      - name: adapter
+        doc: |
+          Receives the adapter (NULL on failure).
+        type: object.adapter
+        pointer: mutable
+      - name: device
+        doc: |
+          Receives the device (NULL on failure).
+        type: object.device
+        pointer: mutable
+
+  - name: codebrix_instance_adopt_d3d12_device
+    doc: |
+      Direct3D 12 counterpart of @ref wgpuCodebrixInstanceAdoptVulkanDevice.
+    returns:
+      doc: |
+        `WGPUStatus_Success` or `WGPUStatus_Error`.
+      type: enum.status
+    args:
+      - name: instance
+        doc: |
+          The wgpu instance.
+        type: object.instance
+      - name: descriptor
+        doc: |
+          The Direct3D 12 objects.
+        type: struct.codebrix_d3d12_adopt_descriptor
+        pointer: immutable
+      - name: adapter
+        doc: |
+          Receives the adapter.
+        type: object.adapter
+        pointer: mutable
+      - name: device
+        doc: |
+          Receives the device.
+        type: object.device
+        pointer: mutable
+
+  - name: codebrix_instance_adopt_metal_device
+    doc: |
+      Metal counterpart of @ref wgpuCodebrixInstanceAdoptVulkanDevice (wgpu-hal `Device::device_from_raw`).
+    returns:
+      doc: |
+        `WGPUStatus_Success` or `WGPUStatus_Error`.
+      type: enum.status
+    args:
+      - name: instance
+        doc: |
+          The wgpu instance.
+        type: object.instance
+      - name: descriptor
+        doc: |
+          The Metal device.
+        type: struct.codebrix_metal_adopt_descriptor
+        pointer: immutable
+      - name: adapter
+        doc: |
+          Receives the adapter.
+        type: object.adapter
+        pointer: mutable
+      - name: device
+        doc: |
+          Receives the device.
+        type: object.device
+        pointer: mutable
+
+objects: []

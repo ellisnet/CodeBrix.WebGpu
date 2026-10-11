@@ -1,0 +1,165 @@
+copyright: Fixture
+name: webgpu
+enum_prefix: 0x0000
+doc: A tiny core specification for the generator's unit and golden tests.
+constants:
+  - name: strlen
+    value: usize_max
+    doc: String length sentinel.
+  - name: whole_size
+    value: uint64_max
+    doc: Whole-buffer sentinel.
+  - name: answer
+    value: 42
+    doc: A plain number.
+typedefs: []
+enums:
+  - name: s_type
+    doc: Struct type tags.
+    entries:
+      - null
+      - name: sample_extension
+        doc: Tags @ref WGPUSampleExtension.
+  - name: callback_mode
+    doc: When callbacks fire.
+    entries:
+      - null
+      - name: wait_any_only
+        doc: Only inside wgpuInstanceWaitAny.
+      - name: allow_spontaneous
+        doc: TODO
+  - name: texture_dimension
+    doc: Texture dimensionality.
+    entries:
+      - name: undefined
+        doc: TODO
+      - name: 1D
+        doc: One-dimensional.
+      - name: 2D
+        doc: Two-dimensional.
+  - name: status
+    doc: Success or error.
+    entries:
+      - null
+      - name: success
+        doc: It worked.
+      - name: error
+        doc: It did not.
+        value: 7
+bitflags:
+  - name: buffer_usage
+    doc: How a buffer is used.
+    entries:
+      - name: none
+        doc: TODO
+      - name: map_read
+        doc: Mappable for reading.
+      - name: map_write
+        doc: Mappable for writing.
+      - name: copy_src
+        doc: Copy source.
+      - name: map_both
+        doc: Both map modes.
+        value_combination:
+          - map_read
+          - map_write
+structs:
+  - name: sample_descriptor
+    doc: |
+      An extensible descriptor. See @ref WGPUSampleExtension and `code <span>`.
+
+      Second paragraph with **bold** and [a link](@ref Nowhere).
+    type: extensible
+    members:
+      - name: label
+        doc: The label.
+        type: string_with_default_empty
+      - name: size
+        doc: A 64-bit size.
+        type: uint64
+      - name: offset
+        doc: A size_t.
+        type: usize
+      - name: dimension
+        doc: TODO
+        type: enum.texture_dimension
+      - name: usage
+        doc: The usage.
+        type: bitflag.buffer_usage
+      - name: parent
+        doc: An optional pointer to another descriptor.
+        type: struct.sample_descriptor
+        pointer: immutable
+        optional: true
+      - name: entries
+        doc: Some numbers.
+        type: array<uint32>
+        pointer: immutable
+      - name: flag
+        doc: A WGPUBool.
+        type: bool
+      - name: on_error
+        doc: The uncaptured error callback.
+        type: callback.uncaptured
+  - name: sample_extension
+    doc: An extension of the descriptor.
+    type: extension
+    extends:
+      - sample_descriptor
+    members:
+      - name: scale
+        doc: A float.
+        type: float32
+  - name: plain_info
+    doc: A standalone struct with members the API allocates.
+    type: standalone
+    free_members: true
+    members:
+      - name: name
+        doc: TODO
+        type: out_string
+callbacks:
+  - name: request_thing
+    doc: Delivers a thing.
+    style: callback_mode
+    args:
+      - name: status
+        doc: The status.
+        type: enum.status
+      - name: thing
+        doc: The thing.
+        type: object.thing
+      - name: message
+        doc: A message.
+        type: out_string
+  - name: uncaptured
+    doc: An error happened.
+    style: immediate
+    args:
+      - name: message
+        doc: The message.
+        type: out_string
+functions:
+  - name: create_thing
+    doc: Creates a thing.
+    returns:
+      doc: The thing.
+      type: object.thing
+    args:
+      - name: descriptor
+        doc: TODO
+        type: struct.sample_descriptor
+        pointer: immutable
+        optional: true
+objects:
+  - name: thing
+    doc: A thing.
+    methods:
+      - name: request
+        doc: Requests asynchronously.
+        callback: callback.request_thing
+        args:
+          - name: values
+            doc: Values to send.
+            type: array<object.thing>
+            pointer: immutable

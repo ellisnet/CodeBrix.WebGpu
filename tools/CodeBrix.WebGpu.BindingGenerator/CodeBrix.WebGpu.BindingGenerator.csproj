@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The binding generator: reads webgpu.yml + specs/wgpu.yml + specs/codebrix.yml, validates them against
+    webgpu-headers/schema.json and renders src/CodeBrix.WebGpu.Native/Generated/*.g.cs and
+    wgpu-native-tools/specs/expected-exports.txt. A repository tool - never packed, never shipped.
+    See MAINTAINER-README.txt, "THE BINDING GENERATOR".
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>CodeBrix.WebGpu.BindingGenerator</AssemblyName>
+    <RootNamespace>CodeBrix.WebGpu.BindingGenerator</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CodeBrix.YamlParse.MitLicenseForever" Version="1.0.252.1219" />
+    <PackageReference Include="CodeBrix.Templating.BsdLicenseForever" Version="1.0.284.213" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Templates\*.scriban" LogicalName="Templates.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

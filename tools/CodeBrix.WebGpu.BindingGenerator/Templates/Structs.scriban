@@ -1,0 +1,23 @@
+{{ Banner }}
+
+using System.Runtime.InteropServices;
+
+namespace CodeBrix.WebGpu.Native;
+{{ for s in Items }}
+
+{{ s.Doc }}
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct {{ s.Name }}
+{
+{{~ if s.STypeValue ~}}
+    /// <summary>The <see cref="SType" /> value that identifies this struct in <see cref="ChainedStruct.SType" />.</summary>
+    public const SType StructType = SType.{{ s.STypeValue }};
+
+{{~ end ~}}
+{{~ for f in s.Fields ~}}
+{{ f.Doc }}
+    public {{ f.Type }} {{ f.Name }};
+
+{{~ end ~}}
+}
+{{ end }}

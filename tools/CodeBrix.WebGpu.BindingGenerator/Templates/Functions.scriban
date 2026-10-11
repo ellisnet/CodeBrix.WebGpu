@@ -1,0 +1,20 @@
+{{ Banner }}
+
+using System.Runtime.InteropServices;
+
+namespace CodeBrix.WebGpu.Native;
+
+/// <summary>
+/// Every function the codebrix_wgpu native library exports, one <c>LibraryImport</c> per C function,
+/// named as the C function without its <c>wgpu</c> prefix. All parameters are blittable and passed
+/// exactly as the C declaration passes them; nothing is marshalled.
+/// </summary>
+public static unsafe partial class WebGpu
+{
+{{~ for f in Items ~}}
+{{ f.Doc }}
+    [LibraryImport("codebrix_wgpu", EntryPoint = "{{ f.CName }}")]
+    public static partial {{ f.ReturnType }} {{ f.Name }}({{ f.Parameters }});
+
+{{~ end ~}}
+}

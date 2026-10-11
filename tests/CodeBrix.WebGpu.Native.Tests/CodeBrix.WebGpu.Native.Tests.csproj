@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CodeBrix.WebGpu.Native\CodeBrix.WebGpu.Native.csproj" />
+    <!-- The generator, for the in-process drift tests (generated files and expected-exports.txt are current). -->
+    <ProjectReference Include="..\..\tools\CodeBrix.WebGpu.BindingGenerator\CodeBrix.WebGpu.BindingGenerator.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="xunit.v3" Version="4.0.2" />
+    <PackageReference Include="SilverAssertions.ApacheLicenseForever" Version="1.0.248.1071" />
+  </ItemGroup>
+
+  <!--
+    The library's committed native libraries, copied to the test output under runtimes/<rid>/native/ - the
+    layout the library's DllImportResolver probes - so the tests exercise exactly what the package ships.
+    Remove-then-Include so the explicit metadata does not collide with the SDK's default None glob. A glob, so
+    a platform with no native committed yet never breaks the build.
+  -->
+  <ItemGroup>
+    <None Remove="..\..\src\CodeBrix.WebGpu.Native\runtimes\**\*" />
+    <None Include="..\..\src\CodeBrix.WebGpu.Native\runtimes\**\*" Link="runtimes\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    Until a linux-x64 native is committed under src/.../runtimes/, test against the developer host build
+    (wgpu-native-tools/build-host.sh -> wgpu-native-tools/output/host/libcodebrix_wgpu.so), placed where the
+    resolver looks first. The host build is never packed or shipped.
+  -->
+  <ItemGroup Condition="!Exists('..\..\src\CodeBrix.WebGpu.Native\runtimes\linux-x64\native\libcodebrix_wgpu.so') And Exists('..\..\wgpu-native-tools\output\host\libcodebrix_wgpu.so')">
+    <None Include="..\..\wgpu-native-tools\output\host\libcodebrix_wgpu.so" Link="runtimes\linux-x64\native\libcodebrix_wgpu.so" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,18 @@
+{{ Banner }}
+
+using System;
+
+namespace CodeBrix.WebGpu.Native;
+{{ for e in Items }}
+
+{{ e.Doc }}
+[Flags]
+public enum {{ e.Name }} : ulong
+{
+{{~ for v in e.Values ~}}
+{{ v.Doc }}
+    {{ v.Name }} = {{ v.Value }},
+
+{{~ end ~}}
+}
+{{ end }}

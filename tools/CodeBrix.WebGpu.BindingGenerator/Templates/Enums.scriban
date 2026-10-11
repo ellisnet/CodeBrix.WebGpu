@@ -1,0 +1,15 @@
+{{ Banner }}
+
+namespace CodeBrix.WebGpu.Native;
+{{ for e in Items }}
+
+{{ e.Doc }}
+public enum {{ e.Name }} : uint
+{
+{{~ for v in e.Values ~}}
+{{ v.Doc }}
+    {{ v.Name }} = {{ v.Value }},
+
+{{~ end ~}}
+}
+{{ end }}

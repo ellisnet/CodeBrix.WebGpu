@@ -1,0 +1,22 @@
+<!--
+  WgpuNativeDriver - the small console tool through which wgpu-native-tools DOG-FOODS
+  CodeBrix.RustTools (host workbench: licence audit, Android NDK link profile) and
+  CodeBrix.RustTools.Docker (Linux container builds). It is NOT part of CodeBrix.WebGpu.slnx and
+  is never packed: the bash scripts run it with `dotnet run - -project driver/WgpuNativeDriver.csproj`.
+  Its ONLY dependencies are the two packages below (nuget.org). See driver/README.txt.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>WgpuNativeDriver</RootNamespace>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CodeBrix.RustTools.MitLicenseForever" Version="1.0.283.434" />
+    <PackageReference Include="CodeBrix.RustTools.Docker.MitLicenseForever" Version="1.0.283.434" />
+  </ItemGroup>
+</Project>

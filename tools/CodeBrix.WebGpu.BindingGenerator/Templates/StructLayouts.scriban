@@ -1,0 +1,16 @@
+{{ Banner }}
+
+namespace CodeBrix.WebGpu.Native;
+
+/// <summary>Every generated struct, with its C name, for the layout check against the native library.</summary>
+internal static partial class GeneratedStructLayouts
+{
+    /// <summary>The managed size and alignment of every generated struct, keyed by its C type name.</summary>
+    /// <returns>One entry per struct, sorted by C name.</returns>
+    internal static StructLayoutInfo[] Managed() =>
+    [
+{{~ for s in Items ~}}
+        StructLayoutInfo.Of<{{ s.Name }}>("{{ s.CName }}"),
+{{~ end ~}}
+    ];
+}

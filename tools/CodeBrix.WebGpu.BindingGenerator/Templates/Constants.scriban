@@ -1,0 +1,13 @@
+{{ Banner }}
+
+namespace CodeBrix.WebGpu.Native;
+
+/// <summary>The constants of the WebGPU, wgpu-native and CodeBrix specifications (<c>WGPU_*</c> in C).</summary>
+public static class Constants
+{
+{{~ for c in Items ~}}
+{{ c.Doc }}
+    {{ c.Declaration }}
+
+{{~ end ~}}
+}

@@ -1,0 +1,12 @@
+--- a/wgpu-native/src/lib.rs
++++ b/wgpu-native/src/lib.rs
+@@ -4870,3 +4870,9 @@
+         ),
+     }
+ }
++
++// CodeBrix: the bridge module (wgpu-native-tools/patches/0002). It is OUR file, compiled as a child
++// of this crate root so that it can reach the handle structs' private fields; it only exposes
++// accessors and constructors to the codebrix-wgpu crate. Never part of the vendored tree.
++#[path = "../../codebrix-wgpu/bridge/bridge.rs"]
++pub mod codebrix_bridge;

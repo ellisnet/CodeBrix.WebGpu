@@ -1,0 +1,85 @@
+# ==============================================================================================
+# codebrix-wgpu - the crate that becomes the codebrix_wgpu native library on every RID
+# ==============================================================================================
+#
+# One cdylib (libcodebrix_wgpu.so / codebrix_wgpu.dll / libcodebrix_wgpu.dylib) exporting
+#   (a) every function of webgpu.h and (b) every function of wgpu.h - wgpu-native's own
+#       #[no_mangle] exports, re-exported from its rlib (src/lib.rs), and
+#   (c) the wgpuCodebrix* functions of specs/codebrix.yml (src/codebrix.rs, include/codebrix_wgpu.h).
+#
+# "wgpu-native" below is a SCRATCH COPY of ../wgpu-native with patches/*.patch applied (the build
+# scripts copy wgpu-native/ and codebrix-wgpu/ side by side into build-scratch/ and build there;
+# the vendored tree is never built in place and never modified):
+#   0001  crate-type = ["rlib"]          wgpu-native ships cdylib + staticlib only
+#   0002  pub mod codebrix_bridge        bridge/bridge.rs compiled as a child of wgpu-native's root
+# Building THIS folder in place fails on purpose (../wgpu-native has no rlib target).
+#
+# Versions: every crate resolves to EXACTLY what wgpu-native v29.0.1.1's Cargo.lock pins - Cargo.lock
+# here is that lock plus this package (no `cargo update`, ever, outside a recorded upstream bump).
+# Builds pass --locked. The wgpu crates are pinned with "=" so a lock edit cannot drift them.
+#
+# Copyright (c) 2026 Jeremy Ellis and contributors. SPDX-License-Identifier: MIT
+# ==============================================================================================
+
+[package]
+name = "codebrix-wgpu"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.87"
+license = "MIT"
+publish = false
+description = "codebrix_wgpu: wgpu-native plus the CodeBrix extensions, as one native library"
+
+# A workspace of its own, so cargo never looks for one above this folder.
+[workspace]
+
+[lib]
+name = "codebrix_wgpu"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+# wgpu-native's default features: wgsl, spirv, glsl, dx12, metal, vulkan, gles. Each backend only
+# compiles where wgpu-core supports it (Vulkan + GLES on Linux/Android, DX12 + Vulkan + GLES on
+# Windows, Metal on macOS).
+wgpu-native = { path = "../wgpu-native" }
+wgc = { package = "wgpu-core", version = "=29.0.3" }
+wgt = { package = "wgpu-types", version = "=29.0.3" }
+hal = { package = "wgpu-hal", version = "=29.0.3" }
+log = "0.4"
+
+[target.'cfg(any(windows, target_os = "linux", target_os = "android"))'.dependencies]
+ash = "0.38"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", default-features = false, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+] }
+windows-core = { version = "0.62", default-features = false }
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
+objc2-metal = { version = "0.3", default-features = false, features = [
+    "std",
+    "MTLDevice",
+    "MTLCommandQueue",
+    "MTLResource",
+    "MTLTexture",
+    "MTLTypes",
+] }
+
+[build-dependencies]
+
+# The shipped profile. strip is NOT set: the build scripts keep an unstripped twin (debug = true
+# gives it full symbols) and strip the copy that ships.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true
+incremental = false
