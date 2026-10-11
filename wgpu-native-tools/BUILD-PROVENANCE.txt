@@ -377,12 +377,87 @@ macOS (the two osx-* entries)
   Route           : macos/build-osx-arm64.sh / build-osx-x64.sh (source
                     build-common.sh): cargo +1.93 build --release --locked --target
                     aarch64-apple-darwin / x86_64-apple-darwin with Apple's linker and
-                    SDK, MACOSX_DEPLOYMENT_TARGET=11.0 for BOTH; dsymutil, strip -x,
-                    ad-hoc codesign; thin dylibs, never universal.
-  Scripts         : written on Linux 2026-10-11 from the Vorbis / Av1 scripts; NOT YET RUN.
-  Expected        : the Vorbis finding (ld derives LC_UUID from output that includes
-                    N_OSO stab timestamps) may make two builds differ; REPRODUCIBLE=1
-                    records it.
+                    SDK, MACOSX_DEPLOYMENT_TARGET=11.0 for BOTH; the link runs through
+                    macos/cc-exports.sh (see First run); dsymutil, strip -x, ad-hoc
+                    codesign; thin dylibs, never universal.
+  Scripts         : written on Linux 2026-10-11 from the Vorbis / Av1 scripts.
+  Build host      : Jeremy's Apple Silicon Mac - macOS 27.0.1 (26A434, arm64), Xcode
+                    27.0 (27A266a) at /Volumes/VideoWork/Applications/Xcode.app, Apple
+                    clang 21.0.0 (clang-2100.3.34.2), ld PROJECT:ld-27037.1, macOS 27.0
+                    SDK, /bin/bash 3.2.57, Rosetta 2 (installed 2026-10-10).
+  Rust            : rustup 1.29.1; toolchain "1.93" = rustc 1.93.1 (01f6ddf75
+                    2026-02-11) / cargo 1.93.1 (083ac5135 2025-12-15), installed by
+                    Jeremy for this build on 2026-10-11 (rustup toolchain install 1.93;
+                    rustup target add aarch64-apple-darwin x86_64-apple-darwin
+                    --toolchain 1.93) - the ONE thing this build needed installed.
+                    crates.io crates per Cargo.lock (--locked), from the Mac's cargo
+                    registry cache / crates.io.
+  libclang        : the Command Line Tools' /Library/Developer/CommandLineTools/usr/lib/
+                    libclang.dylib (found automatically; Xcode's own copy, same bytes,
+                    was the second candidate). bindgen ran with it on both RIDs.
+  First run       : 2026-10-11 05:13 UTC (the evening of 2026-10-10, local), both RIDs.
+                    cargo built and the smoke test passed on the first attempt (45
+                    checks, Metal, Apple M2 Pro) on both RIDs, but the static gate found
+                    TWO link-step problems, fixed in the repository and then both RIDs
+                    rebuilt (the records below are from the rebuilds, 05:27 / 05:28 UTC):
+                    1. Install name. The dylib's LC_ID_DYLIB was the build tree's
+                       absolute output path (/tmp/codebrix-wgpu-build-<rid>/target/...
+                       /libcodebrix_wgpu.dylib), not @rpath/libcodebrix_wgpu.dylib:
+                       rustc sets NO install name for a cdylib (the script's comment had
+                       assumed @rpath), so ld used its default. It also tripped the
+                       dependency check, which saw that path as a foreign dependency.
+                       FIX: codebrix-wgpu/build.rs now emits
+                       -Wl,-install_name,@rpath/libcodebrix_wgpu.dylib for macOS, next
+                       to the ELF soname it already set (same reason).
+                    2. Exports. nm -gU listed 247 symbols: the 243 of expected-exports.txt
+                       plus __CLASS_RawWindowMetalLayer, __IVAR_OFFSET_..., __DROP_FLAG_
+                       OFFSET_... and __REGISTER_CLASS_RawWindowMetalLayer - the statics
+                       objc2 0.6's define_class! macro gives #[export_name]s to (so two
+                       definitions of one Objective-C class collide at link time), from
+                       raw-window-metal 1.1 via wgpu-hal's Metal backend; rustc exports
+                       every #[export_name] symbol of the crate graph from a cdylib.
+                       Nothing resolves them dynamically (the ObjC runtime finds classes
+                       by name). First attempt: -Wl,-unexported_symbols_list from
+                       build.rs - REFUSED by ld ("-exported_symbol*, -unexported_symbol*
+                       and -no_exported_symbols cannot be used together": rustc always
+                       passes its own -exported_symbols_list). FIX: macos/cc-exports.sh,
+                       the linker cargo is given through CARGO_TARGET_<TRIPLE>_LINKER,
+                       which replaces rustc's list with specs/expected-exports.txt (one
+                       leading underscore per symbol) - the export table is the spec by
+                       construction; the four statics stay in the binary, non-external.
+                       Its first version touched EVERY link, and the native arm64 build
+                       failed linking the proc-macro crate document-features with 243
+                       "symbol not found" (on a native build the host triple IS the
+                       target triple, so cargo links the proc-macro dylibs through the
+                       same linker; the x86_64 cross build was unaffected). It now acts
+                       only when the "-o" output is libcodebrix_wgpu.dylib.
+                    0 cargo warnings on either RID; every other gate check passed as
+                    written; no other script change was needed.
+  Reproducibility : YES, byte for byte - observed, not from REPRODUCIBLE=1: the osx-x64
+                    build of 05:24 UTC (before the wrapper's pass-through fix, which
+                    does not change the cdylib link) and the adopted one of 05:28 UTC
+                    have the same sha256 and LC_UUID. Unlike the C builds of Vorbis /
+                    FlacWriter / Av1, rustc links with the N_OSO stab timestamps ZEROED
+                    (nm -ap shows 0 for all 3 OSO entries), so ld's content-derived UUID
+                    is stable across builds.
+  Managed tests   : dotnet test --solution on the build host. The first run gave 137
+                    tests, 121 passed, 16 SKIPPED - every GPU test, because the fixture
+                    (GpuSession.CreateVulkan / GpuFixture) requested InstanceBackend.
+                    Vulkan only and the macOS natives compile Metal only ("metal not
+                    requested" in the skip reason). With Jeremy's go-ahead the fixture
+                    was made platform-aware the same day: GpuSession.PlatformBackend is
+                    Metal on macOS and Vulkan everywhere else (so Linux and Windows runs
+                    are unchanged), GpuFixture and the one test that builds its own
+                    session use CreateForThisPlatform(), and the adapter-info test
+                    expects GpuSession.ExpectedBackendType. Result: 137 tests, 130
+                    passed, 0 failed, 7 skipped - exactly the Linux-only ones (six
+                    CodebrixExtrasTests Vulkan-extras tests and BuildInfo_lists_vulkan_
+                    on_linux). Every WebGpuTests GPU round trip (compute, render-to-
+                    texture readback, shader modules incl. the SPIR-V passthrough error
+                    path, error callbacks, destroyed device) ran on the Metal device. The
+                    guards passed too: GeneratedFilesDrift, every struct layout against
+                    the arm64 native (wgpuCodebrixGetStructLayout), PackageContent with
+                    both osx RIDs.
   Gate            : thin Mach-O of the right arch (file + lipo), exact exports
                     (nm -gU vs specs/expected-exports.txt), install name
                     @rpath/libcodebrix_wgpu.dylib, system-only dependencies (/usr/lib,
@@ -391,11 +466,76 @@ macOS (the two osx-* entries)
                     exact, LC_UUID equal stripped/unstripped, smoke test.
 
 ================================================================================
-osx-arm64                                                          NOT YET BUILT
+osx-arm64                                                         BUILT + PASSED
 ================================================================================
-Run on Jeremy's Apple Silicon Mac:   cd wgpu-native-tools/macos && ./build-osx-arm64.sh
+Built            : 2026-10-11 05:27:28 UTC (74 s)
+Built by         : macos/build-osx-arm64.sh (route: native, Apple Silicon)
+Build host       : the Apple Silicon Mac above (macOS 27.0.1, arm64)
+Toolchain        : rustc 1.93.1 (01f6ddf75 2026-02-11) / cargo 1.93.1, target
+                   aarch64-apple-darwin; Apple clang 21.0.0 as the linker driver (through
+                   macos/cc-exports.sh), macOS 27.0 SDK; libclang: Command Line Tools
+cargo            : MACOSX_DEPLOYMENT_TARGET=11.0 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=
+                   macos/cc-exports.sh cargo +1.93 build --release --locked --target
+                   aarch64-apple-darwin (rustflags: --remap-path-prefix <scratch>, <cargo
+                   home>; ld -exported_symbols_list = specs/expected-exports.txt)
+Profile          : release - opt-level 3, lto fat, codegen-units 1, panic abort, debug true
+File             : libcodebrix_wgpu.dylib - Mach-O 64-bit arm64, thin (lipo: non-fat);
+                   install name @rpath/libcodebrix_wgpu.dylib; no LC_RPATH
+Minimum macOS    : 11.0 (checked: LC_BUILD_VERSION minos 11.0; 0 weak imports)
+Size (signed)    : 4253232 bytes (strip -x, then codesign --sign -; signature valid)
+SHA256           : af235b4868b615768f83e0a604b89ed77f82f041ee1737b40fda6c35590bba0c
+LC_UUID          : E5BA16B2-4DF6-325E-8E99-68A9D44D9A31 (equal in the stripped and the
+                   unstripped file)
+Unstripped       : 5020680 bytes -> unstripped/osx-arm64/libcodebrix_wgpu.dylib (committed:
+                   well under the 50 MB rule that kept the Windows PDBs out)
+                   sha256 8288659afcb46f8436d97912c5d0e15fc525084c5cc7c6afbfb48f58a0c10211
+Exports          : exactly the 243 functions of specs/expected-exports.txt
+Dependencies     : /usr/lib/libSystem.B.dylib, /usr/lib/libobjc.A.dylib,
+                   /usr/lib/libiconv.2.dylib, and the frameworks QuartzCore, Metal,
+                   Foundation, CoreFoundation - nothing from Homebrew, no Vulkan / MoltenVK
+Build warnings   : 0 (cargo log)
+Smoke test       : PASSED on the build host (45 checks, 0 failed, SMOKE TEST PASSED, exit 0;
+                   Metal backend, Apple M2 Pro: compute + render round trips, transitions,
+                   wgpu.h Metal getters, AdoptMetalDevice, 0 live objects)
+Managed proof    : dotnet test on the build host against this exact file (the copy in the
+                   test output: sha256 above): 130 passed, 0 failed, 7 skipped (the
+                   Linux-only Vulkan tests - see the macOS header); the GPU round trips ran
+                   on Metal; struct layouts and PackageContent passed. 2026-10-11 UTC
 
 ================================================================================
-osx-x64                                                            NOT YET BUILT
+osx-x64                                                           BUILT + PASSED
 ================================================================================
-Run on the same Mac (Rosetta 2 verifies):   ./build-osx-x64.sh
+Built            : 2026-10-11 05:28:42 UTC (74 s)
+Built by         : macos/build-osx-x64.sh (route: cross-compiled on arm64 via --target
+                   x86_64-apple-darwin, verified under Rosetta 2)
+Build host       : the Apple Silicon Mac above (macOS 27.0.1, arm64)
+Toolchain        : rustc 1.93.1 (01f6ddf75 2026-02-11) / cargo 1.93.1, target
+                   x86_64-apple-darwin; Apple clang 21.0.0 as the linker driver (through
+                   macos/cc-exports.sh), macOS 27.0 SDK; libclang: Command Line Tools
+cargo            : MACOSX_DEPLOYMENT_TARGET=11.0 CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER=
+                   macos/cc-exports.sh cargo +1.93 build --release --locked --target
+                   x86_64-apple-darwin (rustflags: --remap-path-prefix <scratch>, <cargo
+                   home>; ld -exported_symbols_list = specs/expected-exports.txt)
+Profile          : release - opt-level 3, lto fat, codegen-units 1, panic abort, debug true
+File             : libcodebrix_wgpu.dylib - Mach-O 64-bit x86_64, thin (lipo: non-fat);
+                   install name @rpath/libcodebrix_wgpu.dylib; no LC_RPATH
+Minimum macOS    : 11.0 (checked: LC_BUILD_VERSION minos 11.0; 0 weak imports)
+Size (signed)    : 4849808 bytes (strip -x, then codesign --sign -; signature valid)
+SHA256           : 99c4c4635447c93eeaf5b624872907b3319d88c82b088a415ff8d28a32f87f20
+LC_UUID          : 2F19E006-5B6A-3E4C-AE84-B5D269478D4C (equal in the stripped and the
+                   unstripped file)
+Unstripped       : 5604168 bytes -> unstripped/osx-x64/libcodebrix_wgpu.dylib (committed)
+                   sha256 a4095b7654570677bcf7cdf82f10749be7227f8ec8fe07bf9b89a78cda282dad
+Exports          : exactly the 243 functions of specs/expected-exports.txt
+Dependencies     : as osx-arm64 (libSystem, libobjc, libiconv, QuartzCore, Metal,
+                   Foundation, CoreFoundation)
+Build warnings   : 0 (cargo log)
+Reproducible     : the build of 05:24 UTC (same source; the earlier cc-exports.sh version
+                   produced the same cdylib link) gave this same sha256 and LC_UUID -
+                   byte-identical
+Smoke test       : PASSED on the build host under Rosetta 2 (45 checks, 0 failed, SMOKE TEST
+                   PASSED, exit 0): the x86_64 program and dylib ran translated and drove
+                   the host's Metal device (Apple M2 Pro)
+Managed proof    : NOT RUN - this Mac has only the arm64 .NET SDK, which cannot load an
+                   x86_64 dylib. An x64 .NET 10 SDK under Rosetta 2, or an Intel Mac, would
+                   give the equivalent of the osx-arm64 line.

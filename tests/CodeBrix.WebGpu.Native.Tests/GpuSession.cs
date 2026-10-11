@@ -7,9 +7,10 @@ using System.Threading;
 namespace CodeBrix.WebGpu.Native.Tests;
 
 /// <summary>
-/// Test helper: one wgpu instance (Vulkan only), its first adapter and a device with uncaptured-error and
-/// device-lost callbacks, created through the raw binding exactly as an application would. When no adapter
-/// is available, <see cref="SkipReason" /> says why and every GPU test skips.
+/// Test helper: one wgpu instance on one backend (<see cref="PlatformBackend" />: Vulkan, or Metal on macOS),
+/// its first adapter and a device with uncaptured-error and device-lost callbacks, created through the raw
+/// binding exactly as an application would. When no adapter is available, <see cref="SkipReason" /> says why
+/// and every GPU test skips.
 /// </summary>
 public sealed unsafe class GpuSession : IDisposable
 {
@@ -81,9 +82,19 @@ public sealed unsafe class GpuSession : IDisposable
     /// <summary>The reason the device-lost callback reported last.</summary>
     public DeviceLostReason LastDeviceLostReason => (DeviceLostReason)state->DeviceLostReason;
 
-    /// <summary>Creates a Vulkan session.</summary>
+    /// <summary>
+    /// The backend the GPU tests use on this platform: Metal on macOS (the only backend the osx natives
+    /// compile), Vulkan everywhere else (the Linux development box and Windows), so a run on Linux or Windows
+    /// behaves exactly as before macOS was added.
+    /// </summary>
+    public static InstanceBackend PlatformBackend => OperatingSystem.IsMacOS() ? InstanceBackend.Metal : InstanceBackend.Vulkan;
+
+    /// <summary>The <see cref="BackendType" /> an adapter of <see cref="PlatformBackend" /> reports.</summary>
+    public static BackendType ExpectedBackendType => OperatingSystem.IsMacOS() ? BackendType.Metal : BackendType.Vulkan;
+
+    /// <summary>Creates a session on <see cref="PlatformBackend" />.</summary>
     /// <returns>The session (check <see cref="SkipReason" />).</returns>
-    public static GpuSession CreateVulkan() => new GpuSession(InstanceBackend.Vulkan);
+    public static GpuSession CreateForThisPlatform() => new GpuSession(PlatformBackend);
 
     /// <summary>Requests the default adapter with the process-events callback pattern.</summary>
     /// <param name="instance">The instance.</param>

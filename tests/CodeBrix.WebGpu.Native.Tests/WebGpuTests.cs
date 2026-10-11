@@ -7,7 +7,7 @@ using Xunit;
 namespace CodeBrix.WebGpu.Native.Tests;
 
 /// <summary>
-/// End-to-end use of the generated binding on a real GPU (Vulkan): adapters, devices, the callback-info async
+/// End-to-end use of the generated binding on a real GPU (Vulkan; Metal on macOS): adapters, devices, the callback-info async
 /// pattern, a compute round trip, a render-to-texture readback, shader modules and error callbacks. Every test
 /// skips, with the reason, when the machine has no adapter.
 /// </summary>
@@ -82,7 +82,7 @@ public unsafe class WebGpuTests : IClassFixture<GpuFixture>
         gpu.Device.IsNull.Should().BeFalse();
         gpu.Queue.IsNull.Should().BeFalse();
         status.Should().Be(Status.Success);
-        backend.Should().Be(BackendType.Vulkan);
+        backend.Should().Be(GpuSession.ExpectedBackendType);
         description.Should().NotBeNullOrEmpty();
     }
 
@@ -309,7 +309,7 @@ public unsafe class WebGpuTests : IClassFixture<GpuFixture>
     public void using_a_destroyed_device_reports_through_the_uncaptured_error_callback()
     {
         //Arrange
-        using GpuSession session = GpuSession.CreateVulkan();
+        using GpuSession session = GpuSession.CreateForThisPlatform();
         Assert.SkipWhen(session.SkipReason != null, session.SkipReason ?? string.Empty);
         BufferDescriptor descriptor = new BufferDescriptor { Usage = BufferUsage.CopyDst, Size = 16 };
 

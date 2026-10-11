@@ -61,7 +61,16 @@ fn main() {
     //     non-executable stack, and zlib-COMPRESSED debug sections (the unstripped twin keeps full
     //     DWARF at a fraction of the size; strip removes them from the shipped file anyway);
     //     Android additionally 16 KB page alignment (Android 15+ devices).
-    //   Mach-O and PE: rustc's defaults (@rpath install name; PDB referenced by file name).
+    //   Mach-O (macOS): the install name @rpath/libcodebrix_wgpu.dylib - rustc sets NONE for a
+    //     cdylib, so ld would stamp the build tree's absolute output path (found on the first macOS
+    //     run, 2026-10-11). The EXPORT SET is not settable from here: rustc always passes its own
+    //     -exported_symbols_list (every #[no_mangle] / #[export_name] symbol of the crate graph, which
+    //     on macOS includes the four statics objc2's define_class! emits for raw-window-metal's
+    //     RawWindowMetalLayer: __CLASS_* __IVAR_OFFSET_* __DROP_FLAG_OFFSET_* __REGISTER_CLASS_*), and
+    //     ld refuses -unexported_symbols_list beside it. The macOS build script therefore links through
+    //     wgpu-native-tools/macos/cc-exports.sh, which replaces rustc's list with
+    //     specs/expected-exports.txt (the C API, nothing else).
+    //   PE: rustc's defaults (PDB referenced by file name).
     if matches!(os.as_str(), "linux" | "android") {
         println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,libcodebrix_wgpu.so");
         println!("cargo:rustc-cdylib-link-arg=-Wl,--build-id=sha1");
@@ -71,6 +80,9 @@ fn main() {
     if os == "android" {
         println!("cargo:rustc-cdylib-link-arg=-Wl,-z,max-page-size=16384");
         println!("cargo:rustc-cdylib-link-arg=-Wl,-z,common-page-size=16384");
+    }
+    if os == "macos" {
+        println!("cargo:rustc-cdylib-link-arg=-Wl,-install_name,@rpath/libcodebrix_wgpu.dylib");
     }
 
     let mut backends = Vec::new();

@@ -87,9 +87,9 @@ WHAT BUILDS WHERE
   win-x64        windows/build-win-x64.ps1       x64 Windows + VS C++ + Rust   built (Jeremy's x64 box)
   win-arm64      windows/build-win-arm64.ps1     ARM64 Windows, or x64 cross   cross-built there;
                                                  (smoke test then UNRUN)       smoke test UNRUN
-  osx-arm64      macos/build-osx-arm64.sh        Apple Silicon Mac             NOT YET BUILT (Jeremy)
-  osx-x64        macos/build-osx-x64.sh          Intel Mac, or Apple Silicon   NOT YET BUILT (Jeremy)
-                                                 + Rosetta 2
+  osx-arm64      macos/build-osx-arm64.sh        Apple Silicon Mac             built (Jeremy's Apple Silicon Mac)
+  osx-x64        macos/build-osx-x64.sh          Intel Mac, or Apple Silicon   built there (cross, verified
+                                                 + Rosetta 2                   under Rosetta 2)
   (host)         build-host.sh                   this Linux dev box            NOT shipped
 
 The Windows and macOS scripts were written on Linux on 2026-10-11 from the
@@ -104,8 +104,17 @@ twins (a full-debug wgpu PDB is 67 MB per RID, so the Windows PDBs are NOT
 committed - they stay in output/<rid>/ on the build machine). win-arm64 was
 cross-built with -AdoptCrossBuild, so its smoke test is still UNRUN - finish it
 on an ARM64 Windows device (Surface Pro X) as build-win-arm64.ps1's header
-describes. The macOS scripts are UNRUN. If one breaks, fix it in the script and
-record it in BUILD-PROVENANCE.txt.
+describes. The macOS scripts first ran on 2026-10-11 UTC on Jeremy's Apple
+Silicon Mac (macOS 27.0.1, Xcode 27.0, rustup toolchain 1.93 installed for it,
+the Command Line Tools' libclang, Rosetta 2): two first-run fixes, recorded in
+BUILD-PROVENANCE.txt - codebrix-wgpu/build.rs now sets the dylib's @rpath
+install name (rustc sets none for a cdylib), and cargo links through
+macos/cc-exports.sh, which replaces rustc's -exported_symbols_list with
+specs/expected-exports.txt (objc2's define_class! statics for raw-window-metal's
+RawWindowMetalLayer were being exported beside the C API, and ld refuses an
+-unexported_symbols_list next to rustc's list). Both RIDs then passed the
+complete gate and were adopted; all nine RIDs are built. If a script breaks,
+fix it in the script and record it in BUILD-PROVENANCE.txt.
 
 PREREQUISITES PER MACHINE
 --------------------------------------------------------------------------------
@@ -252,7 +261,8 @@ FILES
                           (pins.env also feeds the Android, Windows and macOS scripts)
   android/                build.sh, layout-check.c (ABI static asserts)
   windows/                build-common.ps1, build-win-x64.ps1, build-win-arm64.ps1
-  macos/                  build-common.sh, build-osx-arm64.sh, build-osx-x64.sh
+  macos/                  build-common.sh, build-osx-arm64.sh, build-osx-x64.sh, cc-exports.sh
+                          (the linker cargo uses there: rustc's export list -> specs/expected-exports.txt)
   driver/                 WgpuNativeDriver - the CodeBrix.RustTools dog-food tool
   tools-scripts/          gen-layouts.sh
   build-host.sh           the not-shipped dev-box build

@@ -106,6 +106,9 @@ the developer host build wgpu-native-tools/output/host/libcodebrix_wgpu.so
 The GPU tests need a WebGPU adapter. Every one of them SKIPS (with the reason)
 when none is found - a skip is not a pass. The development laptop has Intel
 UHD Vulkan + llvmpipe; do not install software rasterisers to make tests pass.
+The fixture (GpuSession.PlatformBackend) requests Vulkan, or Metal on macOS,
+where the natives compile only Metal (Jeremy's Apple Silicon Mac runs the GPU
+round trips that way); the codebrix Vulkan-extras tests stay Linux-only.
 
 The Native tests include the guards that tie the repository together:
   * GeneratedFilesDrift: Generated/*.g.cs and specs/expected-exports.txt are

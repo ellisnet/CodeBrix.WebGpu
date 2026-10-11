@@ -17,10 +17,23 @@
 #     * wgpu-native's build script runs bindgen, which needs libclang (see LIBCLANG below) and
 #       `xcrun --sdk macosx --show-sdk-path`;
 #     * the smoke test is ../smoke-test.c compiled with cc -arch <arch>;
-#     * the export set is checked against ../specs/expected-exports.txt (243 functions).
+#     * the export set is checked against ../specs/expected-exports.txt (243 functions) - and MADE
+#       from it: cargo links through cc-exports.sh (CARGO_TARGET_<TRIPLE>_LINKER), which replaces the
+#       -exported_symbols_list rustc generates (every #[no_mangle] / #[export_name] symbol of the crate
+#       graph - on macOS that includes four objc2 define_class! statics of raw-window-metal) with
+#       expected-exports.txt plus Mach-O's leading underscore. ld refuses -unexported_symbols_list
+#       beside rustc's list ("cannot be used together"), so the list is replaced, not amended. The
+#       wrapper touches ONLY the link whose output is libcodebrix_wgpu.dylib: on a native build the
+#       host triple is the target triple, so cargo links the proc-macro dylibs through it as well.
+#       codebrix-wgpu/build.rs sets the install name (rustc sets none for a cdylib).
 #
-#   NOT YET RUN. If something breaks on the Mac, fix it IN THE SCRIPT and record it in
-#   ../BUILD-PROVENANCE.txt.
+#   FIRST RUN 2026-10-11 UTC on Jeremy's Apple Silicon Mac (macOS 27.0.1, Xcode 27.0, rustup
+#   toolchain 1.93, the Command Line Tools' libclang, Rosetta 2). Two first-run fixes, both in the
+#   repository: codebrix-wgpu/build.rs sets the @rpath install name (rustc sets none for a cdylib),
+#   and cargo links through cc-exports.sh (CARGO_TARGET_<TRIPLE>_LINKER, set in cargo_build) so the
+#   export table is exactly specs/expected-exports.txt - see ../BUILD-PROVENANCE.txt. Both RIDs then
+#   passed the complete gate. If something breaks on another machine, fix it IN THE SCRIPT and
+#   record it there.
 #
 # Everything it builds is in this repository: ../wgpu-native (unmodified release tree), ../codebrix-wgpu
 # (our crate), ../patches (applied to a scratch copy), ../linux/pins.env (the shared pins). cargo
@@ -59,8 +72,9 @@ PINS_FILE="$TOOLS_DIR/linux/pins.env"
 
 PATCH_DIR="$TOOLS_DIR/patches"
 LIB_NAME="libcodebrix_wgpu.dylib"     # the name DllImport("codebrix_wgpu") probes on macOS
-# rustc gives a cdylib the install name @rpath/<file name>. .NET loads the file by path; the id is
-# not consulted, but it is checked so a toolchain change cannot slip through unnoticed.
+# codebrix-wgpu/build.rs sets the install name @rpath/<file name> (rustc sets NONE for a cdylib; the
+# first run, 2026-10-11, found ld's default - the build tree's absolute path). .NET loads the file
+# by path; the id is not consulted, but it is checked so a toolchain change cannot slip through.
 EXPECTED_INSTALL_NAME="@rpath/libcodebrix_wgpu.dylib"
 RUNTIMES_DIR="$REPO_DIR/src/CodeBrix.WebGpu.Native/runtimes"
 UNSTRIPPED_DIR="$TOOLS_DIR/unstripped"
@@ -168,7 +182,15 @@ cargo_build() {
     export CARGO_TARGET_DIR="$target_dir"
     export CARGO_TERM_COLOR=never
     export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$scratch=wgpu-native-tools"$'\x1f'"--remap-path-prefix=$cargo_home=cargo-home"
-    CARGO_COMMAND_LINE="MACOSX_DEPLOYMENT_TARGET=$MACOS_MIN cargo +$RUST_TOOLCHAIN build --release --locked --target $triple (rustflags: --remap-path-prefix <scratch>, <cargo home>)"
+    # The export list for ld: specs/expected-exports.txt with Mach-O's leading underscore. cc-exports.sh
+    # (the linker cargo is told to use for this target) swaps it in for the list rustc generates.
+    EXPORTS_LIST="$target_dir.exported-symbols.txt"
+    grep -v -e '^#' -e '^[[:space:]]*$' "$EXPECTED_EXPORTS" | sed 's/^/_/' > "$EXPORTS_LIST"
+    export CODEBRIX_WGPU_EXPORTS_LIST="$EXPORTS_LIST"
+    export CODEBRIX_WGPU_EXPORTS_FOR="$LIB_NAME"
+    local linker_var; linker_var="CARGO_TARGET_$(printf '%s' "$triple" | tr 'a-z-' 'A-Z_')_LINKER"
+    export "$linker_var=$TOOLS_DIR/macos/cc-exports.sh"
+    CARGO_COMMAND_LINE="MACOSX_DEPLOYMENT_TARGET=$MACOS_MIN $linker_var=macos/cc-exports.sh cargo +$RUST_TOOLCHAIN build --release --locked --target $triple (rustflags: --remap-path-prefix <scratch>, <cargo home>; ld -exported_symbols_list = specs/expected-exports.txt)"
     echo "  $CARGO_COMMAND_LINE"
     ( cd "$scratch/codebrix-wgpu" && cargo "+$RUST_TOOLCHAIN" build --release --locked --target "$triple" ) > "$target_dir.build.log" 2>&1 \
         || { echo "ERROR: cargo build failed - see $target_dir.build.log" >&2; tail -40 "$target_dir.build.log" >&2; exit 1; }

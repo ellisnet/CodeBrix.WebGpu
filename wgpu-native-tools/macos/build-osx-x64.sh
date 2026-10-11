@@ -6,8 +6,11 @@
 #   Written on Linux on 2026-10-11 from CodeBrix.VideoEncoding.Av1's script of the same name
 #   (a copy of CodeBrix.Audio.Vorbis's, run successfully, unchanged, by Jeremy on his Apple
 #   Silicon Mac on 2026-10-10, osx-x64 verified under Rosetta 2), adapted to a Rust (cargo) build.
-#   NOT YET RUN. If something breaks, fix it IN THE SCRIPT (or build-common.sh) and record it in
-#   ../BUILD-PROVENANCE.txt.
+#   FIRST RUN 2026-10-11 UTC on Jeremy's Apple Silicon Mac (Rosetta 2): this script ran UNCHANGED;
+#   the two first-run fixes (install name in build.rs, the cc-exports.sh linker wrapper in
+#   build-common.sh) are recorded in ../BUILD-PROVENANCE.txt. Complete gate passed under Rosetta 2
+#   (the host's Metal device), adopted; two builds gave identical bytes. If something breaks on
+#   another machine, fix it IN THE SCRIPT (or build-common.sh) and record it there.
 #
 # USAGE
 #     cd wgpu-native-tools/macos
