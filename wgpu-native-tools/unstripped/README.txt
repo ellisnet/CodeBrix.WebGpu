@@ -17,7 +17,15 @@ One folder per runtime identifier, mirroring
                                  gdb, lldb, addr2line, eu-stack and
                                  llvm-symbolizer read compressed sections directly.
   <rid>/libcodebrix_wgpu.dylib   pre-strip Mach-O (macOS; the .dSYM stays in output/)
-  <rid>/codebrix_wgpu.pdb        the PDB of the shipped DLL (Windows)
+  <rid>/codebrix_wgpu.pdb        the PDB of the shipped DLL (Windows) - ONLY when it is
+                                 50 MB or smaller. A full-debug-info PDB of the whole
+                                 wgpu stack is ~67 MB per RID (win-x64 and win-arm64,
+                                 2026-10-10), over GitHub's per-file warning threshold,
+                                 so the Windows build script (build-common.ps1,
+                                 $script:PdbAdoptLimit) leaves it in output/<rid>/ on
+                                 the build machine and ../BUILD-PROVENANCE.txt records
+                                 its sha256 and RSDS GUID instead. There is therefore NO
+                                 win-x64 / win-arm64 folder here.
 
 The build scripts copy the twin here automatically when they adopt a binary
 (ADOPT=1 / no -NoAdopt). Refresh SHA256SUMS after adding one:

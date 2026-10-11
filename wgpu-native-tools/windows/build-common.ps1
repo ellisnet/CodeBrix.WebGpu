@@ -18,8 +18,15 @@
 #     * the smoke test (..\smoke-test.c) is compiled with cl.exe for the target architecture;
 #     * the export set is checked against ..\specs\expected-exports.txt (243 functions).
 #
-#   NOT YET RUN. If something breaks on the Windows machine, fix it IN THE SCRIPT and record it
-#   in ..\BUILD-PROVENANCE.txt.
+#   FIRST RUN 2026-10-10 on Jeremy's x64 Windows 11 machine (Visual Studio Professional 2026
+#   18.10.3, rustup toolchain 1.93 = rustc 1.93.1, libclang = Visual Studio's own LLVM via
+#   LIBCLANG_PATH, PowerShell 7.6): win-x64 (full gate, 47-check smoke test on Vulkan) and
+#   win-arm64 (cross, -AdoptCrossBuild, smoke test unrun) both built and passed. Two fixes were
+#   made in this script after that run and both RIDs rebuilt: the licence check (it rejected the
+#   CR bytes the committed licence file legitimately contains - see Test-CodebrixWgpuDll) and a
+#   50 MB adopt limit for the PDB twin ($script:PdbAdoptLimit - a full-debug wgpu PDB is 67 MB).
+#   Recorded in ..\BUILD-PROVENANCE.txt. If something else breaks on another machine, fix it IN
+#   THE SCRIPT and record it there too.
 #
 # Dot-source this from an architecture script; do not run it directly.
 #
@@ -88,6 +95,10 @@ $script:AllowedDependents = @(
     'opengl32.dll', 'd3dcompiler_47.dll', 'dxcore.dll', 'SETUPAPI.dll', 'CFGMGR32.dll', 'VERSION.dll', 'WINMM.dll',
     'synchronization.dll'
 )
+
+# The largest PDB that is copied into ..\unstripped\<rid>\ (committed) on adoption; larger ones stay
+# in output\<rid>\ only. 50 MB is GitHub's per-file warning threshold (100 MB is its hard limit).
+$script:PdbAdoptLimit = 50MB
 
 # ---------------------------------------------------------------------------------------------
 # Native commands. Windows PowerShell 5.1 turns every STDERR line of a native command into an
@@ -452,13 +463,24 @@ function Test-CodebrixWgpuDll {
     # --- 4. licence file -----------------------------------------------------------------------
     # LICENSE-WgpuNative.txt must be the committed licenses\LICENSE-WgpuNative.txt byte for byte
     # (composed ONCE from Cargo.lock by ..\licenses\compose-license-wgpunative.sh; never per build).
+    # FIRST-RUN FIX (2026-10-10): this check used to reject any CR byte in the file as the sign of a
+    # CRLF checkout. The committed file legitimately CONTAINS CR bytes - two crates (allocator-api2,
+    # glow) publish CRLF licence texts, kept verbatim (..\.gitattributes marks licenses\** -text) -
+    # so the first win-x64 and win-arm64 runs failed the gate on a correct file. What a CRLF checkout
+    # would actually change is the file's bytes versus the committed blob, so that is what is checked
+    # now: the staged copy equals the file in licenses\, and that file equals HEAD's blob (git diff
+    # --quiet applies the -text attribute, i.e. compares raw bytes). The Linux gate's cmp against the
+    # committed file is the same test.
     $outDir = Split-Path -Parent $DllPath
+    $licenceRel    = "wgpu-native-tools/licenses/$($Pins['LICENSE_NAME'])"
     $outHash       = (Get-FileHash -LiteralPath (Join-Path $outDir $Pins['LICENSE_NAME'])).Hash
     $committedHash = (Get-FileHash -LiteralPath (Join-Path $ToolsDir "licenses\$($Pins['LICENSE_NAME'])")).Hash
-    $bytes = [System.IO.File]::ReadAllBytes((Join-Path $ToolsDir "licenses\$($Pins['LICENSE_NAME'])"))
-    $hasCr = $bytes -contains 13
-    if ($outHash -eq $committedHash -and -not $hasCr) { Add-GatePass "$($Pins['LICENSE_NAME']) is the committed file (LF line endings)" }
-    else { Add-GateFail "$($Pins['LICENSE_NAME']) differs from licenses\$($Pins['LICENSE_NAME']) or has CR bytes (a CRLF checkout? see ..\.gitattributes)" }
+    $repoRoot      = Split-Path -Parent $ToolsDir
+    $null = Invoke-Native 'git' @('-C', $repoRoot, 'diff', '--quiet', 'HEAD', '--', $licenceRel)
+    $sameAsHead = ($LASTEXITCODE -eq 0)
+    if ($outHash -eq $committedHash -and $sameAsHead) { Add-GatePass "$($Pins['LICENSE_NAME']) is the committed file, byte for byte (equal to HEAD's blob)" }
+    elseif ($outHash -ne $committedHash) { Add-GateFail "$($Pins['LICENSE_NAME']) in output\ differs from licenses\$($Pins['LICENSE_NAME'])" }
+    else { Add-GateFail "licenses\$($Pins['LICENSE_NAME']) differs from the committed blob (git diff HEAD) - an uncommitted edit, or a checkout that converted its bytes (see ..\.gitattributes)" }
 
     if (-not $CanRunTargetBinaries) {
         Add-GateFail 'smoke test NOT RUN - this machine cannot execute the target architecture. (Reported as a failure on purpose: an unrun check is not a passed check.)'
@@ -645,7 +667,11 @@ build tools (Latest)") to that instance. (The check reads this instance's filesy
     # --- 5. record ----------------------------------------------------------------------------------
     $sha = Get-Sha256 $dllPath
     $size = (Get-Item -LiteralPath $dllPath).Length
-    $pdbLine = if (Test-Path -LiteralPath $pdbPath) { "codebrix_wgpu.pdb, $((Get-Item -LiteralPath $pdbPath).Length) bytes, sha256 $(Get-Sha256 $pdbPath) (not shipped)" } else { 'none produced' }
+    $pdbLine = if (Test-Path -LiteralPath $pdbPath) {
+        $pdbBytes = (Get-Item -LiteralPath $pdbPath).Length
+        $pdbWhere = if ($pdbBytes -le $script:PdbAdoptLimit) { 'adopted into unstripped\ on adoption' } else { "over the $($script:PdbAdoptLimit / 1MB) MB adopt limit: output\$Rid\ only, NOT committed" }
+        "codebrix_wgpu.pdb, $pdbBytes bytes, sha256 $(Get-Sha256 $pdbPath) (not shipped; $pdbWhere)"
+    } else { 'none produced' }
     $sumLines = foreach ($name in @('codebrix_wgpu.dll', 'codebrix_wgpu.pdb', $pins['LICENSE_NAME'], 'smoke-test.exe')) {
         $p = Join-Path $outDir $name
         if (Test-Path -LiteralPath $p) { "$(Get-Sha256 $p)  $name" }
@@ -721,11 +747,22 @@ $(($smokeOutput | ForEach-Object { "  $_" }) -join "`n")
             Copy-Item -LiteralPath (Join-Path $outDir $name) -Destination (Join-Path $dest $name) -Force
         }
         Write-Host "adopted -> src\CodeBrix.WebGpu.Native\runtimes\$Rid\native\ (codebrix_wgpu.dll + $($pins['LICENSE_NAME']))"
+        # The PDB twin goes to ..\unstripped\<rid>\ ONLY when it is small enough to live in git. A
+        # full-debug-info PDB of the whole wgpu stack is ~70 MB per RID (first run, 2026-10-10):
+        # over GitHub's 50 MB warning threshold and well past what a crash-triage twin should cost
+        # the clone. Above $script:PdbAdoptLimit it stays in output\<rid>\ (git-ignored, this
+        # machine only) and BUILD-INFO.txt / BUILD-PROVENANCE.txt say so.
         if (Test-Path -LiteralPath $pdbPath) {
-            $unstripped = Join-Path $toolsDir "unstripped\$Rid"
-            New-Item -ItemType Directory -Path $unstripped -Force | Out-Null
-            Copy-Item -LiteralPath $pdbPath -Destination (Join-Path $unstripped 'codebrix_wgpu.pdb') -Force
-            Write-Host "        -> wgpu-native-tools\unstripped\$Rid\codebrix_wgpu.pdb"
+            $pdbSize = (Get-Item -LiteralPath $pdbPath).Length
+            if ($pdbSize -le $script:PdbAdoptLimit) {
+                $unstripped = Join-Path $toolsDir "unstripped\$Rid"
+                New-Item -ItemType Directory -Path $unstripped -Force | Out-Null
+                Copy-Item -LiteralPath $pdbPath -Destination (Join-Path $unstripped 'codebrix_wgpu.pdb') -Force
+                Write-Host "        -> wgpu-native-tools\unstripped\$Rid\codebrix_wgpu.pdb"
+            }
+            else {
+                Write-Host ("        codebrix_wgpu.pdb NOT copied to unstripped\{0}\: {1:N1} MB is over the {2:N0} MB adopt limit; it stays in output\{0}\ only (see BUILD-PROVENANCE.txt)" -f $Rid, ($pdbSize / 1MB), ($script:PdbAdoptLimit / 1MB))
+            }
         }
         if (-not $complete) { Write-Host '  [note] adopted with -AdoptCrossBuild: the smoke test has NOT run on ARM64. Say so in ..\BUILD-PROVENANCE.txt.' }
         Write-Host "Record the build in ..\BUILD-PROVENANCE.txt (replace the NOT YET BUILT block for $Rid) from"

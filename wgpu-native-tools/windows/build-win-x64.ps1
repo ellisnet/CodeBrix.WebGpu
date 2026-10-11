@@ -4,8 +4,13 @@
 #
 #   Written on Linux on 2026-10-11 from CodeBrix.VideoEncoding.Av1's script of the same name
 #   (the FlacWriter original ran successfully, unchanged, on Jeremy's x64 Windows 11 machine on
-#   2026-10-10), adapted to a Rust (cargo, MSVC target) build. NOT YET RUN. If something breaks,
-#   fix it IN THE SCRIPT (or build-common.ps1) and record it in ..\BUILD-PROVENANCE.txt.
+#   2026-10-10), adapted to a Rust (cargo, MSVC target) build. FIRST RUN the same day on the same
+#   machine (Visual Studio 2026, rustup toolchain 1.93, Visual Studio's libclang via LIBCLANG_PATH):
+#   built, passed the whole gate including the 47-check smoke test (Intel UHD 770, Vulkan), and
+#   was adopted, with this script unchanged; the fixes were in build-common.ps1 and ..\smoke-test.c
+#   (see their headers and ..\BUILD-PROVENANCE.txt). The 67 MB PDB stays in ..\output\win-x64\, not
+#   in unstripped\. If something breaks on another machine, fix it IN THE SCRIPT (or
+#   build-common.ps1) and record it in ..\BUILD-PROVENANCE.txt.
 #
 # USAGE (from any PowerShell prompt - the script sets up the compiler environment itself):
 #

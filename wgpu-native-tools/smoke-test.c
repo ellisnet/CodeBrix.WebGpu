@@ -307,7 +307,7 @@ static int clear_and_read(WGPUDevice device, WGPUTexture target, double r, doubl
     return ok;
 }
 
-static int near(uint8_t a, int b) { return abs((int)a - b) <= 1; }
+static int within_one(uint8_t a, int b) { return abs((int)a - b) <= 1; }
 
 /* The wrap test common to every backend: a texture wrapped around `wrapped`'s native object is
    cleared to a NEW colour, and the ORIGINAL texture must then read back that colour. */
@@ -320,7 +320,7 @@ static void check_wrapped_texture(WGPUDevice device, WGPUTexture original, WGPUT
     int ok = clear_and_read(device, wrapped, 1.0, 0.0, 0.5, original, px);
     snprintf(line, sizeof line, "%s: clear through the wrapper, read through the original = (%u,%u,%u,%u), expected (255,0,128,255)",
              what, px[0], px[1], px[2], px[3]);
-    check(ok && near(px[0], 255) && near(px[1], 0) && near(px[2], 128) && near(px[3], 255), line);
+    check(ok && within_one(px[0], 255) && within_one(px[1], 0) && within_one(px[2], 128) && within_one(px[3], 255), line);
     p_wgpuTextureRelease(wrapped);
 }
 
@@ -433,7 +433,7 @@ int main(int argc, char **argv) {
     uint8_t px[4] = {0, 0, 0, 0};
     int ok = clear_and_read(device, texture, 0.25, 0.5, 0.75, NULL, px);
     snprintf(line, sizeof line, "render pass clear + CopyTextureToBuffer: pixel (%u,%u,%u,%u), expected (64,128,191,255)", px[0], px[1], px[2], px[3]);
-    check(ok && near(px[0], 64) && near(px[1], 128) && near(px[2], 191) && near(px[3], 255), line);
+    check(ok && within_one(px[0], 64) && within_one(px[1], 128) && within_one(px[2], 191) && within_one(px[3], 255), line);
 
     WGPUBackendType backend = p_wgpuCodebrixDeviceGetBackend(device);
     snprintf(line, sizeof line, "wgpuCodebrixDeviceGetBackend == the adapter's backend (%d)", (int)adapter_info.backendType);

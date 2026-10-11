@@ -84,9 +84,9 @@ WHAT BUILDS WHERE
   linux-riscv64  linux/build.sh riscv64          ditto: CROSS (x86_64 image) built here
   android-arm64  android/build.sh arm64          Linux/macOS + NDK 30          built here
   android-x64    android/build.sh x64            Linux/macOS + NDK 30          built here
-  win-x64        windows/build-win-x64.ps1       x64 Windows + VS C++ + Rust   NOT YET BUILT (Jeremy)
-  win-arm64      windows/build-win-arm64.ps1     ARM64 Windows, or x64 cross   NOT YET BUILT (Jeremy)
-                                                 (smoke test then UNRUN)
+  win-x64        windows/build-win-x64.ps1       x64 Windows + VS C++ + Rust   built (Jeremy's x64 box)
+  win-arm64      windows/build-win-arm64.ps1     ARM64 Windows, or x64 cross   cross-built there;
+                                                 (smoke test then UNRUN)       smoke test UNRUN
   osx-arm64      macos/build-osx-arm64.sh        Apple Silicon Mac             NOT YET BUILT (Jeremy)
   osx-x64        macos/build-osx-x64.sh          Intel Mac, or Apple Silicon   NOT YET BUILT (Jeremy)
                                                  + Rosetta 2
@@ -94,7 +94,17 @@ WHAT BUILDS WHERE
 
 The Windows and macOS scripts were written on Linux on 2026-10-11 from the
 FlacWriter / Av1 scripts that ran on Jeremy's machines, with the CMake build
-replaced by cargo. They are UNRUN. If one breaks, fix it in the script and
+replaced by cargo. The Windows scripts first ran on 2026-10-10 on Jeremy's x64
+Windows 11 machine (Visual Studio 2026, rustup toolchain 1.93, Visual Studio's
+own libclang via LIBCLANG_PATH): three first-run changes, all recorded in
+BUILD-PROVENANCE.txt - the smoke test's `near()` helper renamed (a Windows
+header macro), the gate's licence check corrected (the committed licence file
+legitimately contains CRLF crate texts), and a 50 MB adopt limit for the PDB
+twins (a full-debug wgpu PDB is 67 MB per RID, so the Windows PDBs are NOT
+committed - they stay in output/<rid>/ on the build machine). win-arm64 was
+cross-built with -AdoptCrossBuild, so its smoke test is still UNRUN - finish it
+on an ARM64 Windows device (Surface Pro X) as build-win-arm64.ps1's header
+describes. The macOS scripts are UNRUN. If one breaks, fix it in the script and
 record it in BUILD-PROVENANCE.txt.
 
 PREREQUISITES PER MACHINE
