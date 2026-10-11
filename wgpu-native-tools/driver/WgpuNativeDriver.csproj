@@ -16,7 +16,7 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="CodeBrix.RustTools.MitLicenseForever" Version="1.0.283.434" />
-    <PackageReference Include="CodeBrix.RustTools.Docker.MitLicenseForever" Version="1.0.283.434" />
+    <PackageReference Include="CodeBrix.RustTools.MitLicenseForever" Version="1.0.284.266" />
+    <PackageReference Include="CodeBrix.RustTools.Docker.MitLicenseForever" Version="1.0.284.266" />
   </ItemGroup>
 </Project>

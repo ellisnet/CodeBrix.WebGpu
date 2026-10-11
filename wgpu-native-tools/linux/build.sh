@@ -237,12 +237,29 @@ build_arch() {
     echo "  $rid finished in $(( SECONDS - started ))s"
 }
 
+# Rewrites <dir>/SHA256SUMS from the files present under <dir>, KEEPING the lines of files that are
+# not on this machine (the Windows and macOS binaries are built elsewhere and only their checksum
+# lines are committed here). Lines are "sha256  relative/path", LC_ALL=C sorted by path.
+merge_sha256sums() {
+    local dir="$1"; shift
+    local sums="$dir/SHA256SUMS" fresh kept
+    fresh="$(cd "$dir" && find . "$@" -print | sed 's|^\./||' | LC_ALL=C sort | xargs -r sha256sum)"
+    kept=""
+    if [ -f "$sums" ]; then
+        # keep every existing line whose file is absent locally (and so not in $fresh)
+        kept="$(awk -v fresh="$fresh" 'BEGIN { n = split(fresh, l, "\n"); for (i = 1; i <= n; i++) { split(l[i], f, "  "); have[f[2]] = 1 } }
+                                       NF == 2 && !($2 in have) { print }' "$sums")"
+    fi
+    printf '%s\n' "$fresh" "$kept" | grep -v '^$' | LC_ALL=C sort -k2 > "$sums.new"
+    mv -f "$sums.new" "$sums"
+}
+
 write_sha256sums() {
-    ( cd "$OUTPUT_DIR" && find . -path ./host -prune -o -type f \( -name "$LIB_NAME" -o -name 'codebrix_wgpu.dll' -o -name 'libcodebrix_wgpu.dylib' \) -print \
-        | grep -v -e '/unstripped/' -e '/build/' | sed 's|^\./||' | LC_ALL=C sort | xargs -r sha256sum > SHA256SUMS )
+    merge_sha256sums "$OUTPUT_DIR" -path ./host -prune -o -path './*/unstripped' -prune -o -path './*/build' -prune -o \
+        -type f \( -name "$LIB_NAME" -o -name 'codebrix_wgpu.dll' -o -name 'libcodebrix_wgpu.dylib' \) -a -not -path '*/unstripped/*'
     echo; echo "  output/SHA256SUMS:"; sed 's/^/    /' "$OUTPUT_DIR/SHA256SUMS"
     if [ -d "$UNSTRIPPED_DIR" ]; then
-        ( cd "$UNSTRIPPED_DIR" && find . -type f \( -name "$LIB_NAME" -o -name '*.dylib' -o -name '*.pdb' \) | sed 's|^\./||' | LC_ALL=C sort | xargs -r sha256sum > SHA256SUMS )
+        merge_sha256sums "$UNSTRIPPED_DIR" -type f \( -name "$LIB_NAME" -o -name '*.dylib' -o -name '*.dll' -o -name '*.pdb' \)
     fi
 }
 
