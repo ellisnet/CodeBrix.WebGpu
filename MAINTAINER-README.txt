@@ -19,13 +19,31 @@ PURPOSE AND SCOPE
   License:          MIT (repository LICENSE); natives: LICENSE-WgpuNative.txt
   Consumer doc:     AGENT-README.txt
 
-The repository will produce THREE packages, all MIT, from one solution
+  PackageId:        CodeBrix.WebGpu.Skia.MitLicenseForever
+  Assembly:         CodeBrix.WebGpu.Skia (root namespace the same)
+  Project:          src/CodeBrix.WebGpu.Skia/CodeBrix.WebGpu.Skia.csproj
+  License:          MIT (repository LICENSE)
+  Consumer doc:     src/CodeBrix.WebGpu.Skia/AGENT-README.txt (+ its own README.md)
+  Design notes:     THE SKIA PACKAGE, below
+
+  PackageId:        CodeBrix.WebGpu.Graphics.MitLicenseForever
+  Assembly:         CodeBrix.WebGpu.Graphics (root namespace the same)
+  Project:          src/CodeBrix.WebGpu.Graphics/CodeBrix.WebGpu.Graphics.csproj
+  License:          MIT (repository LICENSE)
+  Consumer doc:     src/CodeBrix.WebGpu.Graphics/AGENT-README.txt (+ its own README.md)
+  Design notes:     THE GRAPHICS PACKAGE, below
+
+The repository produces THREE packages, all MIT, from one solution
 (CodeBrix.WebGpu.slnx):
 
-  CodeBrix.WebGpu.Native     the natives + the thin generated binding (this one)
+  CodeBrix.WebGpu.Native     the natives + the thin generated binding (built)
   CodeBrix.WebGpu.Skia       wgpu <-> SkiaSharp: zero-copy into a GPU SKSurface
-                             (Vulkan / Metal / Direct3D 12), readback otherwise
-  CodeBrix.WebGpu.Graphics   the high-level, high-performance graphics API
+                             (Vulkan / Metal / Direct3D 12), GPU copy or
+                             readback otherwise (built - phase 2)
+  CodeBrix.WebGpu.Graphics   the high-level graphics API over the binding:
+                             context, resources, pipelines, 2D sprite batch,
+                             lit 3D meshes, headless + window presentation
+                             (built - phase 3)
 
 The upstream pin is stated as "wgpu 29.0.3 via wgpu-native v29.0.1.1" (the
 wgpu-native RELEASE, not trunk). Its webgpu-headers submodule commit is
@@ -41,7 +59,7 @@ REPOSITORY LAYOUT
                              icon-codebrix-128.png, LICENSE,
                              MAINTAINER-README.txt, README-INDEX.txt, README.md,
                              THIRD-PARTY-NOTICES.txt); folders Tests, Tools,
-                             Samples (empty for now).
+                             Samples (WebGpuModelViewer).
   global.json                selects the Microsoft.Testing.Platform test runner;
                              pins no SDK.
   src/CodeBrix.WebGpu.Native/
@@ -52,7 +70,48 @@ REPOSITORY LAYOUT
       runtimes/<rid>/native/ the committed natives + LICENSE-WgpuNative.txt
                              (adopted from wgpu-native-tools/output/ by agent /
                              maintainer after the gate; not built by MSBuild)
+  src/CodeBrix.WebGpu.Skia/
+      Devices/               WebGpuSkiaDevice (owned + adopted routes), options,
+                             backend / route enums
+      Targets/               WebGpuSkiaTarget (tiers, frame protocol, readback),
+                             options, tier enum, WebGpuSkiaSurfaceBacking
+      Backends/              internal SkiaBridge per backend: GRContext on the
+                             wgpu device, GRBackendTexture over a wgpu texture,
+                             native texture -> wgpu texture
+      Interop/               internal: adapter/device/map requests, Vulkan
+                             entry-point lookup, constants, pixel formats
+      README.md, AGENT-README.txt   THIS package's docs (packed with
+                             None Update, the CodeBrix.RustTools.Docker pattern)
+  src/CodeBrix.WebGpu.Graphics/
+      Context/               GraphicsContext (partial: core, resources,
+                             pipelines, meshes, presentation factories),
+                             options, backend enum, GraphicsResource base,
+                             GraphicsError, GraphicsException +
+                             ShaderCompilationException
+      Resources/             GpuBuffer, GpuTexture, GpuSampler (+ description),
+                             GpuShader, bind-group layouts / groups and their
+                             entry structs, TextureFormats
+      Pipelines/             VertexLayout (+ builder, VertexElementAttribute,
+                             VertexFormats), render / compute builders and
+                             pipelines, blend / depth / cull presets
+      Frames/                GraphicsFrame, RenderPass, ComputePass
+      Presentation/          RenderTargetView, HeadlessRenderTarget,
+                             NativeWindowSource, WindowSurface
+      Drawing2D/             SpriteBatch (+ internal SpriteVertex)
+      Drawing3D/             Mesh, MeshVertex, MeshData, MeshShapes, Camera +
+                             OrbitCamera, SceneLighting, LitMaterial,
+                             MeshRenderer (+ internal InstanceData)
+      Common/                Color4
+      Shaders/               internal WGSL sources of the two renderers
+      Interop/               internal: adapter / device / map / error-scope
+                             requests, callback registry, UTF-8 scratch memory
+      README.md, AGENT-README.txt   THIS package's docs (None Update)
+  samples/WebGpuModelViewer/  the model-viewer sample (not packed; Samples
+                             solution folder) - Scene/, Hud/, Rendering/,
+                             Hosting/, Assets/ (CC0 models + licence files)
+  tests/CodeBrix.WebGpu.Graphics.Tests/        the Graphics package on a real GPU
   tests/CodeBrix.WebGpu.Native.Tests/          the binding against a real native
+  tests/CodeBrix.WebGpu.Skia.Tests/            the Skia package on a real GPU
   tests/CodeBrix.WebGpu.BindingGenerator.Tests/ the generator (+ Fixtures/,
                              Golden/*.golden, the header-parity test)
   tools/CodeBrix.WebGpu.BindingGenerator/      the generator (never packed)
@@ -96,6 +155,8 @@ their counts:
 
     dotnet tests/CodeBrix.WebGpu.BindingGenerator.Tests/bin/Debug/net10.0/CodeBrix.WebGpu.BindingGenerator.Tests.dll
     dotnet tests/CodeBrix.WebGpu.Native.Tests/bin/Debug/net10.0/CodeBrix.WebGpu.Native.Tests.dll
+    dotnet tests/CodeBrix.WebGpu.Skia.Tests/bin/Debug/net10.0/CodeBrix.WebGpu.Skia.Tests.dll
+    dotnet tests/CodeBrix.WebGpu.Graphics.Tests/bin/Debug/net10.0/CodeBrix.WebGpu.Graphics.Tests.dll
 
 Which native the Native tests load: the test project copies
 src/CodeBrix.WebGpu.Native/runtimes/** into its output (exactly what the
@@ -120,6 +181,32 @@ The Native tests include the guards that tie the repository together:
   * PackageContent: the newest nupkg of the configuration has the assembly,
     the documents and exactly the committed runtimes/ files.
 The generator tests include HeaderParityTests (see THE SPECIFICATIONS).
+
+The Skia tests (tests/CodeBrix.WebGpu.Skia.Tests) copy the same committed
+natives into their output and add SkiaSharp.NativeAssets.Linux (test-only).
+Their fixture (SkiaGpuFixture) uses WebGpuSkiaDevice.Create() - Vulkan on
+Linux, Direct3D 12 on Windows, Metal on macOS - and every GPU test skips with
+the reason when there is no adapter or no GRContext. Platform-specific tests
+skip elsewhere: AdoptMetal on non-macOS, the Windows backend-order and
+Vulkan-on-Windows tests on non-Windows, AdoptVulkan where the platform has no
+Vulkan. TimingTests prints frames per second per tier (test output and
+bin/<config>/net10.0/skia-tier-timing.txt) and asserts only sanity.
+PackageContentTests checks the newest Skia nupkg (documents, no runtimes/,
+dependencies = SkiaSharp 4.153.1 + CodeBrix.WebGpu.Native.MitLicenseForever).
+
+The Graphics tests (tests/CodeBrix.WebGpu.Graphics.Tests) copy the same
+committed natives; their fixture (GraphicsGpuFixture) uses
+GraphicsContext.TryCreate() on the platform default backend and every GPU test
+skips with the reason when there is none. Pure tests (vertex layouts, camera
+maths, generated shapes, colours, native window descriptions) need no GPU.
+Pixel tests render to headless targets and assert colours at known
+coordinates (sprite batch, lit cube, instancing, depth order, culling,
+translucency). SkiaSharingTests reference the Skia project and
+SkiaSharp.NativeAssets.Linux (test-only; the Graphics package references
+neither): a GraphicsContext wraps a WebGpuSkiaDevice's device and renders into
+a WebGpuSkiaTarget through the frame protocol. PackageContentTests checks the
+newest Graphics nupkg (documents, no runtimes/, dependencies = only
+CodeBrix.WebGpu.Native.MitLicenseForever).
 
 
 THE BINDING GENERATOR
@@ -346,6 +433,41 @@ out as well doubles the path; check the nupkg after any csproj change
 (PackageContent test). The generator and the test projects are not packable.
 Jeremy publishes.
 
+PUBLISHING THE SKIA PACKAGE. src/CodeBrix.WebGpu.Skia has a switch:
+
+  * default (no property): ProjectReference to ../CodeBrix.WebGpu.Native. This
+    is how the repository builds and tests. A package packed this way depends
+    on CodeBrix.WebGpu.Native.MitLicenseForever at the version the Native
+    project computes AT THAT PACK (the date-stamped minute) - a version that
+    was never published. Never publish a Skia package packed this way.
+  * -p:WebGpuNativePackageVersion=<v>: PackageReference to the PUBLISHED
+    CodeBrix.WebGpu.Native.MitLicenseForever <v> instead; the nuspec then
+    depends on exactly <v>.
+
+  Order: (1) publish CodeBrix.WebGpu.Native (note its version V); (2) wait
+  until nuget.org lists V; (3)
+      dotnet pack src/CodeBrix.WebGpu.Skia -c Release -p:WebGpuNativePackageVersion=V -o <folder>
+  (4) check the nuspec: dependencies CodeBrix.WebGpu.Native.MitLicenseForever
+  V and SkiaSharp 4.153.1, nothing else; (5) publish. Afterwards run a plain
+  `dotnet restore` so obj/ is back on the ProjectReference form.
+  Before V exists on nuget.org step (3) fails at restore with
+      error NU1101: Unable to find package CodeBrix.WebGpu.Native.MitLicenseForever.
+      No packages exist with this id in source(s): ..., nuget.org
+  (or NU1102 "Unable to find package ... with version (= V)" once some other
+  version exists). Verified 2026-10-11: with a scratch folder feed holding a
+  locally packed Native 1.0.284.372, the switch produced a Skia nuspec that
+  depends on exactly 1.0.284.372 and SkiaSharp 4.153.1.
+
+
+PUBLISHING THE GRAPHICS PACKAGE. src/CodeBrix.WebGpu.Graphics has the same
+switch as the Skia package (default ProjectReference to the Native project;
+-p:WebGpuNativePackageVersion=<v> turns it into a PackageReference to the
+published Native package). Same order: publish Native V, wait for nuget.org,
+    dotnet pack src/CodeBrix.WebGpu.Graphics -c Release -p:WebGpuNativePackageVersion=V -o <folder>
+check the nuspec (one dependency: CodeBrix.WebGpu.Native.MitLicenseForever V),
+publish, then a plain `dotnet restore`. The Graphics package does NOT depend on
+the Skia package, so the two can be published in either order after Native.
+
 
 CODING CONVENTIONS
 ==================
@@ -353,11 +475,195 @@ CODING CONVENTIONS
 The CodeBrix family rules: net10.0 only; NRT off (no `?` on reference types,
 no `!`); no ImplicitUsings, no global usings; file-scoped namespaces; usings at
 the top, System first; XML docs on every public member; no NoWarn, no pragma
-suppressions; no third-party NuGet in the library. Tests: <Class>Tests.cs,
+suppressions; no third-party NuGet in the Native library (the Skia library
+references SkiaSharp only - never SkiaSharp.* siblings or native assets).
+Tests: <Class>Tests.cs,
 snake_case names (Member_does_x or plain snake_case), //Arrange //Act //Assert,
 expression bodies for one-statement tests, SilverAssertions,
 TestContext.Current.CancellationToken on cancellable calls. Generated code
 follows the same rules - fix the templates, never the output.
+
+
+THE SKIA PACKAGE
+================
+
+Goal (Jeremy): an SKSurface from any C# application on a supported platform is
+handed to the library and WebGPU writes into it as fast as possible; a surface
+created on a GRContext over Vulkan, Metal or Direct3D 12 gets the zero-copy
+path. The library picks the tier and REPORTS it.
+
+SkiaSharp facts that shaped the design (probed by reflection over SkiaSharp
+4.153.1, net10.0):
+  * GRContext.CreateVulkan / CreateMetal / CreateDirect3D exist; the Linux and
+    Windows natives contain the Vulkan backend, Windows also Direct3D, macOS
+    Metal (macOS has no Vulkan in SkiaSharp).
+  * GRVkBackendContext: VkInstance, VkPhysicalDevice, VkDevice, VkQueue,
+    GraphicsQueueIndex (the FAMILY), MaxAPIVersion, Extensions
+    (GRVkExtensions), VkPhysicalDeviceFeatures / Features2, GetProcedureAddress
+    (delegate(string name, IntPtr instance, IntPtr device)), ProtectedContext.
+    GRD3DBackendContext: Adapter, Device, Queue, ProtectedContext.
+    GRMtlBackendContext: DeviceHandle, QueueHandle.
+  * GRBackendTexture(w, h, GRVkImageInfo) / (w, h, GRD3DTextureResourceInfo) /
+    (w, h, mipmapped, GRMtlTextureInfo); SKSurface.Create(GRRecordingContext,
+    GRBackendTexture, origin, colorType); SKImage.FromTexture /
+    FromAdoptedTexture.
+  * MISSING: no way to get the texture behind an SKSurface or SKImage
+    (no GetBackendTexture / GetBackendRenderTarget; GRBackendTexture /
+    GRBackendRenderTarget only return GL info); no mutable-state API (Skia's
+    setBackendTextureState, flush with a new MutableTextureState) - the
+    Vulkan layout / D3D12 state Skia leaves a texture in can neither be read
+    nor requested; GRVkExtensions cannot list its extensions. SkiaSharp also
+    exposes Graphite (SKGraphiteContext, incl. a Vulkan backend texture with
+    an explicit layout) - not used; Ganesh (GRContext) is what applications
+    have.
+
+Tiers (WebGpuSkiaTier): Unavailable < Headless < Readback < GpuCopy < ZeroCopy.
+  ZeroCopy  the SKSurface is created by the library over a wgpu texture on the
+            shared device (Create(device, grContext, w, h)), or the app
+            describes its surface's native texture (WebGpuSkiaSurfaceBacking)
+            and the library wraps it with CreateTextureFrom* (initial state
+            Undefined - the only one this native accepts - so the surface's
+            content at creation is not preserved).
+  GpuCopy   app surface on the shared GRContext: wgpu renders into its own
+            texture; SkiaSharp draws a cached SKImage over that texture onto
+            the surface (BlendMode.Src).
+  Readback  everything else: texture -> buffer -> MapAsync -> drawn from the
+            mapped memory.
+  ReadbackCount counts every GPU-to-CPU transfer; tests assert 0 for ZeroCopy
+  and GpuCopy.
+
+Synchronisation model (one native queue shared by wgpu and Skia on the owned
+route, so submission order orders the GPU work; barriers handle memory):
+  * BeginWebGpuPass: GRContext.Flush() + Submit(sync = !SharesQueueWithSkia),
+    then a fresh wgpu encoder. ZeroCopy adds TransitionTexture(CopySrc) +
+    TransitionTexture(ColorTarget): Skia leaves the image in COLOR_ATTACHMENT,
+    which wgpu already believes, so wgpu would record NO barrier before its
+    pass - the detour records the barrier that orders Skia's writes before
+    wgpu's (two transitions per frame; the timing test includes them).
+  * EndWebGpuPass: ZeroCopy -> TransitionTexture(ColorTarget) (what Skia was
+    told when the surface was wrapped: VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+    / D3D12_RESOURCE_STATE_RENDER_TARGET); GpuCopy -> ShaderResource (Skia's
+    SKImage was wrapped as SHADER_READ_ONLY_OPTIMAL / PIXEL_SHADER_RESOURCE, so
+    sampling needs no Skia-side transition and both sides agree); submit.
+    Not sharing a queue (adopted Metal): DevicePoll(wait) after the submit.
+  * New textures are cleared once by wgpu at creation: otherwise wgpu's lazy
+    zero-init would wipe whatever Skia drew before the first wgpu pass.
+  * The one rule the app must keep: in ZeroCopy, between passes only DRAW into
+    the surface (a Skia ReadPixels/Snapshot moves the image to TRANSFER_SRC /
+    SHADER_READ and neither side can tell the other). Fix would need the
+    SkiaSharp mutable-state API.
+  * Skia on the owned Vulkan route is given MaxAPIVersion = min(reported, 1.1)
+    and an all-false VkPhysicalDeviceFeatures (the engine does not report
+    which core features it enabled). With the reported 1.4 Skia asked for
+    vkTransitionImageLayout/vkCopyMemoryToImage, got NULL and refused the
+    context (FIXLIST_webgpu_found_along_the_way_2026-10-11.txt).
+
+Per-platform backend table:
+  Linux/Android  owned: Vulkan, ZeroCopy (proven here, Intel UHD / Mesa)
+                 adopted: AdoptVulkan, ZeroCopy + GpuCopy (proven here)
+  Windows        owned: Direct3D 12 (default) - ZeroCopy, UNTESTED here;
+                 owned: Vulkan (PreferredBackend = Vulkan) - ZeroCopy
+                 adopted: AdoptVulkan works like Linux; AdoptDirect3D always
+                 unavailable (the native's adopt returns Error - known limit)
+  macOS          owned: Metal - ZeroCopy, UNTESTED here
+                 adopted: AdoptMetal - wgpu gets its own MTLCommandQueue, so
+                 hand-overs wait (SharesQueueWithSkia = false), UNTESTED here
+
+What Jeremy runs on the other machines (from the repository root):
+  Windows (D3D12 primary; Vulkan secondary + Vulkan owned when a Vulkan
+  driver is present):
+      dotnet build -c Release CodeBrix.WebGpu.slnx
+      dotnet test --solution CodeBrix.WebGpu.slnx -c Release
+      (or) dotnet tests\CodeBrix.WebGpu.Skia.Tests\bin\Release\net10.0\CodeBrix.WebGpu.Skia.Tests.dll
+    Expect: device on Direct3D12, GRContext Direct3D, ZeroCopy/GpuCopy/
+    Readback/backing tests green, AdoptVulkan + Create_with_vulkan_preferred
+    green or skipped with a reason, AdoptDirect3D test asserting the
+    "not supported by this native library" reason, AdoptMetal skipped.
+  macOS (Metal):
+      dotnet build -c Release CodeBrix.WebGpu.slnx
+      dotnet test --solution CodeBrix.WebGpu.slnx -c Release
+    Expect: device on Metal, GRContext Metal, AdoptMetal_shares_the_
+    applications_device runs, AdoptVulkan tests skip (no Vulkan backend).
+  Send back: the test summary and bin/Release/net10.0/skia-tier-timing.txt.
+
+
+THE GRAPHICS PACKAGE
+====================
+
+Goal (Jeremy): a high-level graphics API over WebGPU - resources, pipelines, a
+fast 2D path and a basic 3D path - usable without raw binding calls, sharing a
+device with the Skia package without referencing it.
+
+Design decisions:
+  * Context: GraphicsContext.Create / TryCreate request instance (backends
+    from GraphicsBackend; Default = Primary), adapter and device with an
+    uncaptured-error and a device-lost callback. Callbacks carry an integer id
+    (Interop/ContextRegistry, weak references) instead of a GCHandle, so a late
+    callback never dereferences a freed handle. They only enqueue (the native
+    holds the device's error lock while calling); events are raised from
+    Poll / GraphicsFrame.Submit. Wrap(Device, Queue, Instance, Adapter) AddRefs
+    every handle and Releases only its own references - dispose order against
+    the owner does not matter - and installs no callbacks.
+  * Errors: every object creation runs inside a Validation error scope
+    (push / create / pop; the native calls the pop callback synchronously) and
+    throws GraphicsException / ShaderCompilationException with the native
+    message. wgpuShaderModuleGetCompilationInfo and every *SetLabel are
+    unimplemented in this native (abort) - never call them; labels go in the
+    descriptors.
+  * Lifetimes: GraphicsResource (private protected constructor) registers with
+    its context and a sequence number; Dispose untracks; context Dispose
+    releases survivors newest first. Composite resources (SpriteBatch,
+    MeshRenderer, Mesh, LitMaterial, HeadlessRenderTarget, WindowSurface)
+    create their children after registering themselves, so children are
+    released first and the composite's own release is a no-op for them.
+  * Presentation abstraction: RenderTargetView, a struct of colour view +
+    format + size (+ optional depth view + format). Pipelines are cached per
+    target format combination by the renderers. GraphicsFrame either owns its
+    encoder (Submit finishes and submits) or borrows one (Submit only closes) -
+    the borrowed form is how a WebGpuSkiaTarget's BeginWebGpuPass encoder is
+    used; no Skia types anywhere.
+  * Per-frame data: queue writes land before the next submit, ahead of the
+    frame's recorded commands, so the sprite batch and mesh renderer keep each
+    Begin/End's vertices / instances / uniforms in its own region of a growing
+    buffer (uniforms in 256-byte dynamic-offset slots), reset when a frame
+    with a new Id begins. Growing a buffer mid-frame releases the old one; the
+    recorded commands keep it alive.
+  * Shaders: two built-in WGSL sources (Shaders/BuiltInShaders.cs). The sprite
+    shader multiplies the vertex colour by mix(1, texture, textured) so shapes
+    (textured = 0) never break a texture run; the lit shader is Blinn-Phong
+    with per-instance model + inverse-transpose rows, front_facing-flipped
+    normals for double-sided materials.
+  * Vertex layouts: reflection over the struct's fields ordered by
+    Marshal.OffsetOf, stride Unsafe.SizeOf<T>; Matrix4x4 expands to four
+    Float32x4 rows (read by WGSL as columns, so `m * v` = Vector4.Transform).
+  * Matrices are System.Numerics row-vector matrices uploaded as-is.
+  * Window surfaces: the native treats surface creation / configuration
+    failures as fatal, so Configure validates size, format and present mode
+    against the capabilities first. Capabilities need the adapter; a wrapped
+    context without one falls back to BGRA8Unorm + Fifo.
+
+The sample (samples/WebGpuModelViewer): one WebGpuSkiaDevice (owned route,
+GRContext on it) + a wrapped GraphicsContext; each frame renders the scene and
+HUD into a zero-copy WebGpuSkiaTarget through the frame protocol, SkiaSharp
+draws its overlay on the same texture, then headless reads the target back
+(SKImage.Encode PNG) and live wraps the target texture once and draws it as
+one full-screen sprite onto the window surface inside a second
+Begin/EndWebGpuPass pair. glTF: Schema2 primitives converted once to MeshData;
+Runtime SceneTemplate / SceneInstance animate; RigidTransform.WorldMatrix *
+placement gives each part's world matrix. Live windows: CodeBrix.Sdl3 window
+properties -> NativeWindowSource (x11 / wayland / windows / cocoa via
+SDL_Metal_CreateView + GetLayer).
+
+What Jeremy runs on the other machines (from the repository root):
+      dotnet build -c Release CodeBrix.WebGpu.slnx
+      dotnet test --solution CodeBrix.WebGpu.slnx -c Release
+      (or) dotnet tests/CodeBrix.WebGpu.Graphics.Tests/bin/Release/net10.0/CodeBrix.WebGpu.Graphics.Tests.dll
+      dotnet run --project samples/WebGpuModelViewer -c Release -- --headless frames --frames 24
+      dotnet run --project samples/WebGpuModelViewer -c Release -- --seconds 10
+    Windows: Direct3D 12 by default (the Skia device picks it); the live
+    window uses the Win32 HWND path. macOS: Metal; the live window uses an SDL
+    Metal view's CAMetalLayer. Linux Wayland desktop: add
+    -- --video-driver wayland to force the Wayland path.
 
 
 PROVENANCE / VENDORED SOURCES
@@ -387,8 +693,8 @@ NOTES
     changes it is noticed.
   * wgpuDeviceCreateShaderModuleSpirV is passthrough and needs a feature the
     release does not expose; the test pins the reported validation error.
-  * Samples/WebGpuDiagnostics (Android device-proof app) is planned; the
-    Samples solution folder is empty until then.
+  * samples/WebGpuModelViewer is the first sample (see THE GRAPHICS PACKAGE);
+    samples/WebGpuDiagnostics (Android device-proof app) is planned.
 
 ================================================================================
 END OF MAINTAINER-README

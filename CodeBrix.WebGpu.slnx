@@ -11,13 +11,20 @@
     <File Path="README.md" />
     <File Path="THIRD-PARTY-NOTICES.txt" />
   </Folder>
-  <Folder Name="/Samples/" />
+  <Folder Name="/Samples/">
+    <Project Path="samples/WebGpuModelViewer/WebGpuModelViewer.csproj" />
+    <Project Path="samples/WebGpuModelViewer.Android/WebGpuModelViewer.Android.csproj" />
+  </Folder>
   <Folder Name="/Tests/">
     <Project Path="tests/CodeBrix.WebGpu.BindingGenerator.Tests/CodeBrix.WebGpu.BindingGenerator.Tests.csproj" />
+    <Project Path="tests/CodeBrix.WebGpu.Graphics.Tests/CodeBrix.WebGpu.Graphics.Tests.csproj" />
     <Project Path="tests/CodeBrix.WebGpu.Native.Tests/CodeBrix.WebGpu.Native.Tests.csproj" />
+    <Project Path="tests/CodeBrix.WebGpu.Skia.Tests/CodeBrix.WebGpu.Skia.Tests.csproj" />
   </Folder>
   <Folder Name="/Tools/">
     <Project Path="tools/CodeBrix.WebGpu.BindingGenerator/CodeBrix.WebGpu.BindingGenerator.csproj" />
   </Folder>
+  <Project Path="src/CodeBrix.WebGpu.Graphics/CodeBrix.WebGpu.Graphics.csproj" />
   <Project Path="src/CodeBrix.WebGpu.Native/CodeBrix.WebGpu.Native.csproj" />
+  <Project Path="src/CodeBrix.WebGpu.Skia/CodeBrix.WebGpu.Skia.csproj" />
 </Solution>

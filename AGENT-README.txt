@@ -29,9 +29,16 @@ This is the first of three packages built from the same repository:
 CodeBrix.WebGpu.Native (this package: the raw binding and the natives),
 CodeBrix.WebGpu.Skia (shares one GPU device between WebGPU and a SkiaSharp
 GRContext so WebGPU can draw straight into an SKSurface's texture), and
-CodeBrix.WebGpu.Graphics (a high-level, high-performance graphics API). If you
-want objects with Dispose, convenience overloads or a scene graph, those belong
-in the higher packages - not here.
+CodeBrix.WebGpu.Graphics (a graphics layer: one context object owning or
+sharing the device, tracked resources, pipeline builders, a 2D sprite batch, a
+lit 3D mesh renderer, headless targets and window surfaces). If you want
+objects with Dispose, convenience overloads or ready-made renderers, those
+belong in the higher packages - not here. CodeBrix.WebGpu.Skia is published
+from this repository as CodeBrix.WebGpu.Skia.MitLicenseForever; its own guide
+is src/CodeBrix.WebGpu.Skia/AGENT-README.txt (also inside that package).
+CodeBrix.WebGpu.Graphics is published as
+CodeBrix.WebGpu.Graphics.MitLicenseForever; its own guide is
+src/CodeBrix.WebGpu.Graphics/AGENT-README.txt (also inside that package).
 
 The binding is generated from the WebGPU C API's machine-readable YAML
 specification, the engine's extension header, and a CodeBrix specification of
@@ -543,7 +550,8 @@ WHAT THIS PACKAGE DOES NOT DO
     chained SurfaceSource* struct).
   * No shader compilation tools beyond what the engine does at run time
     (WGSL, SPIR-V, GLSL through ShaderSourceGLSL).
-  * No SkiaSharp integration (that is CodeBrix.WebGpu.Skia).
+  * No SkiaSharp integration (that is CodeBrix.WebGpu.Skia - use it rather
+    than wiring the codebrix extras to SkiaSharp yourself).
   * No support for platforms other than the nine runtime identifiers listed in
     INSTALLATION.
 

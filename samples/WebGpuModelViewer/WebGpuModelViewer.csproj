@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>WebGpuModelViewer</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CodeBrix.WebGpu.Graphics\CodeBrix.WebGpu.Graphics.csproj" />
+    <ProjectReference Include="..\..\src\CodeBrix.WebGpu.Skia\CodeBrix.WebGpu.Skia.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CodeBrix.Graphics3D.Gltf2.MitLicenseForever" Version="1.0.261.293" />
+    <PackageReference Include="CodeBrix.Sdl3.ZlibLicenseForever" Version="1.0.275.85" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.153.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.153.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.153.1" />
+  </ItemGroup>
+
+  <!--
+    The Native project's committed native libraries, copied to the output under runtimes/<rid>/native/ - the layout
+    the Native library's DllImportResolver probes (a ProjectReference does not bring them; an application that uses
+    the published packages gets them from the Native package instead).
+  -->
+  <ItemGroup>
+    <None Remove="..\..\src\CodeBrix.WebGpu.Native\runtimes\**\*" />
+    <None Include="..\..\src\CodeBrix.WebGpu.Native\runtimes\**\*" Link="runtimes\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- The models, their textures and their licence files (CC0; see README.md). -->
+  <ItemGroup>
+    <None Update="Assets\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

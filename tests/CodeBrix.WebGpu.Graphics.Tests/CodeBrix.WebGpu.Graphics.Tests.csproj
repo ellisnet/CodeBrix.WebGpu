@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!--
+    The Graphics library itself references only CodeBrix.WebGpu.Native. The tests also reference the Skia project
+    (and SkiaSharp's Linux native assets) for the sharing tests, which render a Graphics frame into a
+    WebGpuSkiaTarget and read it back through Skia - exactly what an application that combines the two does.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CodeBrix.WebGpu.Graphics\CodeBrix.WebGpu.Graphics.csproj" />
+    <ProjectReference Include="..\..\src\CodeBrix.WebGpu.Skia\CodeBrix.WebGpu.Skia.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="xunit.v3" Version="4.0.2" />
+    <PackageReference Include="SilverAssertions.ApacheLicenseForever" Version="1.0.248.1071" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.153.1" />
+  </ItemGroup>
+
+  <!--
+    The Native project's committed native libraries, copied to the test output under runtimes/<rid>/native/ - the
+    layout the Native library's DllImportResolver probes (a ProjectReference does not bring them, a
+    PackageReference would). Same items as tests/CodeBrix.WebGpu.Native.Tests.
+  -->
+  <ItemGroup>
+    <None Remove="..\..\src\CodeBrix.WebGpu.Native\runtimes\**\*" />
+    <None Include="..\..\src\CodeBrix.WebGpu.Native\runtimes\**\*" Link="runtimes\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

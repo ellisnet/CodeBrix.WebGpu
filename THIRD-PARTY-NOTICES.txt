@@ -1,8 +1,12 @@
 THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
 
-CodeBrix.WebGpu.Native is a thin, generated .NET binding over the native
-codebrix_wgpu libraries it P/Invokes into. Several things in this repository
-and in the package come from other people; all of them are covered below.
+This repository produces three packages: CodeBrix.WebGpu.Native, a thin,
+generated .NET binding over the native codebrix_wgpu libraries it P/Invokes
+into; CodeBrix.WebGpu.Skia, which shares a GPU device between that binding
+and SkiaSharp; and CodeBrix.WebGpu.Graphics, a graphics layer (resources,
+pipelines, 2D and 3D renderers, presentation) over the binding. Several things
+in this repository and in the packages come from other people; all of them
+are covered below.
 
   1. THE SHIPPED BINARIES. The package's runtimes/<rid>/native/ folders contain
      libcodebrix_wgpu.so / libcodebrix_wgpu.dylib / codebrix_wgpu.dll. Each is
@@ -46,6 +50,24 @@ and in the package come from other people; all of them are covered below.
      CodeBrix.Templating.BsdLicenseForever. They are tools only: nothing from
      them is compiled into the CodeBrix.WebGpu.Native assembly or shipped in
      its package.
+
+  5. SKIASHARP. CodeBrix.WebGpu.Skia references the SkiaSharp NuGet package
+     (mono/SkiaSharp, MIT) as an ordinary package dependency. No SkiaSharp
+     source or binary is copied into this repository or into the
+     CodeBrix.WebGpu.Skia package; SkiaSharp and its native assets reach an
+     application through NuGet under their own licences. CodeBrix.WebGpu.Skia
+     is written for this repository (MIT). Its licence text follows (section 4).
+
+  6. CODEBRIX.WEBGPU.GRAPHICS is written for this repository (MIT). It contains
+     no third-party code and depends only on CodeBrix.WebGpu.Native; its WGSL
+     shaders are this repository's own.
+
+  7. THE SAMPLE. samples/WebGpuModelViewer is not part of any package. It
+     references the NuGet packages CodeBrix.Graphics3D.Gltf2.MitLicenseForever,
+     CodeBrix.Sdl3.ZlibLicenseForever, SkiaSharp and SkiaSharp.NativeAssets.*
+     (each under its own licence, reaching the sample through NuGet), and it
+     includes a few public-domain 3D models, listed with their credits in
+     section 5 below.
 
 wgpu-native is offered under "MIT OR Apache-2.0"; this repository uses it under
 the MIT License. webgpu-headers is BSD-3-Clause. Both are compatible with this
@@ -133,6 +155,62 @@ See LICENSE-WgpuNative.txt beside each native library in the package (the same
 file as wgpu-native-tools/licenses/LICENSE-WgpuNative.txt in this repository):
 every crate, its version, its licence and the licence texts, grouped by
 licence.
+
+================================================================================
+4. SkiaSharp
+   https://github.com/mono/SkiaSharp
+   Referenced as a NuGet package dependency by CodeBrix.WebGpu.Skia; nothing copied.
+================================================================================
+
+MIT License
+
+Copyright (c) 2015-2016 Xamarin, Inc.
+Copyright (c) 2017-2018 Microsoft Corporation.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+================================================================================
+5. 3D models in samples/WebGpuModelViewer/Assets (CC0 1.0 Universal)
+   https://creativecommons.org/publicdomain/zero/1.0/
+================================================================================
+
+The sample copies only the models it uses; each pack's own licence file sits
+beside its models.
+
+  Cube Pets - created and distributed by Kenney (www.kenney.nl).
+    Assets/cube-pets/: animal-cat, animal-dog, animal-fox, animal-pig,
+    animal-cow, animal-panda, animal-penguin, animal-bunny (.glb) and
+    Textures/colormap.png. Licence: Assets/cube-pets/LICENSE-Kenney-cube-pets.txt
+
+  Survival Kit - created and distributed by Kenney (www.kenney.nl).
+    Assets/survival-kit/: chest, tree, tree-tall, tree-autumn, rock-a, rock-b,
+    rock-c, fence, barrel, campfire-pit, patch-grass-large (.glb) and
+    Textures/colormap.png. Licence:
+    Assets/survival-kit/LICENSE-Kenney-survival-kit.txt
+
+  Crystals and Avian - created by Jeremy Ellis for the Hakunaverse project, in
+    the style of the Kenney 3D kits (not a Kenney product).
+    Assets/crystals-and-avian/: avian.glb and Textures/colormap.png. Licence:
+    Assets/crystals-and-avian/LICENSE-JeremyEllis-crystals-and-avian.txt
+
+All three packs are dedicated to the public domain under Creative Commons Zero
+(CC0): they may be used for personal, educational and commercial purposes, and
+credit is appreciated but not required. Thank you, Kenney.
 
 ================================================================================
 

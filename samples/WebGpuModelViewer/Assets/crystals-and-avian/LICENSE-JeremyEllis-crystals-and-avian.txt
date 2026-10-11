@@ -1,0 +1,26 @@
+	
+
+	Crystals and Avian (1.0)
+
+	Created/distributed by Jeremy Ellis for the Hakunaverse project
+	Creation date: 25-09-2026 12:00
+
+			------------------------------
+
+	License: (Creative Commons Zero, CC0)
+	http://creativecommons.org/publicdomain/zero/1.0/
+
+	You can use this content for personal, educational, and commercial purposes.
+
+	This is not a Kenney (www.kenney.nl) product. It is an independent asset pack made in the
+	style of the Kenney 3D kits so that it drops into tools that read those bundles, and it is
+	dedicated to the public domain under CC0 in the same spirit. Kenney is welcome to include
+	it in their own bundles.
+
+	Support by crediting 'Jeremy Ellis' or 'Hakunaverse' (this is not a requirement)
+
+			------------------------------
+
+	Contents: procedurally modelled crystals in ten colours, seven shapes and three sizes,
+	at Cube Pets scale; and the Avian, a winged humanoid character with eight animations
+	(static, idle, fly, take-off, land, create, nod-yes, nod-no).
