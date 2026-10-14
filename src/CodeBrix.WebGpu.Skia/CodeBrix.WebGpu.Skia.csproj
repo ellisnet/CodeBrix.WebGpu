@@ -99,8 +99,8 @@
   </PropertyGroup>
 
   <ItemGroup Condition="'$(UseLocalNativeProject)' != 'true'">
-    <!-- PLACEHOLDER version: replace 1.0.0 with the published CodeBrix.WebGpu.Native.MitLicenseForever version. -->
-    <PackageReference Include="CodeBrix.WebGpu.Native.MitLicenseForever" Version="1.0.0" />
+    <!-- PLACEHOLDER version: replace 1.0.287.301 with the published CodeBrix.WebGpu.Native.MitLicenseForever version. -->
+    <PackageReference Include="CodeBrix.WebGpu.Native.MitLicenseForever" Version="1.0.287.301" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(UseLocalNativeProject)' == 'true'">
