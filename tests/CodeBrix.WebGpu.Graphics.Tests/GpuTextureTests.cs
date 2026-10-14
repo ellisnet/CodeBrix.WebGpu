@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using CodeBrix.WebGpu.Native;
 using SilverAssertions;
 using Xunit;
@@ -176,5 +177,163 @@ public class GpuTextureTests : IClassFixture<GraphicsGpuFixture>
 
         //Assert
         act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void Introspection_reports_the_native_texture_shape()
+    {
+        //Arrange
+        gpu.RequireDevice();
+
+        //Act
+        using GpuTexture texture = gpu.Context.CreateTexture2D(8, 4, TextureFormat.RGBA8Unorm, TextureUsage.TextureBinding | TextureUsage.CopyDst, 2);
+
+        //Assert
+        texture.Dimension.Should().Be(TextureDimension.Dimension2D);
+        texture.DepthOrArrayLayers.Should().Be(1);
+        texture.SampleCount.Should().Be(1);
+        texture.IsExternal.Should().BeFalse();
+    }
+
+    [Fact]
+    public void WriteRegion_and_ReadRegion_round_trip_a_sub_rectangle()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        using GpuTexture texture = gpu.Context.CreateTexture2D(6, 6, TextureFormat.RGBA8Unorm, TextureUsage.CopyDst | TextureUsage.CopySrc);
+        texture.Write(new byte[6 * 6 * 4]);
+        byte[] patch = Enumerable.Range(10, 2 * 3 * 4).Select(value => (byte)value).ToArray();
+        TextureRegion region = new TextureRegion(3, 1, 2, 3);
+
+        //Act
+        texture.WriteRegion(region, patch);
+        byte[] read = new byte[patch.Length];
+        texture.ReadRegion(region, read);
+        byte[] whole = texture.ReadRgba();
+
+        //Assert
+        read.Should().Equal(patch);
+        TestPixels.At(whole, 6, 0, 0).Should().Be(((byte)0, (byte)0, (byte)0, (byte)0));
+        TestPixels.At(whole, 6, 3, 1).Should().Be(((byte)10, (byte)11, (byte)12, (byte)13));
+    }
+
+    [Fact]
+    public void CopyTo_copies_every_mip_level_on_the_gpu()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        using GpuTexture source = gpu.Context.CreateTextureFromRgba(4, 4, Enumerable.Repeat((byte)90, 64).ToArray(), mipmaps: true);
+        using GpuTexture destination = gpu.Context.CreateTexture2D(4, 4, TextureFormat.RGBA8Unorm, TextureUsage.CopyDst | TextureUsage.CopySrc, source.MipLevelCount);
+
+        //Act
+        ulong submission = source.CopyTo(destination);
+        byte[] level2 = new byte[4];
+        destination.ReadPixels(level2, 2);
+
+        //Assert
+        submission.Should().BeGreaterThan(0UL);
+        destination.ReadPixels().Should().OnlyContain(value => value == 90);
+        level2.Should().Equal((byte)90, (byte)90, (byte)90, (byte)90);
+    }
+
+    [Fact]
+    public void Destroy_frees_the_texture_and_disposes_the_wrapper()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        GpuTexture texture = gpu.Context.CreateRenderTexture(4, 4);
+
+        //Act
+        texture.Destroy();
+        Action act = () => texture.ReadPixels();
+
+        //Assert
+        texture.IsDisposed.Should().BeTrue();
+        act.Should().Throw<ObjectDisposedException>();
+    }
+
+    [Fact]
+    public void Wrapped_texture_reads_its_shape_from_the_native_texture()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        GpuTexture original = gpu.Context.CreateTextureFromRgba(2, 2, new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 });
+
+        //Act
+        using GpuTexture wrapped = gpu.Context.WrapTexture(original.Handle, "wrapped");
+        original.Dispose();
+
+        //Assert
+        wrapped.IsWrapped.Should().BeTrue();
+        wrapped.Width.Should().Be(2);
+        wrapped.Height.Should().Be(2);
+        wrapped.Format.Should().Be(TextureFormat.RGBA8Unorm);
+        wrapped.ReadRgba()[15].Should().Be(16);
+    }
+
+    [Fact]
+    public void Vulkan_texture_info_names_the_image()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        Assert.SkipUnless(gpu.Context.Backend == BackendType.Vulkan, "The device is not on Vulkan.");
+        using GpuTexture texture = gpu.Context.CreateRenderTexture(4, 4);
+
+        //Act
+        bool vulkan = texture.TryGetVulkanInfo(out VulkanTextureInfo info);
+        bool d3d12 = texture.TryGetD3D12Info(out _);
+
+        //Assert
+        vulkan.Should().BeTrue();
+        info.Image.Should().NotBe(IntPtr.Zero);
+        info.Format.Should().Be(37u);
+        info.SampleCount.Should().Be(1u);
+        d3d12.Should().BeFalse();
+        texture.MetalTexture.Should().Be(IntPtr.Zero);
+    }
+
+    [Fact]
+    public void Texture_over_an_external_Vulkan_image_shares_its_pixels()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        Assert.SkipUnless(gpu.Context.Backend == BackendType.Vulkan, "The device is not on Vulkan.");
+        using GpuTexture owner = gpu.Context.CreateTexture2D(4, 4, TextureFormat.RGBA8Unorm, TextureUsage.CopyDst | TextureUsage.CopySrc | TextureUsage.TextureBinding | TextureUsage.RenderAttachment);
+        owner.TryGetVulkanInfo(out VulkanTextureInfo info).Should().BeTrue();
+
+        // The engine tracks initialisation per texture: write and read the owner first so it is initialised (a read of
+        // an uninitialised texture is zero-filled) and both wrappers end in the same copy-source state.
+        owner.Write(new byte[64]);
+        owner.ReadPixels();
+
+        //Act
+        GpuTexture external = gpu.Context.CreateTextureFromVulkanImage(info.Image, 4, 4, TextureFormat.RGBA8Unorm, owner.Usage, label: "external");
+        external.Write(Enumerable.Repeat((byte)77, 64).ToArray());
+        byte[] throughExternal = external.ReadPixels();
+        external.Dispose();
+        byte[] throughOwner = owner.ReadPixels();
+
+        //Assert
+        external.IsExternal.Should().BeTrue();
+        throughExternal.Should().OnlyContain(value => value == 77);
+        throughOwner.Should().OnlyContain(value => value == 77);
+    }
+
+    [Fact]
+    public void External_image_on_the_wrong_backend_throws()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        Assert.SkipUnless(gpu.Context.Backend == BackendType.Vulkan, "The device is not on Vulkan.");
+
+        //Act
+        Action metal = () => gpu.Context.CreateTextureFromMetalTexture(new IntPtr(0x1000), 4, 4, TextureFormat.RGBA8Unorm, TextureUsage.TextureBinding);
+        Action d3d12 = () => gpu.Context.CreateTextureFromD3D12Resource(new IntPtr(0x1000), 4, 4, TextureFormat.RGBA8Unorm, TextureUsage.TextureBinding);
+        Action none = () => gpu.Context.CreateTextureFromVulkanImage(IntPtr.Zero, 4, 4, TextureFormat.RGBA8Unorm, TextureUsage.TextureBinding);
+
+        //Assert
+        metal.Should().Throw<GraphicsException>();
+        d3d12.Should().Throw<GraphicsException>();
+        none.Should().Throw<ArgumentException>();
     }
 }

@@ -12,19 +12,33 @@ namespace WebGpuModelViewer.Rendering;
 
 /// <summary>
 /// Renders the viewer's frames. One GPU device is shared by both CodeBrix.WebGpu packages: a
-/// <see cref="WebGpuSkiaDevice" /> creates it (and the SkiaSharp GRContext on it), and a
-/// <see cref="GraphicsContext" /> wraps it. Each frame:
+/// <see cref="WebGpuSkiaDevice" /> creates it (and the SkiaSharp GRContext on it), and a <see cref="GraphicsContext" />
+/// wraps it in one call. Each frame:
 /// <list type="number">
-/// <item>the 3D scene and the sprite-batch HUD render into the texture of a zero-copy <see cref="WebGpuSkiaTarget" />,
-/// recorded into the encoder the target's frame protocol hands out;</item>
+/// <item>the glTF models (physically based, lit by a procedural sky and a sun light) and the skybox render into a
+/// linear RGBA16Float texture, which is tone mapped into the texture of a zero-copy <see cref="WebGpuSkiaTarget" />;
+/// the sprite-batch HUD is drawn on top - all inside ONE frame opened on the Skia target (<c>BeginFrame(target)</c>);</item>
 /// <item>SkiaSharp draws its overlay straight onto the same pixels;</item>
 /// <item>headless: the frame is read back through Skia; live: the target's texture is drawn onto the window surface
 /// as one full-screen sprite and presented.</item>
 /// </list>
 /// </summary>
+/// <remarks>
+/// The Skia target is an 8-bit UNORM texture. The model renderer, skybox and tone mapper sRGB-encode in their shaders
+/// for such targets, so the models' sRGB colour maps come out right; the HUD's sprite colours are display values and
+/// are written as they are.
+/// </remarks>
 internal sealed class ViewerRenderer : IDisposable
 {
-    private static readonly Color4 Sky = Color4.FromBytes(150, 196, 232);
+    /// <summary>The background when the skybox is off (a display colour).</summary>
+    private static readonly Color4 FlatSky = Color4.FromBytes(150, 196, 232);
+
+    /// <summary>The same colour as linear light, for the HDR texture (the tone mapper encodes it back).</summary>
+    private static readonly Color4 FlatSkyLinear = new Color4(0.305f, 0.552f, 0.807f);
+
+    /// <summary>The direction the sunlight travels.</summary>
+    private static readonly Vector3 SunDirection = Vector3.Normalize(new Vector3(-0.45f, -1f, -0.35f));
+
     private readonly SKPaint overlayFill = new SKPaint { Color = new SKColor(16, 20, 28, 190), IsAntialias = true };
     private readonly SKPaint overlayStroke = new SKPaint { Color = new SKColor(255, 200, 87), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2 };
     private readonly SKPaint overlayText = new SKPaint { Color = SKColors.White, IsAntialias = true };
@@ -32,35 +46,73 @@ internal sealed class ViewerRenderer : IDisposable
     private readonly SKFont titleFont;
     private readonly SKFont bodyFont;
     private readonly HudOverlay hud;
+    private readonly ViewerOptions options;
+    private readonly EnvironmentMap environment;
+    private readonly SkyboxRenderer skybox;
+    private readonly ToneMapper toneMapper;
     private WebGpuSkiaTarget target;
     private GpuTexture depth;
     private GpuTexture targetTexture;
+    private HeadlessRenderTarget hdrTarget;
 
     /// <summary>Creates the device, loads the scene and makes a target of the given size.</summary>
     /// <param name="assets">The Assets folder.</param>
     /// <param name="width">The width in pixels.</param>
     /// <param name="height">The height in pixels.</param>
-    public ViewerRenderer(string assets, int width, int height)
+    /// <param name="options">How to render, or null for the defaults.</param>
+    public ViewerRenderer(string assets, int width, int height, ViewerOptions options = null)
     {
+        this.options = options ?? new ViewerOptions();
         Device = WebGpuSkiaDevice.Create();
         if (!Device.IsAvailable) throw new InvalidOperationException("No WebGPU device: " + Device.Reason);
         GrContext = Device.CreateGrContext() ?? throw new InvalidOperationException("No SkiaSharp GRContext on the WebGPU device: " + Device.GrContextReason);
-        Context = GraphicsContext.Wrap(Device.Device, Device.Queue, Device.Instance, Device.Adapter);
-        Meshes = new MeshRenderer(Context);
+        Context = GraphicsContext.Wrap(Device);
+        Models = Context.CreateModelRenderer();
         Sprites = new SpriteBatch(Context);
-        Scene = new ViewerScene(Context, Meshes, assets);
+        Scene = new ViewerScene(Context, assets);
         hud = new HudOverlay(Context);
+        skybox = Context.CreateSkyboxRenderer();
+        toneMapper = Context.CreateToneMapper();
+
+        // Khronos PBR Neutral keeps the kits' flat colours true and only rolls off the highlights.
+        toneMapper.Operator = ToneMapOperator.KhronosPbrNeutral;
         SKTypeface typeface = SKTypeface.FromFamilyName("sans-serif", SKFontStyle.Bold) ?? SKTypeface.Default;
         titleFont = new SKFont(typeface, 20);
         bodyFont = new SKFont(SKTypeface.FromFamilyName("sans-serif") ?? SKTypeface.Default, 14);
         Camera = new Camera { FieldOfView = 50f * MathF.PI / 180f, NearPlane = 0.1f, FarPlane = 200 };
-        Orbit = new OrbitCamera { Target = new Vector3(0, 0.9f, 0), Distance = 10.5f, Pitch = 0.40f };
-        Lighting = new SceneLighting
+        Orbit = new OrbitCamera { Target = new Vector3(0, 0.9f, 0), Distance = 10.5f, Pitch = 0.30f };
+
+        // A late-morning sky whose bright side matches the sun light, baked once into an environment map; the
+        // models take their ambient light and reflections from it, the skybox shows it. Its ground half is a dark
+        // meadow green, so the light bouncing up onto the animals is green-tinted like the grass they stand on.
+        if (string.IsNullOrEmpty(this.options.EnvironmentPath))
         {
-            LightDirection = new Vector3(-0.45f, -1f, -0.35f),
-            LightColor = new Color4(1f, 0.96f, 0.88f),
-            AmbientColor = new Color4(0.42f, 0.45f, 0.52f),
-        };
+            environment = Context.CreateProceduralSky(new ProceduralSkyOptions
+            {
+                SunDirection = SunDirection,
+                ZenithColor = new Color4(0.14f, 0.32f, 0.70f),
+                HorizonColor = new Color4(0.40f, 0.58f, 0.85f),
+                GroundColor = new Color4(0.10f, 0.15f, 0.07f),
+                Turbidity = 2f,
+            });
+            EnvironmentDescription = "procedural sky";
+            Lighting = new SceneLighting
+            {
+                LightDirection = SunDirection,
+                LightColor = new Color4(1f, 0.95f, 0.86f),
+                LightIntensity = 1.6f,
+                Environment = environment,
+                EnvironmentIntensity = 1f,
+                Exposure = 1f,
+            };
+        }
+        else
+        {
+            environment = Context.CreateEnvironment(this.options.EnvironmentPath);
+            EnvironmentDescription = System.IO.Path.GetFileName(this.options.EnvironmentPath);
+            Lighting = new SceneLighting { LightIntensity = 0f, Environment = environment, Exposure = 1.2f };
+        }
+
         Resize(width, height);
     }
 
@@ -73,8 +125,8 @@ internal sealed class ViewerRenderer : IDisposable
     /// <summary>The Graphics context wrapping the device.</summary>
     public GraphicsContext Context { get; }
 
-    /// <summary>The 3D renderer.</summary>
-    public MeshRenderer Meshes { get; }
+    /// <summary>The physically based glTF model renderer.</summary>
+    public ModelRenderer Models { get; }
 
     /// <summary>The 2D renderer.</summary>
     public SpriteBatch Sprites { get; }
@@ -91,8 +143,14 @@ internal sealed class ViewerRenderer : IDisposable
     /// <summary>An extra orbit angle the user added by dragging, in radians.</summary>
     public float UserYaw { get; set; }
 
-    /// <summary>The lighting.</summary>
+    /// <summary>The lighting: the sun (key light), the environment and the exposure.</summary>
     public SceneLighting Lighting { get; }
+
+    /// <summary>What lights the scene ("procedural sky" or the panorama's file name).</summary>
+    public string EnvironmentDescription { get; }
+
+    /// <summary>The options the renderer was made with.</summary>
+    public ViewerOptions Options => options;
 
     /// <summary>The frame statistics shown by the HUD.</summary>
     public FrameStats Stats { get; } = new FrameStats();
@@ -100,7 +158,7 @@ internal sealed class ViewerRenderer : IDisposable
     /// <summary>The Skia target the frame is rendered into.</summary>
     public WebGpuSkiaTarget Target => target;
 
-    /// <summary>Recreates the target and depth buffer for a new size.</summary>
+    /// <summary>Recreates the target, the depth buffer and the HDR texture for a new size.</summary>
     /// <param name="width">The width in pixels.</param>
     /// <param name="height">The height in pixels.</param>
     public void Resize(int width, int height)
@@ -111,11 +169,22 @@ internal sealed class ViewerRenderer : IDisposable
         Sprites.Forget(targetTexture);
         targetTexture?.Dispose();
         depth?.Dispose();
+        hdrTarget?.Dispose();
         target?.Dispose();
         target = WebGpuSkiaTarget.Create(Device, GrContext, width, height);
         if (!target.IsAvailable) throw new InvalidOperationException("No Skia target: " + target.TierReason);
-        depth = Context.CreateDepthTexture(width, height, TextureFormat.Depth24Plus, "scene depth");
-        targetTexture = Context.WrapTexture(target.Texture, target.TextureView, target.Format, width, height, "skia target");
+        if (options.Hdr)
+        {
+            depth = null;
+            hdrTarget = Context.CreateHeadlessTarget(width, height, TextureFormat.RGBA16Float, withDepth: true, TextureFormat.Depth24Plus);
+        }
+        else
+        {
+            hdrTarget = null;
+            depth = Context.CreateDepthTexture(width, height, TextureFormat.Depth24Plus, "scene depth");
+        }
+
+        targetTexture = Context.WrapTexture(target, "skia target");
     }
 
     /// <summary>Renders the scene, the HUD and the Skia overlay into the target.</summary>
@@ -126,25 +195,33 @@ internal sealed class ViewerRenderer : IDisposable
         Orbit.Yaw = 0.7f + (time * 0.18f) + UserYaw;
         Orbit.Apply(Camera);
 
-        CommandEncoder encoder = target.BeginWebGpuPass();
-        using (GraphicsFrame frame = Context.BeginFrame(encoder))
+        using (GraphicsFrame frame = Context.BeginFrame(target, depth))
         {
-            RenderTargetView view = new RenderTargetView(target.TextureView, target.Format, target.Width, target.Height).WithDepth(depth);
-            using (RenderPass pass = frame.BeginRenderPass(view, Sky))
+            if (options.Hdr)
             {
-                Meshes.Begin(pass, Camera, Lighting);
-                Scene.Draw(Meshes);
-                Meshes.End();
+                using (RenderPass pass = frame.BeginRenderPass(hdrTarget.View, options.Skybox ? Color4.Black : FlatSkyLinear))
+                {
+                    DrawScene(pass);
+                }
 
-                Sprites.Begin(pass);
-                hud.Draw(Sprites, target.Width, target.Height, Stats, Scene, Meshes.LastDrawCallCount, Orbit.Yaw);
-                Sprites.End();
+                using (RenderPass pass = frame.BeginRenderPass(Color4.Black, null))
+                {
+                    toneMapper.Apply(pass, hdrTarget.Color);
+                    DrawHud(pass);
+                }
+            }
+            else
+            {
+                using (RenderPass pass = frame.BeginRenderPass(FlatSky))
+                {
+                    DrawScene(pass);
+                    DrawHud(pass);
+                }
             }
 
             frame.Submit();
         }
 
-        target.EndWebGpuPass();
         DrawSkiaOverlay(target.Surface.Canvas, target.Width, target.Height);
     }
 
@@ -154,8 +231,7 @@ internal sealed class ViewerRenderer : IDisposable
     public bool PresentTo(WindowSurface surface)
     {
         if (surface.TryAcquire(out RenderTargetView view) != SurfaceAcquireResult.Ready) return false;
-        CommandEncoder encoder = target.BeginWebGpuPass();
-        using (GraphicsFrame frame = Context.BeginFrame(encoder))
+        using (GraphicsFrame frame = Context.BeginFrame(target))
         {
             using (RenderPass pass = frame.BeginRenderPass(view, Color4.Black, null))
             {
@@ -167,7 +243,6 @@ internal sealed class ViewerRenderer : IDisposable
             frame.Submit();
         }
 
-        target.EndWebGpuPass();
         surface.Present();
         return true;
     }
@@ -182,7 +257,13 @@ internal sealed class ViewerRenderer : IDisposable
         Context.WaitIdle();
         targetTexture?.Dispose();
         depth?.Dispose();
+        hdrTarget?.Dispose();
         target?.Dispose();
+        Models.Dispose();
+        skybox.Dispose();
+        toneMapper.Dispose();
+        Scene.Dispose();
+        environment.Dispose();
         Context.Dispose();
         titleFont.Dispose();
         bodyFont.Dispose();
@@ -191,6 +272,23 @@ internal sealed class ViewerRenderer : IDisposable
         overlayText.Dispose();
         overlayAccent.Dispose();
         Device.Dispose();
+    }
+
+    private void DrawScene(RenderPass pass)
+    {
+        Models.Begin(pass, Camera, Lighting);
+        Scene.Draw(Models);
+        Models.End();
+
+        // After the opaque models: the sky only fills the pixels nothing covered.
+        if (options.Skybox) skybox.Draw(pass, Camera, Lighting);
+    }
+
+    private void DrawHud(RenderPass pass)
+    {
+        Sprites.Begin(pass);
+        hud.Draw(Sprites, target.Width, target.Height, Stats, Scene, Models.LastInstanceCount, Models.LastDrawCallCount, Orbit.Yaw);
+        Sprites.End();
     }
 
     private void DrawSkiaOverlay(SKCanvas canvas, int width, int height)

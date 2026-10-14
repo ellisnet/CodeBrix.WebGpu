@@ -12,7 +12,9 @@ AGENT-README FILES (consumer documentation, one per NuGet package)
   AGENT-README.txt
       CodeBrix.WebGpu.Native.MitLicenseForever - thin, generated .NET
       bindings over the native WebGPU (wgpu) libraries shipped in the
-      package, plus native-device access for Vulkan, Direct3D 12 and Metal.
+      package, plus native-device access for Vulkan, Direct3D 12 and Metal,
+      the device / texture sharing contracts, and the C headers, function
+      table and hand-off structs for native modules.
   src/CodeBrix.WebGpu.Skia/AGENT-README.txt
       CodeBrix.WebGpu.Skia.MitLicenseForever - WebGPU rendering into
       SkiaSharp surfaces: one GPU device shared with a GRContext, zero copy /
@@ -22,7 +24,10 @@ AGENT-README FILES (consumer documentation, one per NuGet package)
       CodeBrix.WebGpu.Graphics.MitLicenseForever - a graphics layer over
       WebGPU: one context owning or sharing the device, tracked resources,
       WGSL shaders, pipeline builders, a batched 2D sprite and shape
-      renderer, a lit 3D mesh renderer, headless targets and window surfaces.
+      renderer, a lit 3D mesh renderer, image and animated-image textures,
+      glTF 2.0 models with physically based shading, GPU skinning, morph
+      targets and animation playback, image-based lighting with a skybox and
+      tone mapping, headless targets and window surfaces.
 
 MAINTAINER AND EXTRAS
 ---------------------
@@ -45,6 +50,10 @@ GENERAL
   samples/WebGpuModelViewer/README.md
       The model-viewer sample: what it shows, how to run it (live window or
       headless PNG frames) and the credits for its 3D models.
+  samples/WebGpuModelViewer.Android/README.md
+      The same sample on Android: building, installing and what it logs.
+  wgpu-native-tools/README.txt
+      Building, gating and adopting the native codebrix_wgpu libraries.
   README-INDEX.txt
       This file.
   THIRD-PARTY-NOTICES.txt

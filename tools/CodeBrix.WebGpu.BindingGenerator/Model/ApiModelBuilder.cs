@@ -51,6 +51,7 @@ public sealed class ApiModelBuilder
         model.Files.AddRange(files);
 
         BuildConstants(model);
+        BuildTypedefs(model);
         BuildEnums(model);
         BuildBitflags(model);
         BuildHandles(model);
@@ -201,7 +202,7 @@ public sealed class ApiModelBuilder
         {
             ApiConstant result = new ApiConstant
             {
-                CName = "WGPU_" + Names.Constant(constant.Name),
+                CName = "WGPU_" + (constant.Source.Name is "webgpu" or "wgpu" ? string.Empty : Names.Constant(constant.Source.Name) + "_") + Names.Constant(constant.Name),
                 CsName = Names.Pascal(constant.Name),
                 Doc = constant.Doc,
                 IsConst = true,
@@ -235,6 +236,18 @@ public sealed class ApiModelBuilder
 
             model.Constants.Add(result);
         }
+    }
+
+    // ---------------------------------------------------------------- typedefs
+
+    private void BuildTypedefs(ApiModel model)
+    {
+        foreach (SpecTypedef typedef in typedefs.Values)
+        {
+            model.Typedefs.Add(new ApiTypedef { CName = "WGPU" + Names.Pascal(typedef.Name), Type = Ref(typedef.Type, null, typedef.Path), Doc = typedef.Doc });
+        }
+
+        model.Typedefs.Sort((a, b) => string.CompareOrdinal(a.CName, b.CName));
     }
 
     // ---------------------------------------------------------------- enums
@@ -375,8 +388,8 @@ public sealed class ApiModelBuilder
             foreach (SpecParameter argument in value.Args) AddParameters(result.Parameters, argument);
             if (!value.IsLegacySingleUserdata)
             {
-                result.Parameters.Add(new ApiParameter { CName = "userdata1", CsName = "userdata1", CsType = "void*", Doc = "The first user data pointer from the callback-info struct." });
-                result.Parameters.Add(new ApiParameter { CName = "userdata2", CsName = "userdata2", CsType = "void*", Doc = "The second user data pointer from the callback-info struct." });
+                result.Parameters.Add(new ApiParameter { CName = "userdata1", CsName = "userdata1", CsType = "void*", Type = TypeRef.VoidPointer, Doc = "The first user data pointer from the callback-info struct." });
+                result.Parameters.Add(new ApiParameter { CName = "userdata2", CsName = "userdata2", CsType = "void*", Type = TypeRef.VoidPointer, Doc = "The second user data pointer from the callback-info struct." });
             }
 
             result.FunctionPointerType = "delegate* unmanaged[Cdecl]<" + string.Join(", ", result.Parameters.Select(p => p.CsType).Append("void")) + ">";
@@ -392,15 +405,15 @@ public sealed class ApiModelBuilder
                     Doc = value.Doc,
                     SpecName = value.Source.Name,
                 };
-                info.Fields.Add(new ApiField { CName = "nextInChain", CsName = "NextInChain", CsType = "ChainedStruct*", Doc = "Pointer to the first extension struct, or null." });
+                info.Fields.Add(new ApiField { CName = "nextInChain", CsName = "NextInChain", CsType = "ChainedStruct*", Type = TypeRef.Named("struct", "WGPUChainedStruct", "mutable"), Doc = "Pointer to the first extension struct, or null." });
                 if (value.Style == "callback_mode")
                 {
-                    info.Fields.Add(new ApiField { CName = "mode", CsName = "Mode", CsType = "CallbackMode", Doc = "Controls when the callback may be called. Has no default." });
+                    info.Fields.Add(new ApiField { CName = "mode", CsName = "Mode", CsType = "CallbackMode", Type = TypeRef.Named("enum", "WGPUCallbackMode"), Doc = "Controls when the callback may be called. Has no default." });
                 }
 
-                info.Fields.Add(new ApiField { CName = "callback", CsName = "Callback", CsType = result.FunctionPointerType, Doc = "The callback: an `UnmanagedCallersOnly` Cdecl function." });
-                info.Fields.Add(new ApiField { CName = "userdata1", CsName = "Userdata1", CsType = "void*", Doc = "Passed back to the callback as its first user data pointer." });
-                info.Fields.Add(new ApiField { CName = "userdata2", CsName = "Userdata2", CsType = "void*", Doc = "Passed back to the callback as its second user data pointer." });
+                info.Fields.Add(new ApiField { CName = "callback", CsName = "Callback", CsType = result.FunctionPointerType, Type = TypeRef.Named("callback", result.CName), Doc = "The callback: an `UnmanagedCallersOnly` Cdecl function." });
+                info.Fields.Add(new ApiField { CName = "userdata1", CsName = "Userdata1", CsType = "void*", Type = TypeRef.VoidPointer, Doc = "Passed back to the callback as its first user data pointer." });
+                info.Fields.Add(new ApiField { CName = "userdata2", CsName = "Userdata2", CsType = "void*", Type = TypeRef.VoidPointer, Doc = "Passed back to the callback as its second user data pointer." });
                 result.Info = info;
                 model.LayoutStructs.Add(info);
             }
@@ -428,8 +441,8 @@ public sealed class ApiModelBuilder
                   + "and **may or may not be null-terminated**. `{NULL, WGPU_STRLEN}` is the null value; `{any, 0}` "
                   + "is the empty string.",
         };
-        stringView.Fields.Add(new ApiField { CName = "data", CsName = "Data", CsType = "byte*", Doc = "Pointer to the UTF-8 bytes, or null." });
-        stringView.Fields.Add(new ApiField { CName = "length", CsName = "Length", CsType = "nuint", Doc = "Length in bytes, or @ref WGPU_STRLEN for a null-terminated string." });
+        stringView.Fields.Add(new ApiField { CName = "data", CsName = "Data", CsType = "byte*", Type = TypeRef.Scalar("char", "c_char", "immutable"), Doc = "Pointer to the UTF-8 bytes, or null." });
+        stringView.Fields.Add(new ApiField { CName = "length", CsName = "Length", CsType = "nuint", Type = TypeRef.Scalar("size_t", "usize"), Doc = "Length in bytes, or @ref WGPU_STRLEN for a null-terminated string." });
 
         ApiStruct chained = new ApiStruct
         {
@@ -439,8 +452,8 @@ public sealed class ApiModelBuilder
             SpecName = "webgpu",
             Doc = "The header every extension struct starts with; extensible structs point at a chain of them through `nextInChain`.",
         };
-        chained.Fields.Add(new ApiField { CName = "next", CsName = "Next", CsType = "ChainedStruct*", Doc = "The next struct in the chain, or null." });
-        chained.Fields.Add(new ApiField { CName = "sType", CsName = "SType", CsType = "SType", Doc = "Identifies the struct this header begins." });
+        chained.Fields.Add(new ApiField { CName = "next", CsName = "Next", CsType = "ChainedStruct*", Type = TypeRef.Named("struct", "WGPUChainedStruct", "mutable"), Doc = "The next struct in the chain, or null." });
+        chained.Fields.Add(new ApiField { CName = "sType", CsName = "SType", CsType = "SType", Type = TypeRef.Named("enum", "WGPUSType"), Doc = "Identifies the struct this header begins." });
 
         model.Structs.Add(stringView);
         model.Structs.Add(chained);
@@ -459,11 +472,11 @@ public sealed class ApiModelBuilder
 
             if (value.Type is "extensible" or "extensible_callback_arg")
             {
-                result.Fields.Add(new ApiField { CName = "nextInChain", CsName = "NextInChain", CsType = "ChainedStruct*", Doc = "Pointer to the first extension struct in the chain, or null." });
+                result.Fields.Add(new ApiField { CName = "nextInChain", CsName = "NextInChain", CsType = "ChainedStruct*", Type = TypeRef.Named("struct", "WGPUChainedStruct", "mutable"), Doc = "Pointer to the first extension struct in the chain, or null." });
             }
             else if (value.Type == "extension")
             {
-                result.Fields.Add(new ApiField { CName = "chain", CsName = "Chain", CsType = "ChainedStruct", Doc = "The chain header; its `sType` must be this struct's @ref WGPUSType value (see `StructType`)." });
+                result.Fields.Add(new ApiField { CName = "chain", CsName = "Chain", CsType = "ChainedStruct", Type = TypeRef.Named("struct", "WGPUChainedStruct"), Doc = "The chain header; its `sType` must be this struct's @ref WGPUSType value (see `StructType`)." });
                 ApiEnumValue tag = sType?.Values.FirstOrDefault(v => v.CsName == result.CsName);
                 result.STypeValue = tag?.CsName;
             }
@@ -479,6 +492,7 @@ public sealed class ApiModelBuilder
                         CName = Names.Camel(single) + "Count",
                         CsName = Names.Pascal(single) + "Count",
                         CsType = "nuint",
+                        Type = TypeRef.Scalar("size_t", "usize"),
                         Doc = "The number of elements in @ref " + result.CName + "::" + Names.Camel(member.Name) + ".",
                     });
                     result.Fields.Add(new ApiField
@@ -486,6 +500,7 @@ public sealed class ApiModelBuilder
                         CName = Names.Camel(member.Name),
                         CsName = Names.Pascal(member.Name),
                         CsType = CsType(arrayItem, "array", member.Path) + "*",
+                        Type = Ref(arrayItem, member.Pointer ?? "immutable", member.Path),
                         Doc = member.Doc,
                     });
                 }
@@ -498,7 +513,7 @@ public sealed class ApiModelBuilder
                         continue;
                     }
 
-                    result.Fields.Add(new ApiField { CName = Names.Camel(member.Name), CsName = Names.Pascal(member.Name), CsType = callback.Info.CsName, Doc = member.Doc });
+                    result.Fields.Add(new ApiField { CName = Names.Camel(member.Name), CsName = Names.Pascal(member.Name), CsType = callback.Info.CsName, Type = TypeRef.Named("struct", callback.Info.CName), Doc = member.Doc });
                 }
                 else
                 {
@@ -507,6 +522,7 @@ public sealed class ApiModelBuilder
                         CName = Names.Camel(member.Name),
                         CsName = Names.Pascal(member.Name),
                         CsType = CsType(member.Type, member.Pointer, member.Path),
+                        Type = Ref(member.Type, member.Pointer, member.Path),
                         Doc = member.Doc,
                     });
                 }
@@ -545,7 +561,7 @@ public sealed class ApiModelBuilder
                 new SpecFunction { Name = "free_members", Doc = "Frees members which were allocated by the API.", Source = value.Source, Path = value.Path },
                 "wgpu" + owner + "FreeMembers",
                 owner + "FreeMembers",
-                new ApiParameter { CName = Names.Camel(value.Name), CsName = Names.Escape(Names.Camel(value.Name)), CsType = owner, Doc = "The struct whose API-allocated members are freed." },
+                new ApiParameter { CName = Names.Camel(value.Name), CsName = Names.Escape(Names.Camel(value.Name)), CsType = owner, Type = TypeRef.Named("struct", "WGPU" + owner), Doc = "The struct whose API-allocated members are freed." },
                 owner);
             free.Synthesized = "free_members";
             model.Functions.Add(free);
@@ -554,7 +570,7 @@ public sealed class ApiModelBuilder
         foreach (SpecObject value in objects.Values)
         {
             string owner = Names.Pascal(value.Name);
-            ApiParameter self = new ApiParameter { CName = Names.Camel(value.Name), CsName = Names.Escape(Names.Camel(value.Name)), CsType = owner, Doc = "The object." };
+            ApiParameter self = new ApiParameter { CName = Names.Camel(value.Name), CsName = Names.Escape(Names.Camel(value.Name)), CsType = owner, Type = TypeRef.Named("handle", "WGPU" + owner), Doc = "The object." };
             foreach (SpecFunction method in objectMethods[value.Name])
             {
                 model.Functions.Add(Function(method, "wgpu" + owner + Names.Pascal(method.Name), owner + Names.Pascal(method.Name), self, owner));
@@ -579,12 +595,13 @@ public sealed class ApiModelBuilder
             CName = "wgpuGetProcAddress",
             CsName = "GetProcAddress",
             ReturnType = "delegate* unmanaged[Cdecl]<void>",
+            Return = TypeRef.Named("proc", "WGPUProc"),
             ReturnDoc = "The function pointer, or null when the name is unknown. Cast it to the function's real signature.",
             Doc = "Returns the \"procedure address\" (function pointer) of the named function.",
             SpecName = "webgpu",
             Synthesized = "get_proc_address",
         };
-        getProcAddress.Parameters.Add(new ApiParameter { CName = "procName", CsName = "procName", CsType = "StringView", Doc = "The C name of the function, for example `wgpuCreateInstance`." });
+        getProcAddress.Parameters.Add(new ApiParameter { CName = "procName", CsName = "procName", CsType = "StringView", Type = TypeRef.Named("struct", "WGPUStringView"), Doc = "The C name of the function, for example `wgpuCreateInstance`." });
         model.Functions.Add(getProcAddress);
 
         HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
@@ -615,15 +632,17 @@ public sealed class ApiModelBuilder
             ApiCallback callback = ResolveCallback(value.Callback, value.Path);
             if (callback?.Info != null)
             {
-                result.Parameters.Add(new ApiParameter { CName = "callbackInfo", CsName = "callbackInfo", CsType = callback.Info.CsName, Doc = "How and when the result is delivered." });
+                result.Parameters.Add(new ApiParameter { CName = "callbackInfo", CsName = "callbackInfo", CsType = callback.Info.CsName, Type = TypeRef.Named("struct", callback.Info.CName), Doc = "How and when the result is delivered." });
             }
 
             result.ReturnType = "Future";
+            result.Return = TypeRef.Named("struct", "WGPUFuture");
             result.ReturnDoc = "The future that completes when the callback has been called.";
         }
         else if (value.Returns != null)
         {
             result.ReturnType = CsType(value.Returns.Type, value.Returns.Pointer, value.Path + ".returns");
+            result.Return = Ref(value.Returns.Type, value.Returns.Pointer, value.Path + ".returns");
             result.ReturnDoc = value.Returns.Doc;
         }
         else
@@ -640,21 +659,25 @@ public sealed class ApiModelBuilder
         if (arrayItem != null)
         {
             string count = Names.Camel(Names.Singularize(argument.Name)) + "Count";
-            target.Add(new ApiParameter { CName = count, CsName = Names.Escape(count), CsType = "nuint", Doc = "The number of elements in `" + Names.Camel(argument.Name) + "`." });
+            target.Add(new ApiParameter { CName = count, CsName = Names.Escape(count), CsType = "nuint", Type = TypeRef.Scalar("size_t", "usize"), Doc = "The number of elements in `" + Names.Camel(argument.Name) + "`." });
             target.Add(new ApiParameter
             {
                 CName = Names.Camel(argument.Name),
                 CsName = Names.Escape(Names.Camel(argument.Name)),
                 CsType = CsType(arrayItem, "array", argument.Path) + "*",
+                Type = Ref(arrayItem, argument.Pointer ?? "immutable", argument.Path),
                 Doc = argument.Doc,
             });
             return;
         }
 
-        string csType = argument.Type.StartsWith("callback.", StringComparison.Ordinal)
-            ? ResolveCallback(argument.Type, argument.Path)?.FunctionPointerType ?? "void*"
-            : CsType(argument.Type, argument.Pointer, argument.Path);
-        target.Add(new ApiParameter { CName = Names.Camel(argument.Name), CsName = Names.Escape(Names.Camel(argument.Name)), CsType = csType, Doc = argument.Doc });
+        bool isCallback = argument.Type.StartsWith("callback.", StringComparison.Ordinal);
+        ApiCallback resolved = isCallback ? ResolveCallback(argument.Type, argument.Path) : null;
+        string csType = isCallback ? resolved?.FunctionPointerType ?? "void*" : CsType(argument.Type, argument.Pointer, argument.Path);
+        TypeRef type = isCallback
+            ? (resolved == null ? TypeRef.VoidPointer : TypeRef.Named("callback", resolved.CName))
+            : Ref(argument.Type, argument.Pointer, argument.Path);
+        target.Add(new ApiParameter { CName = Names.Camel(argument.Name), CsName = Names.Escape(Names.Camel(argument.Name)), CsType = csType, Type = type, Doc = argument.Doc });
     }
 
     // ---------------------------------------------------------------- types
@@ -712,6 +735,49 @@ public sealed class ApiModelBuilder
         }
 
         return isPointer ? baseType + "*" : baseType;
+    }
+
+    /// <summary>Maps a schema type to its C ABI type (webgpu-headers' gen.go CType); errors are reported by <see cref="CsType" />.</summary>
+    private TypeRef Ref(string type, string pointer, string path)
+    {
+        string level = pointer is "mutable" or "immutable" ? pointer : null;
+        switch (type)
+        {
+            case "bool": return TypeRef.Named("typedef", "WGPUBool", level);
+            case "nullable_string":
+            case "string_with_default_empty":
+            case "out_string":
+            case "string":
+                return TypeRef.Named("struct", "WGPUStringView", level);
+            case "uint16": return TypeRef.Scalar("uint16_t", "u16", level);
+            case "uint32": return TypeRef.Scalar("uint32_t", "u32", level);
+            case "uint64": return TypeRef.Scalar("uint64_t", "u64", level);
+            case "usize": return TypeRef.Scalar("size_t", "usize", level);
+            case "int16": return TypeRef.Scalar("int16_t", "i16", level);
+            case "int32": return TypeRef.Scalar("int32_t", "i32", level);
+            case "float32":
+            case "nullable_float32":
+                return TypeRef.Scalar("float", "f32", level);
+            case "float64":
+            case "float64_supertype":
+                return TypeRef.Scalar("double", "f64", level);
+            case "c_void": return new TypeRef { Kind = "void", CName = "void", RustName = "c_void", Pointer = level };
+        }
+
+        int dot = type.IndexOf('.');
+        if (dot < 0) return TypeRef.VoidPointer;
+        string category = type.Substring(0, dot);
+        string cName = "WGPU" + Names.Pascal(type.Substring(dot + 1));
+        string kind = category switch
+        {
+            "enum" => "enum",
+            "bitflag" => "bitflag",
+            "struct" => "struct",
+            "object" => "handle",
+            "typedef" => "typedef",
+            _ => "void",
+        };
+        return TypeRef.Named(kind, cName, level);
     }
 
     private string ResolveNamedType(string type, string path)

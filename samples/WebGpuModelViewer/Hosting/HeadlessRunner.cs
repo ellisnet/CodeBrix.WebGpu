@@ -16,16 +16,17 @@ internal static class HeadlessRunner
     /// <param name="frames">How many frames.</param>
     /// <param name="width">The width in pixels.</param>
     /// <param name="height">The height in pixels.</param>
+    /// <param name="options">How to render.</param>
     /// <returns>The process exit code.</returns>
-    public static int Run(string assets, string folder, int frames, int width, int height)
+    public static int Run(string assets, string folder, int frames, int width, int height, ViewerOptions options)
     {
         Directory.CreateDirectory(folder);
         Stopwatch setup = Stopwatch.StartNew();
-        using ViewerRenderer renderer = new ViewerRenderer(assets, width, height);
+        using ViewerRenderer renderer = new ViewerRenderer(assets, width, height, options);
         setup.Stop();
         Console.WriteLine("Device: " + renderer.Device.Backend + " - " + renderer.Device.AdapterName);
-        Console.WriteLine("Target: " + renderer.Target);
-        Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "Loaded {0} model files ({1} placed, {2} textures, {3} materials) in {4:F0} ms", renderer.Scene.ModelFileCount, renderer.Scene.ActorCount, renderer.Scene.Cache.TextureCount, renderer.Scene.Cache.MaterialCount, setup.Elapsed.TotalMilliseconds));
+        Console.WriteLine("Target: " + renderer.Target + "; " + (options.Hdr ? "HDR (RGBA16Float + tone mapping)" : "LDR") + ", lit by the " + renderer.EnvironmentDescription + (options.Skybox ? " with skybox" : string.Empty));
+        Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "Loaded {0} model files ({1} placed, {2} shared textures, {3} materials) and the environment in {4:F0} ms", renderer.Scene.ModelFileCount, renderer.Scene.ActorCount, renderer.Scene.TextureCache.Count, renderer.Scene.MaterialCount, setup.Elapsed.TotalMilliseconds));
 
         double renderTotal = 0;
         double encodeTotal = 0;

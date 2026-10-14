@@ -11,7 +11,7 @@ namespace CodeBrix.WebGpu.Graphics;
 /// synchronous readback. Create one with <see cref="GraphicsContext.CreateBuffer(ulong, BufferUsage, string)" /> or
 /// one of the typed helpers (<see cref="GraphicsContext.CreateVertexBuffer{T}(ReadOnlySpan{T}, string)" /> and so on).
 /// </summary>
-public sealed unsafe class GpuBuffer : GraphicsResource
+public sealed unsafe partial class GpuBuffer : GraphicsResource
 {
     internal GpuBuffer(GraphicsContext context, Buffer handle, ulong size, BufferUsage usage, string label)
         : base(context, label)
@@ -39,12 +39,14 @@ public sealed unsafe class GpuBuffer : GraphicsResource
     /// <param name="byteOffset">Where to start, in bytes; a multiple of 4.</param>
     /// <exception cref="ObjectDisposedException">The buffer has been disposed.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The data does not fit, or the offset is not a multiple of 4.</exception>
+    /// <exception cref="InvalidOperationException">The buffer is mapped (see <see cref="MapState" />).</exception>
     public void Write<T>(ReadOnlySpan<T> data, ulong byteOffset = 0)
         where T : unmanaged
     {
         ThrowIfDisposed();
         ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(data);
         if (bytes.Length == 0) return;
+        ThrowIfMapped();
         if (byteOffset % 4 != 0) throw new ArgumentOutOfRangeException(nameof(byteOffset), "The offset must be a multiple of 4.");
         ulong padded = (ulong)((bytes.Length + 3) & ~3);
         if (byteOffset + padded > Size) throw new ArgumentOutOfRangeException(nameof(data), "Writing " + bytes.Length + " bytes at offset " + byteOffset + " overruns the " + Size + "-byte buffer.");
@@ -95,7 +97,7 @@ public sealed unsafe class GpuBuffer : GraphicsResource
     /// <param name="destination">Receives the data; its byte length must not exceed <see cref="Size" /> minus the offset.</param>
     /// <param name="byteOffset">Where to start reading, in bytes; a multiple of 4.</param>
     /// <exception cref="ObjectDisposedException">The buffer has been disposed.</exception>
-    /// <exception cref="InvalidOperationException">The buffer lacks <see cref="BufferUsage.CopySrc" />.</exception>
+    /// <exception cref="InvalidOperationException">The buffer lacks <see cref="BufferUsage.CopySrc" />, or is mapped.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The range does not fit, or the offset is not a multiple of 4.</exception>
     /// <exception cref="GraphicsException">The staging buffer could not be mapped.</exception>
     public void Read<T>(Span<T> destination, ulong byteOffset = 0)
@@ -105,6 +107,7 @@ public sealed unsafe class GpuBuffer : GraphicsResource
         if ((Usage & BufferUsage.CopySrc) == 0) throw new InvalidOperationException("The buffer was not created with BufferUsage.CopySrc, so it cannot be read back.");
         Span<byte> bytes = MemoryMarshal.AsBytes(destination);
         if (bytes.Length == 0) return;
+        ThrowIfMapped();
         if (byteOffset % 4 != 0) throw new ArgumentOutOfRangeException(nameof(byteOffset), "The offset must be a multiple of 4.");
         ulong padded = (ulong)((bytes.Length + 3) & ~3);
         if (byteOffset + padded > Size) throw new ArgumentOutOfRangeException(nameof(destination), "Reading " + bytes.Length + " bytes at offset " + byteOffset + " overruns the " + Size + "-byte buffer.");

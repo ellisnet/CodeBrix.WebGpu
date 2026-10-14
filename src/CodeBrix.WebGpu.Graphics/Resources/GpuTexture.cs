@@ -9,9 +9,9 @@ namespace CodeBrix.WebGpu.Graphics;
 /// <summary>
 /// A 2D texture with a default view, uploads from raw bytes (in the texture's own byte order) or RGBA pixels
 /// (converted to the texture's channel order), optional mipmaps generated on the CPU, and synchronous readback.
-/// Also wraps textures other libraries own (<see cref="GraphicsContext.WrapTexture" />).
+/// Also wraps textures other libraries own (<see cref="GraphicsContext.WrapTexture(Texture, TextureView, TextureFormat, int, int, string)" />).
 /// </summary>
-public sealed unsafe class GpuTexture : GraphicsResource
+public sealed unsafe partial class GpuTexture : GraphicsResource
 {
     internal GpuTexture(GraphicsContext context, Texture texture, TextureView view, int width, int height, TextureFormat format, int mipLevelCount, TextureUsage usage, bool isWrapped, string label)
         : base(context, label)
@@ -49,6 +49,13 @@ public sealed unsafe class GpuTexture : GraphicsResource
 
     /// <summary>True when the texture belongs to another library and this object holds only its own reference.</summary>
     public bool IsWrapped { get; }
+
+    /// <summary>
+    /// The array layer this object views (non-zero only for a <see cref="CreateLayerView" /> texture): whole-level
+    /// writes and reads (<see cref="Write(ReadOnlySpan{byte})" />, <see cref="WriteMipLevel" />, <see cref="ReadPixels(Span{byte}, int)" />)
+    /// address this layer. Regions (<see cref="TextureRegion" />) always address the whole texture.
+    /// </summary>
+    public int ViewLayer { get; internal set; }
 
     /// <summary>A render target over mip level 0 of this (colour) texture.</summary>
     /// <returns>The target.</returns>
@@ -126,7 +133,7 @@ public sealed unsafe class GpuTexture : GraphicsResource
         int expected = width * height * bytesPerPixel;
         if (pixels.Length != expected) throw new ArgumentException("Mip level " + mipLevel + " needs " + expected + " bytes (" + width + " x " + height + " x " + bytesPerPixel + "); got " + pixels.Length + ".", nameof(pixels));
 
-        TexelCopyTextureInfo destination = new TexelCopyTextureInfo { Texture = Handle, MipLevel = (uint)mipLevel, Aspect = TextureAspect.All };
+        TexelCopyTextureInfo destination = new TexelCopyTextureInfo { Texture = Handle, MipLevel = (uint)mipLevel, Origin = new Origin3D { Z = (uint)ViewLayer }, Aspect = TextureAspect.All };
         TexelCopyBufferLayout layout = new TexelCopyBufferLayout { Offset = 0, BytesPerRow = (uint)(width * bytesPerPixel), RowsPerImage = (uint)height };
         Extent3D size = new Extent3D { Width = (uint)width, Height = (uint)height, DepthOrArrayLayers = 1 };
         fixed (byte* data = pixels)
@@ -165,7 +172,7 @@ public sealed unsafe class GpuTexture : GraphicsResource
         try
         {
             CommandEncoder encoder = Native.WebGpu.DeviceCreateCommandEncoder(Context.Device, null);
-            TexelCopyTextureInfo source = new TexelCopyTextureInfo { Texture = Handle, MipLevel = (uint)mipLevel, Aspect = depth ? TextureAspect.DepthOnly : TextureAspect.All };
+            TexelCopyTextureInfo source = new TexelCopyTextureInfo { Texture = Handle, MipLevel = (uint)mipLevel, Origin = new Origin3D { Z = (uint)ViewLayer }, Aspect = depth ? TextureAspect.DepthOnly : TextureAspect.All };
             TexelCopyBufferInfo target = new TexelCopyBufferInfo
             {
                 Buffer = staging,

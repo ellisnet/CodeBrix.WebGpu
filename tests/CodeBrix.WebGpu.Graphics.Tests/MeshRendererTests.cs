@@ -223,6 +223,39 @@ public class MeshRendererTests : IClassFixture<GraphicsGpuFixture>
     }
 
     [Fact]
+    public void mirroring_world_matrices_keep_single_sided_faces_visible()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        using Mesh plane = gpu.Context.CreateMesh(MeshShapes.Plane(2, 2));
+        Matrix4x4 facing = Matrix4x4.CreateRotationX(MathF.PI / 2);
+        Matrix4x4[] worlds =
+        {
+            facing * Matrix4x4.CreateTranslation(-3, 0, 0),
+            facing * Matrix4x4.CreateScale(-1, 1, 1),
+            facing * Matrix4x4.CreateTranslation(3, 0, 0),
+        };
+
+        //Act
+        byte[] pixels = Render(FrontOrthographic(), null, r =>
+        {
+            LitMaterial material = r.CreateMaterial(Color4.Red);
+            material.Unlit = true;
+            r.DrawInstanced(plane, material, worlds);
+        }, out MeshRenderer stats);
+        int drawCalls = stats.LastDrawCallCount;
+        stats.Dispose();
+
+        //Assert - one draw per run of matrices with the same winding; every quad is drawn.
+        drawCalls.Should().Be(3);
+        TestPixels.At(pixels, Size, 48 - 29, 48).Should().Be(((byte)255, (byte)0, (byte)0, (byte)255));
+        TestPixels.At(pixels, Size, 48, 48).Should().Be(((byte)255, (byte)0, (byte)0, (byte)255));
+        TestPixels.At(pixels, Size, 48 + 29, 48).Should().Be(((byte)255, (byte)0, (byte)0, (byte)255));
+        MeshRenderer.IsMirroring(worlds[1]).Should().BeTrue();
+        MeshRenderer.IsMirroring(worlds[0]).Should().BeFalse();
+    }
+
+    [Fact]
     public void Material_from_another_renderer_is_refused()
     {
         //Arrange
@@ -254,5 +287,43 @@ public class MeshRendererTests : IClassFixture<GraphicsGpuFixture>
         //Assert
         outOfRange.Should().Throw<ArgumentException>();
         notTriangles.Should().Throw<ArgumentException>();
+    }
+    [Fact]
+    public void alpha_modes_and_texture_transform_shape_the_lit_material()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        using Mesh quad = gpu.Context.CreateMesh(MeshShapes.Box(new Vector3(4, 4, 0.01f)), "quad");
+        using GpuTexture texture = gpu.Context.CreateTextureFromRgba(2, 1, new byte[] { 255, 0, 0, 255, 0, 255, 0, 0 });
+        using GpuSampler nearest = gpu.Context.CreateSampler(SamplerDescription.NearestRepeat);
+        LitMaterial masked = null;
+        LitMaterial opaque = null;
+
+        //Act
+        byte[] maskedPixels = Render(FrontOrthographic(), new SceneLighting { AmbientColor = Color4.White }, r =>
+        {
+            masked = r.CreateMaterial(Color4.White, texture, false, "masked", nearest);
+            masked.Unlit = true;
+            masked.AlphaMode = MaterialAlphaMode.Mask;
+            masked.TextureTransform = Matrix3x2.CreateTranslation(0.5f, 0);
+            r.Draw(quad, masked, Matrix4x4.Identity);
+        }, out _);
+        byte[] opaquePixels = Render(FrontOrthographic(), null, r =>
+        {
+            opaque = r.CreateMaterial(Color4.White.WithAlpha(0.25f));
+            opaque.Unlit = true;
+            opaque.AlphaMode = MaterialAlphaMode.Opaque;
+            r.Draw(quad, opaque, Matrix4x4.Identity);
+        }, out _);
+
+        //Assert
+        masked.IsTranslucent.Should().BeFalse();
+        opaque.IsTranslucent.Should().BeFalse();
+        // u + 0.5 (repeating): the left half samples the transparent texel (discarded), the right half wraps to red.
+        TestPixels.Near(TestPixels.At(maskedPixels, Size, (Size / 2) - 4, Size / 2), 20, 30, 40).Should().BeTrue();
+        TestPixels.At(maskedPixels, Size, (Size / 2) + 4, Size / 2).R.Should().BeGreaterThan(200);
+        TestPixels.At(maskedPixels, Size, (Size / 2) + 4, Size / 2).G.Should().BeLessThan(10);
+        TestPixels.At(opaquePixels, Size, Size / 2, Size / 2).A.Should().Be(255);
+        TestPixels.At(opaquePixels, Size, Size / 2, Size / 2).R.Should().BeGreaterThan(250);
     }
 }

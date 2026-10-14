@@ -8,14 +8,21 @@ namespace CodeBrix.WebGpu.Graphics;
 /// <see cref="GraphicsFrame.BeginRenderPass(RenderTargetView, Color4?, float?)" />. Set pipelines, bind groups and
 /// buffers and draw - directly, or through a <see cref="SpriteBatch" /> or <see cref="MeshRenderer" /> - then dispose it.
 /// </summary>
-public sealed unsafe class RenderPass : IDisposable
+public sealed unsafe partial class RenderPass : IDisposable
 {
-    internal RenderPass(GraphicsFrame frame, RenderPassEncoder encoder, RenderTargetView target)
+    internal RenderPass(GraphicsFrame frame, RenderPassEncoder encoder, RenderTargetView target, bool isWrapped = false)
     {
         Frame = frame;
         Handle = encoder;
         Target = target;
+        IsWrapped = isWrapped;
     }
+
+    /// <summary>
+    /// True for a pass someone else began (<see cref="GraphicsFrame.WrapRenderPass" />): <see cref="End" /> releases
+    /// only this object's reference and leaves ending the pass to its owner.
+    /// </summary>
+    public bool IsWrapped { get; }
 
     /// <summary>The frame the pass belongs to.</summary>
     public GraphicsFrame Frame { get; }
@@ -133,11 +140,11 @@ public sealed unsafe class RenderPass : IDisposable
         Native.WebGpu.RenderPassEncoderSetScissorRect(Handle, (uint)x, (uint)y, (uint)width, (uint)height);
     }
 
-    /// <summary>Ends the pass. Safe to call twice.</summary>
+    /// <summary>Ends the pass (for a wrapped pass: releases this object's reference only). Safe to call twice.</summary>
     public void End()
     {
         if (Handle.IsNull) return;
-        Native.WebGpu.RenderPassEncoderEnd(Handle);
+        if (!IsWrapped) Native.WebGpu.RenderPassEncoderEnd(Handle);
         Native.WebGpu.RenderPassEncoderRelease(Handle);
         Handle = RenderPassEncoder.Null;
         Frame.PassEnded(this);
@@ -152,14 +159,21 @@ public sealed unsafe class RenderPass : IDisposable
     }
 }
 
-/// <summary>A compute pass, begun by <see cref="GraphicsFrame.BeginComputePass" />.</summary>
-public sealed unsafe class ComputePass : IDisposable
+/// <summary>A compute pass, begun by <see cref="GraphicsFrame.BeginComputePass()" />.</summary>
+public sealed unsafe partial class ComputePass : IDisposable
 {
-    internal ComputePass(GraphicsFrame frame, ComputePassEncoder encoder)
+    internal ComputePass(GraphicsFrame frame, ComputePassEncoder encoder, bool isWrapped = false)
     {
         Frame = frame;
         Handle = encoder;
+        IsWrapped = isWrapped;
     }
+
+    /// <summary>
+    /// True for a pass someone else began (<see cref="GraphicsFrame.WrapComputePass" />): <see cref="End" /> releases
+    /// only this object's reference and leaves ending the pass to its owner.
+    /// </summary>
+    public bool IsWrapped { get; }
 
     /// <summary>The frame the pass belongs to.</summary>
     public GraphicsFrame Frame { get; }
@@ -200,7 +214,7 @@ public sealed unsafe class ComputePass : IDisposable
     public void End()
     {
         if (Handle.IsNull) return;
-        Native.WebGpu.ComputePassEncoderEnd(Handle);
+        if (!IsWrapped) Native.WebGpu.ComputePassEncoderEnd(Handle);
         Native.WebGpu.ComputePassEncoderRelease(Handle);
         Handle = ComputePassEncoder.Null;
         Frame.PassEnded(this);

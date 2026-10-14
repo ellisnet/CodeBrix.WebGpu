@@ -55,12 +55,28 @@ internal static unsafe class GpuRequests
     /// <param name="label">The device label, or null.</param>
     /// <param name="message">The callback's message (empty when none).</param>
     /// <returns>The device, or null.</returns>
-    public static Device RequestDevice(Instance instance, Adapter adapter, long contextId, string label, out string message)
+    public static Device RequestDevice(Instance instance, Adapter adapter, long contextId, string label, out string message) =>
+        RequestDevice(instance, adapter, contextId, label, null, 0, null, out message);
+
+    /// <summary>Requests a device with required features and limits, its callbacks pointed at a context.</summary>
+    /// <param name="instance">The instance that owns the adapter.</param>
+    /// <param name="adapter">The adapter.</param>
+    /// <param name="contextId">The <see cref="ContextRegistry" /> id of the context that receives the callbacks.</param>
+    /// <param name="label">The device label, or null.</param>
+    /// <param name="features">The required features, or null.</param>
+    /// <param name="featureCount">How many.</param>
+    /// <param name="limits">The required limits, or null for the defaults.</param>
+    /// <param name="message">The callback's message (empty when none).</param>
+    /// <returns>The device, or null.</returns>
+    public static Device RequestDevice(Instance instance, Adapter adapter, long contextId, string label, FeatureName* features, int featureCount, Limits* limits, out string message)
     {
         RequestState result = default;
         using Utf8Text text = new Utf8Text();
         DeviceDescriptor descriptor = default;
         descriptor.Label = text.View(label);
+        descriptor.RequiredFeatureCount = (nuint)featureCount;
+        descriptor.RequiredFeatures = features;
+        descriptor.RequiredLimits = limits;
         descriptor.UncapturedErrorCallbackInfo.Callback = &OnUncapturedError;
         descriptor.UncapturedErrorCallbackInfo.Userdata1 = (void*)(IntPtr)contextId;
         descriptor.DeviceLostCallbackInfo.Mode = CallbackMode.AllowSpontaneous;
@@ -86,7 +102,17 @@ internal static unsafe class GpuRequests
     /// <param name="size">Bytes to map.</param>
     /// <param name="message">The callback's message (empty when none).</param>
     /// <returns>True when the buffer is mapped.</returns>
-    public static bool MapRead(Device device, Buffer buffer, nuint size, out string message)
+    public static bool MapRead(Device device, Buffer buffer, nuint size, out string message) => Map(device, buffer, MapMode.Read, 0, size, out message);
+
+    /// <summary>Maps a range of a buffer and waits for it, polling the device.</summary>
+    /// <param name="device">The device.</param>
+    /// <param name="buffer">The buffer.</param>
+    /// <param name="mode">Read or write.</param>
+    /// <param name="offset">The byte offset (multiple of 8).</param>
+    /// <param name="size">Bytes to map (multiple of 4).</param>
+    /// <param name="message">The callback's message (empty when none).</param>
+    /// <returns>True when the buffer is mapped.</returns>
+    public static bool Map(Device device, Buffer buffer, MapMode mode, nuint offset, nuint size, out string message)
     {
         RequestState result = default;
         BufferMapCallbackInfo info = new BufferMapCallbackInfo
@@ -96,7 +122,7 @@ internal static unsafe class GpuRequests
             Userdata1 = &result,
         };
 
-        Native.WebGpu.BufferMapAsync(buffer, MapMode.Read, 0, size, info);
+        Native.WebGpu.BufferMapAsync(buffer, mode, offset, size, info);
         for (int attempt = 0; attempt < PumpAttempts && Volatile.Read(ref result.Called) == 0; attempt++)
         {
             Native.WebGpu.DevicePoll(device, 1, null);

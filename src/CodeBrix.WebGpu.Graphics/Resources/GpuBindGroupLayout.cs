@@ -10,12 +10,16 @@ namespace CodeBrix.WebGpu.Graphics;
 /// </summary>
 public sealed class GpuBindGroupLayout : GraphicsResource
 {
-    internal GpuBindGroupLayout(GraphicsContext context, BindGroupLayout handle, IReadOnlyList<BindingLayoutEntry> entries, string label)
+    internal GpuBindGroupLayout(GraphicsContext context, BindGroupLayout handle, IReadOnlyList<BindingLayoutEntry> entries, string label, bool isWrapped = false)
         : base(context, label)
     {
         Handle = handle;
         Entries = entries;
+        IsWrapped = isWrapped;
     }
+
+    /// <summary>True when the layout belongs to another library and this object holds only its own reference.</summary>
+    public bool IsWrapped { get; }
 
     /// <summary>The native layout. Owned by this object.</summary>
     public BindGroupLayout Handle { get; private set; }

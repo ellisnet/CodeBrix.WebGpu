@@ -8,7 +8,8 @@ pipelines, 2D and 3D renderers, presentation) over the binding. Several things
 in this repository and in the packages come from other people; all of them
 are covered below.
 
-  1. THE SHIPPED BINARIES. The package's runtimes/<rid>/native/ folders contain
+  1. THE SHIPPED BINARIES. The CodeBrix.WebGpu.Native package's
+     runtimes/<rid>/native/ folders contain
      libcodebrix_wgpu.so / libcodebrix_wgpu.dylib / codebrix_wgpu.dll. Each is
      built from the codebrix-wgpu Rust crate in wgpu-native-tools/codebrix-wgpu/
      (written for this repository, MIT), which links wgpu-native, which in turn
@@ -44,6 +45,18 @@ are covered below.
      The generator follows the naming and value rules of webgpu-headers'
      reference Go generator (gen/, BSD-3-Clause); no Go code was copied - the
      generator is a new C# program.
+     The same generator writes the native-module files
+     src/CodeBrix.WebGpu.Native/include/codebrix_wgpu_procs.h and
+     codebrix_wgpu_procs.rs from those inputs (the Rust file restates the C
+     types of webgpu.h and wgpu.h).
+
+  3a. THE SHIPPED C HEADERS. The CodeBrix.WebGpu.Native package's include/
+     folder carries, unmodified, webgpu-headers' webgpu.h (BSD-3-Clause) and
+     wgpu-native's ffi/wgpu.h (MIT) from the vendored trees above, beside
+     codebrix_wgpu.h (this repository, MIT), the two generated files above and
+     a copy of LICENSE-WgpuNative.txt, whose PART 1 (wgpu-native, MIT) and
+     PART 2 (webgpu-headers, BSD-3-Clause) are the notices for the two
+     headers.
 
   4. BUILD-TIME TOOLS. The binding generator uses the NuGet packages
      CodeBrix.YamlParse.MitLicenseForever and
@@ -59,15 +72,34 @@ are covered below.
      is written for this repository (MIT). Its licence text follows (section 4).
 
   6. CODEBRIX.WEBGPU.GRAPHICS is written for this repository (MIT). It contains
-     no third-party code and depends only on CodeBrix.WebGpu.Native; its WGSL
-     shaders are this repository's own.
+     no third-party code; its WGSL shaders are this repository's own (its
+     Radiance .hdr decoder follows the logic of the public-domain stb_image.h
+     HDR loader - public domain / MIT-0, no notice required). Besides
+     CodeBrix.WebGpu.Native it references two NuGet packages as ordinary
+     package dependencies, each reaching an application through NuGet under
+     its own licence (nothing of them is copied into this repository or into
+     the Graphics package):
+       - CodeBrix.Imaging.ApacheLicenseForever (image decoding and encoding;
+         Apache License 2.0 - a fork of SixLabors.ImageSharp / Fonts by its
+         own repository, ellisnet/CodeBrix.Imaging, which carries its notices);
+       - CodeBrix.Graphics3D.Gltf2.MitLicenseForever (glTF 2.0 reading; MIT).
+     The Graphics package itself stays MIT. Its tests include a few
+     public-domain 3D models and an HDRI, listed with their credits in
+     section 6 below.
 
-  7. THE SAMPLE. samples/WebGpuModelViewer is not part of any package. It
-     references the NuGet packages CodeBrix.Graphics3D.Gltf2.MitLicenseForever,
-     CodeBrix.Sdl3.ZlibLicenseForever, SkiaSharp and SkiaSharp.NativeAssets.*
-     (each under its own licence, reaching the sample through NuGet), and it
-     includes a few public-domain 3D models, listed with their credits in
-     section 5 below.
+  7. THE SAMPLES. samples/WebGpuModelViewer and samples/WebGpuModelViewer.Android
+     (which links the desktop sample's sources and models) are not part of any
+     package. They reference the NuGet packages
+     CodeBrix.Graphics3D.Gltf2.MitLicenseForever, CodeBrix.Sdl3.ZlibLicenseForever,
+     SkiaSharp and SkiaSharp.NativeAssets.* (each under its own licence,
+     reaching the samples through NuGet), and include a few public-domain 3D
+     models, listed with their credits in section 5 below.
+
+  8. THE TEST PROJECTS are not part of any package. Besides the projects of
+     this repository they reference xunit.v3, xunit.runner.visualstudio,
+     Microsoft.NET.Test.Sdk, SilverAssertions.ApacheLicenseForever and
+     SkiaSharp.NativeAssets.Linux as NuGet packages (each under its own
+     licence) and include the public-domain models and HDRI of section 6.
 
 wgpu-native is offered under "MIT OR Apache-2.0"; this repository uses it under
 the MIT License. webgpu-headers is BSD-3-Clause. Both are compatible with this
@@ -211,6 +243,41 @@ beside its models.
 All three packs are dedicated to the public domain under Creative Commons Zero
 (CC0): they may be used for personal, educational and commercial purposes, and
 credit is appreciated but not required. Thank you, Kenney.
+
+================================================================================
+6. 3D models and an HDRI in tests/CodeBrix.WebGpu.Graphics.Tests/Assets (CC0 1.0 Universal)
+   https://creativecommons.org/publicdomain/zero/1.0/
+================================================================================
+
+The Graphics tests copy only the models they use; each set's licence file sits
+beside its models. None of them is part of a package.
+
+  Mini Forest - created and distributed by Kenney (www.kenney.nl).
+    Assets/kenney-mini-forest/: tree, character-archer (.glb) and
+    Textures/colormap.png. Licence:
+    Assets/kenney-mini-forest/LICENSE-Kenney-mini-forest.txt
+
+  Prototype Kit - created and distributed by Kenney (www.kenney.nl).
+    Assets/kenney-prototype-kit/: indicator-round-b (.glb) and
+    Textures/colormap.png. Licence:
+    Assets/kenney-prototype-kit/LICENSE-Kenney-prototype-kit.txt
+
+  Retro Urban Kit - created and distributed by Kenney (www.kenney.nl).
+    Assets/kenney-retro-urban-kit/: grass (.glb) and Textures/grass.png.
+    Licence: Assets/kenney-retro-urban-kit/LICENSE-Kenney-retro-urban-kit.txt
+
+  Wet Floor Sign 01 - from Poly Haven (polyhaven.com), CC0.
+    Assets/polyhaven-wet-floor-sign/: WetFloorSign_01_2k.gltf,
+    WetFloorSign_01.bin and textures/*.jpg. Licence:
+    Assets/polyhaven-wet-floor-sign/LICENSE-PolyHaven-WetFloorSign_01.txt
+
+  Small Cathedral (HDRI) - from Poly Haven (polyhaven.com), CC0.
+    Assets/polyhaven-small-cathedral/: small_cathedral_1k.hdr (the
+    environment-lighting tests). Licence:
+    Assets/polyhaven-small-cathedral/LICENSE-PolyHaven-small_cathedral.txt
+
+All five are dedicated to the public domain under Creative Commons Zero (CC0).
+Thank you, Kenney, and thank you, Poly Haven.
 
 ================================================================================
 

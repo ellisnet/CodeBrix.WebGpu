@@ -25,8 +25,10 @@ namespace CodeBrix.WebGpu.Skia;
 /// (do not ReadPixels / Snapshot it, which moves the texture to a layout WebGPU cannot be told about - read it with
 /// <see cref="ReadPixels" />, <see cref="ReadImage" /> or <see cref="ReadBitmap" /> instead, or after the last frame);
 /// use one thread; dispose targets before their device.
+/// The target is an <see cref="IWebGpuTextureTarget" /> (this frame protocol is that interface's pass protocol), so
+/// any library built on CodeBrix.WebGpu.Native that accepts one can render straight into it.
 /// </summary>
-public sealed unsafe class WebGpuSkiaTarget : IDisposable
+public sealed unsafe class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
 {
     private const TextureUsage BaseUsage = TextureUsage.RenderAttachment | TextureUsage.TextureBinding | TextureUsage.CopySrc | TextureUsage.CopyDst;
 
@@ -94,6 +96,9 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable
     /// <summary>The texture's usages.</summary>
     public TextureUsage Usage { get; private set; }
 
+    /// <summary>Samples per pixel of <see cref="Texture" />: always 1 (Skia surfaces over WebGPU textures are single-sampled).</summary>
+    int IWebGpuTextureTarget.SampleCount => 1;
+
     /// <summary>
     /// The texture WebGPU renders into - the surface's own texture in the <see cref="WebGpuSkiaTier.ZeroCopy" />
     /// tier. Owned by the target (never release it). Null when unavailable.
@@ -103,7 +108,7 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable
     /// <summary>A default view of <see cref="Texture" />, for render pass colour attachments. Owned by the target.</summary>
     public TextureView TextureView { get; private set; }
 
-    /// <summary>How many WebGPU passes have ended.</summary>
+    /// <summary>How many WebGPU passes have ended with their commands submitted (a pass rejected by validation is not counted).</summary>
     public long FrameCount { get; private set; }
 
     /// <summary>
@@ -118,7 +123,10 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable
     /// <summary>True between <see cref="BeginWebGpuPass" /> and <see cref="EndWebGpuPass" />.</summary>
     public bool IsInWebGpuPass { get; private set; }
 
-    /// <summary>The last non-fatal problem reported while transferring pixels (a buffer map that failed), or null.</summary>
+    /// <summary>
+    /// The last non-fatal problem reported while transferring pixels (a buffer map that failed) or ending a pass (the
+    /// validation message of a pass whose commands were rejected), or null.
+    /// </summary>
     public string LastError { get; private set; }
 
     /// <summary>
@@ -343,13 +351,16 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable
     }
 
     /// <summary>
-    /// Ends the WebGPU pass: finishes and submits the encoder, hands the texture back to Skia and - in the copy
-    /// tiers - draws the result onto the surface (replacing its pixels, like a WebGPU pass that clears; the canvas's
-    /// current clip still applies, its matrix does not). Skia may then draw on <see cref="Surface" /> until the next
-    /// <see cref="BeginWebGpuPass" />.
+    /// Ends the WebGPU pass: finishes the encoder (validated), submits it, hands the texture back to Skia and - in
+    /// the copy tiers - draws the result onto the surface (replacing its pixels, like a WebGPU pass that clears; the
+    /// canvas's current clip still applies, its matrix does not). Skia may then draw on <see cref="Surface" /> until
+    /// the next <see cref="BeginWebGpuPass" />. When the recorded commands fail WebGPU validation nothing is
+    /// submitted or drawn: the pass is still closed, the target stays usable, and
+    /// <see cref="WebGpuSkiaValidationException" /> carries WebGPU's message.
     /// </summary>
     /// <exception cref="ObjectDisposedException">The target has been disposed.</exception>
     /// <exception cref="InvalidOperationException">No pass is open.</exception>
+    /// <exception cref="WebGpuSkiaValidationException">The pass's commands failed WebGPU validation and were not submitted.</exception>
     public void EndWebGpuPass()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
@@ -357,26 +368,34 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable
         IsInWebGpuPass = false;
         CommandEncoder current = encoder;
         encoder = CommandEncoder.Null;
+        string error;
 
         switch (Tier)
         {
             case WebGpuSkiaTier.ZeroCopy:
                 Native.WebGpu.CodebrixCommandEncoderTransitionTexture(current, Texture, CodebrixTextureState.ColorTarget);
-                Finish(current);
+                error = Finish(current);
                 break;
             case WebGpuSkiaTier.GpuCopy:
                 Native.WebGpu.CodebrixCommandEncoderTransitionTexture(current, Texture, CodebrixTextureState.ShaderResource);
-                Finish(current);
-                DrawOntoCanvas(Surface.Canvas, sampledImage);
+                error = Finish(current);
+                if (error == null) DrawOntoCanvas(Surface.Canvas, sampledImage);
                 break;
             case WebGpuSkiaTier.Readback:
                 EncodeCopyToReadbackBuffer(current);
-                Finish(current);
-                DrawReadbackOntoCanvas();
+                error = Finish(current);
+                if (error == null) DrawReadbackOntoCanvas();
                 break;
             default:
-                Finish(current);
+                error = Finish(current);
                 break;
+        }
+
+        if (error != null)
+        {
+            RestoreAfterRejectedPass();
+            LastError = "The WebGPU pass's commands failed validation and were not submitted: " + error;
+            throw new WebGpuSkiaValidationException(LastError, error);
         }
 
         FrameCount++;
@@ -400,12 +419,24 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable
         int tightRow = Width * PixelFormats.BytesPerPixel;
         if (destination.Length < tightRow * Height) throw new ArgumentException("The destination needs " + (tightRow * Height) + " bytes.", nameof(destination));
 
+        string bufferError = EnsureReadbackBuffer();
+        if (bufferError != null)
+        {
+            LastError = bufferError;
+            return false;
+        }
+
         if (Tier == WebGpuSkiaTier.ZeroCopy || Tier == WebGpuSkiaTier.GpuCopy) Device.FlushSkia();
         CommandEncoder copy = Native.WebGpu.DeviceCreateCommandEncoder(Device.Device, null);
         EncodeCopyToReadbackBuffer(copy);
         if (Tier == WebGpuSkiaTier.ZeroCopy) Native.WebGpu.CodebrixCommandEncoderTransitionTexture(copy, Texture, CodebrixTextureState.ColorTarget);
         else if (Tier == WebGpuSkiaTier.GpuCopy) Native.WebGpu.CodebrixCommandEncoderTransitionTexture(copy, Texture, CodebrixTextureState.ShaderResource);
-        Finish(copy);
+        string copyError = Finish(copy);
+        if (copyError != null)
+        {
+            LastError = "The readback copy failed validation and was not submitted: " + copyError;
+            return false;
+        }
 
         nuint size = (nuint)rowBytes * (nuint)Height;
         if (!WgpuRequests.MapRead(Device.Device, readbackBuffer, size, out string message))
@@ -596,18 +627,29 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable
         Format = backing.Format;
         Usage = backing.Usage;
         TextureDescriptor descriptor = Descriptor();
+        WgpuRequests.PushValidationScope(Device.Device);
         Texture texture = Device.Bridge.ImportTexture(Device.Device, backing.NativeTexture, &descriptor, out reason);
-        if (texture.IsNull) return false;
+        TextureView view = texture.IsNull ? TextureView.Null : Native.WebGpu.TextureCreateView(texture, null);
+        string error = WgpuRequests.PopErrorScope(Device.Instance, Device.Device);
+        if (texture.IsNull || error != null)
+        {
+            if (!view.IsNull) Native.WebGpu.TextureViewRelease(view);
+            if (!texture.IsNull) Native.WebGpu.TextureRelease(texture);
+            if (error != null) reason = "WebGPU refused the " + Width + "x" + Height + " " + Format + " texture with usage " + Usage + ": " + error;
+            return false;
+        }
 
         Texture = texture;
         ownsTexture = true;
-        TextureView = Native.WebGpu.TextureCreateView(texture, null);
+        TextureView = view;
         CommandEncoder setup = Native.WebGpu.DeviceCreateCommandEncoder(Device.Device, null);
         Status status = Native.WebGpu.CodebrixCommandEncoderTransitionTexture(setup, texture, CodebrixTextureState.ColorTarget);
-        Finish(setup);
-        if (status != Status.Success)
+        string setupError = Finish(setup);
+        if (status != Status.Success || setupError != null)
         {
-            reason = "the imported texture could not be transitioned to a render target";
+            reason = setupError != null
+                ? "the imported texture's setup commands failed validation: " + setupError
+                : "the imported texture could not be transitioned to a render target";
             return false;
         }
 
@@ -657,6 +699,14 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable
             return;
         }
 
+        string bufferError = EnsureReadbackBuffer();
+        if (bufferError != null)
+        {
+            ReleaseOwnedTexture();
+            MarkUnavailable(bufferError);
+            return;
+        }
+
         Tier = WebGpuSkiaTier.Readback;
         TierReason = reason;
     }
@@ -673,19 +723,28 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable
 
     // Creates the target's own texture, clears it to transparent (so it is initialized: the WebGPU engine would
     // otherwise zero it on first use and wipe whatever Skia drew first) and leaves it in finalState.
+    // The texture and its view are created inside a validation error scope: a format/usage/size the device rejects
+    // gives a non-null but INVALID texture, and submitting the clear below would then end the process.
     private bool CreateOwnedTexture(CodebrixTextureState? finalState, out string reason)
     {
         TextureDescriptor descriptor = Descriptor();
+        WgpuRequests.PushValidationScope(Device.Device);
         Texture texture = Native.WebGpu.DeviceCreateTexture(Device.Device, &descriptor);
-        if (texture.IsNull)
+        TextureView view = texture.IsNull ? TextureView.Null : Native.WebGpu.TextureCreateView(texture, null);
+        string error = WgpuRequests.PopErrorScope(Device.Instance, Device.Device);
+        if (texture.IsNull || error != null)
         {
-            reason = "wgpuDeviceCreateTexture failed for " + Width + "x" + Height + " " + Format + ".";
+            if (!view.IsNull) Native.WebGpu.TextureViewRelease(view);
+            if (!texture.IsNull) Native.WebGpu.TextureRelease(texture);
+            reason = error != null
+                ? "WebGPU refused the " + Width + "x" + Height + " " + Format + " texture with usage " + Usage + ": " + error
+                : "wgpuDeviceCreateTexture failed for " + Width + "x" + Height + " " + Format + ".";
             return false;
         }
 
         Texture = texture;
         ownsTexture = true;
-        TextureView = Native.WebGpu.TextureCreateView(texture, null);
+        TextureView = view;
 
         RenderPassColorAttachment attachment = new RenderPassColorAttachment
         {
@@ -701,9 +760,25 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable
         Native.WebGpu.RenderPassEncoderEnd(clear);
         Native.WebGpu.RenderPassEncoderRelease(clear);
         if (finalState.HasValue) Native.WebGpu.CodebrixCommandEncoderTransitionTexture(setup, texture, finalState.Value);
-        Finish(setup);
+        string setupError = Finish(setup);
+        if (setupError != null)
+        {
+            ReleaseOwnedTexture();
+            reason = "The target texture's setup commands failed validation: " + setupError;
+            return false;
+        }
+
         reason = null;
         return true;
+    }
+
+    private void ReleaseOwnedTexture()
+    {
+        if (!TextureView.IsNull) Native.WebGpu.TextureViewRelease(TextureView);
+        if (!Texture.IsNull && ownsTexture) Native.WebGpu.TextureRelease(Texture);
+        TextureView = TextureView.Null;
+        Texture = Texture.Null;
+        ownsTexture = false;
     }
 
     // Skia's writes to the shared texture leave it in the colour-target state WebGPU already believes it is in, so
@@ -720,11 +795,41 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable
         Native.WebGpu.CodebrixCommandEncoderTransitionTexture(target, Texture, CodebrixTextureState.ColorTarget);
     }
 
-    private void Finish(CommandEncoder current)
+    // Finishes the encoder inside a validation error scope and submits it only when WebGPU accepted it (the native
+    // engine ends the process on an invalid submission). Returns null, or WebGPU's message (nothing submitted).
+    // Recording errors surface at finish, so one scope around the finish catches every command in the encoder; the
+    // scope's pop is the only extra work per frame.
+    private string Finish(CommandEncoder current)
     {
+        WgpuRequests.PushValidationScope(Device.Device);
         CommandBuffer commands = Native.WebGpu.CommandEncoderFinish(current, null);
+        string error = WgpuRequests.PopErrorScope(Device.Instance, Device.Device);
         Native.WebGpu.CommandEncoderRelease(current);
+        if (error != null)
+        {
+            if (!commands.IsNull) Native.WebGpu.CommandBufferRelease(commands);
+            return error;
+        }
+
         Device.Submit(commands);
+        return null;
+    }
+
+    // After a rejected pass nothing of it ran, so WebGPU still tracks the texture in the state the last submitted
+    // work left it in. Submit the end-of-pass state change on its own (GpuCopy: back to the sampled state Skia's
+    // image expects, also after a PreserveSurfaceContent copy moved it to the render-target state), so Skia and the
+    // next pass find the texture exactly as after a normal pass.
+    private void RestoreAfterRejectedPass()
+    {
+        if (Texture.IsNull || !Device.IsAvailable) return;
+        CodebrixTextureState state;
+        if (Tier == WebGpuSkiaTier.ZeroCopy) state = CodebrixTextureState.ColorTarget;
+        else if (Tier == WebGpuSkiaTier.GpuCopy) state = CodebrixTextureState.ShaderResource;
+        else return;
+
+        CommandEncoder restore = Native.WebGpu.DeviceCreateCommandEncoder(Device.Device, null);
+        Native.WebGpu.CodebrixCommandEncoderTransitionTexture(restore, Texture, state);
+        Finish(restore);
     }
 
     private void DrawOntoCanvas(SKCanvas canvas, SKImage image)
@@ -735,17 +840,29 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable
         canvas.Restore();
     }
 
-    private void EnsureReadbackBuffer()
+    // Creates the readback buffer once, inside a validation error scope (a size over the device's buffer limit gives an
+    // invalid buffer). Returns null, or why it could not be created.
+    private string EnsureReadbackBuffer()
     {
-        if (!readbackBuffer.IsNull) return;
+        if (!readbackBuffer.IsNull) return null;
         rowBytes = PixelFormats.AlignedRowBytes(Width);
         BufferDescriptor descriptor = new BufferDescriptor { Usage = BufferUsage.CopyDst | BufferUsage.MapRead, Size = (ulong)rowBytes * (ulong)Height };
-        readbackBuffer = Native.WebGpu.DeviceCreateBuffer(Device.Device, &descriptor);
+        WgpuRequests.PushValidationScope(Device.Device);
+        Buffer buffer = Native.WebGpu.DeviceCreateBuffer(Device.Device, &descriptor);
+        string error = WgpuRequests.PopErrorScope(Device.Instance, Device.Device);
+        if (buffer.IsNull || error != null)
+        {
+            if (!buffer.IsNull) Native.WebGpu.BufferRelease(buffer);
+            return "WebGPU refused the " + descriptor.Size + "-byte readback buffer: " + (error ?? "wgpuDeviceCreateBuffer returned null");
+        }
+
+        readbackBuffer = buffer;
+        return null;
     }
 
+    // The readback buffer exists here: the Readback tier creates it with the target, ReadPixels before encoding.
     private void EncodeCopyToReadbackBuffer(CommandEncoder current)
     {
-        EnsureReadbackBuffer();
         TexelCopyTextureInfo source = new TexelCopyTextureInfo { Texture = Texture, Aspect = TextureAspect.All };
         TexelCopyBufferInfo destination = new TexelCopyBufferInfo
         {
@@ -785,7 +902,8 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable
     {
         CommandEncoder toTarget = Native.WebGpu.DeviceCreateCommandEncoder(Device.Device, null);
         Native.WebGpu.CodebrixCommandEncoderTransitionTexture(toTarget, Texture, CodebrixTextureState.ColorTarget);
-        Finish(toTarget);
+        string error = Finish(toTarget);
+        if (error != null) LastError = "The PreserveSurfaceContent state change failed validation: " + error;
         using (SKImage snapshot = Surface.Snapshot())
         {
             DrawOntoCanvas(preserveSurface.Canvas, snapshot);

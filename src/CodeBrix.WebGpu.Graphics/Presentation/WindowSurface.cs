@@ -38,8 +38,8 @@ public sealed unsafe class WindowSurface : GraphicsResource
     private bool withDepth;
     private TextureFormat depthFormat = TextureFormat.Depth32Float;
 
-    internal WindowSurface(GraphicsContext context, Surface handle, NativeWindowSource source)
-        : base(context, source.ToString())
+    internal WindowSurface(GraphicsContext context, Surface handle, NativeWindowSource source, string label = null)
+        : base(context, label ?? source?.ToString())
     {
         Handle = handle;
         Source = source;
@@ -49,7 +49,7 @@ public sealed unsafe class WindowSurface : GraphicsResource
     /// <summary>The native surface. Owned by this object.</summary>
     public Surface Handle { get; private set; }
 
-    /// <summary>The window it presents to.</summary>
+    /// <summary>The window it presents to (null for a surface wrapped with <see cref="GraphicsContext.WrapWindowSurface" />).</summary>
     public NativeWindowSource Source { get; }
 
     /// <summary>The formats the surface supports (from its capabilities; a BGRA8 guess when the context has no adapter).</summary>

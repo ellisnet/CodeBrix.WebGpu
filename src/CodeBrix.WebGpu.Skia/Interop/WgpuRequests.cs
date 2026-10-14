@@ -8,7 +8,7 @@ using Buffer = CodeBrix.WebGpu.Native.Buffer;
 namespace CodeBrix.WebGpu.Skia.Interop;
 
 /// <summary>
-/// The WebGPU asynchronous requests the library needs (adapter, device, buffer map), driven to completion
+/// The WebGPU asynchronous requests the library needs (adapter, device, buffer map, error scope), driven to completion
 /// synchronously with the callback-info pattern: <see cref="CallbackMode.AllowProcessEvents" /> callbacks,
 /// pumped by <c>wgpuInstanceProcessEvents</c> or <c>wgpuDevicePoll</c>.
 /// </summary>
@@ -99,6 +99,37 @@ internal static unsafe class WgpuRequests
         return result.Called != 0 && result.Status == (uint)MapAsyncStatus.Success;
     }
 
+    /// <summary>Opens a validation error scope on the device.</summary>
+    /// <param name="device">The device.</param>
+    public static void PushValidationScope(Device device) => Native.WebGpu.DevicePushErrorScope(device, ErrorFilter.Validation);
+
+    /// <summary>Closes the innermost error scope and returns the error it caught.</summary>
+    /// <param name="instance">The instance (pumped when not null).</param>
+    /// <param name="device">The device (polled when there is no instance).</param>
+    /// <returns>The error message, or null when the scope caught nothing.</returns>
+    public static string PopErrorScope(Instance instance, Device device)
+    {
+        RequestState result = default;
+        PopErrorScopeCallbackInfo info = new PopErrorScopeCallbackInfo
+        {
+            Mode = CallbackMode.AllowProcessEvents,
+            Callback = &OnPopped,
+            Userdata1 = &result,
+        };
+
+        Native.WebGpu.DevicePopErrorScope(device, info);
+        for (int attempt = 0; attempt < PumpAttempts && Volatile.Read(ref result.Called) == 0; attempt++)
+        {
+            if (!instance.IsNull) Native.WebGpu.InstanceProcessEvents(instance);
+            else Native.WebGpu.DevicePoll(device, 0, null);
+            if (Volatile.Read(ref result.Called) == 0) Thread.Sleep(1);
+        }
+
+        string message = TakeMessage(result.Message);
+        if (result.Called == 0 || result.Status != (uint)PopErrorScopeStatus.Success) return null;
+        return result.Handle == (IntPtr)(int)ErrorType.NoError ? null : (string.IsNullOrEmpty(message) ? "WebGPU reported an error with no message." : message);
+    }
+
     private static void Pump(Instance instance, int* called)
     {
         for (int attempt = 0; attempt < PumpAttempts && Volatile.Read(ref *called) == 0; attempt++)
@@ -145,6 +176,16 @@ internal static unsafe class WgpuRequests
     {
         RequestState* result = (RequestState*)userdata1;
         result->Status = (uint)status;
+        result->Message = KeepMessage(message);
+        Volatile.Write(ref result->Called, 1);
+    }
+
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static void OnPopped(PopErrorScopeStatus status, ErrorType type, StringView message, void* userdata1, void* userdata2)
+    {
+        RequestState* result = (RequestState*)userdata1;
+        result->Status = (uint)status;
+        result->Handle = (IntPtr)(int)type;
         result->Message = KeepMessage(message);
         Volatile.Write(ref result->Called, 1);
     }

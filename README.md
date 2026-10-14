@@ -30,11 +30,37 @@ CodeBrix.WebGpu.Native has no dependencies other than .NET. Code that uses it mu
 * Callbacks as `delegate* unmanaged` function pointers in the API's callback-info structs - no delegates, no marshalling, no hidden allocations
 * UTF-8 string view helpers for passing text in and reading text out
 * Native-device access for sharing a GPU device: the Vulkan instance, physical device, device and queue (with the enabled extensions) behind a WebGPU device, the Vulkan image behind a texture, the Direct3D 12 and Metal equivalents, wrapping an existing Vulkan, Direct3D 12 or Metal device or texture as WebGPU objects, and explicit texture state transitions
+* Sharing contracts for libraries built on this binding: `IWebGpuDeviceSource` (a device's owner hands out its instance, adapter, device and queue) and `IWebGpuTextureTarget` (a texture another renderer shares, written only inside an explicit `BeginWebGpuPass` / `EndWebGpuPass` pass) - so two libraries share one device and one texture without referencing each other
+* Native modules: separately built native code (Rust, C, C++) that works on the very same WebGPU objects - by linking dynamically to the packaged library with the C headers shipped in the package, or through a generated function table (C#, C and Rust definitions) with versioned device and per-frame hand-off structs
 * Native libraries in the package for Windows x64 and ARM64, macOS Intel and Apple Silicon, Linux x64, ARM64 and RISC-V 64, and Android 13+ ARM64 and x64 - each on the platform's own GPU API: Vulkan on Linux and Android, Direct3D 12 and Vulkan on Windows, Metal on macOS
 
 ## Native assets
 
-The package carries one native library per platform in the standard NuGet `runtimes/<rid>/native/` layout, each beside the licence text of the code it was built from. NuGet and the .NET runtime pick the right one; on Android it is packed into the APK. If the native cannot be found at run time, the exception names the runtime identifier and every path that was tried.
+The package carries one native library per platform in the standard NuGet `runtimes/<rid>/native/` layout, each beside the licence text of the code it was built from. The C headers for native modules are under `include/` at the package root; nothing there is copied into an application. NuGet and the .NET runtime pick the right one; on Android it is packed into the APK. If the native cannot be found at run time, the exception names the runtime identifier and every path that was tried.
+
+## Sharing a device and a texture between libraries
+
+`IWebGpuDeviceSource` and `IWebGpuTextureTarget` are small hand-written interfaces in this package. The owner of a device or of a shared texture implements them; another library accepts them and takes its own references on the handles, so either may be disposed first. The CodeBrix.WebGpu.Skia device and target implement them and CodeBrix.WebGpu.Graphics accepts them - neither of those packages references the other:
+
+```csharp
+using GraphicsContext graphics = GraphicsContext.Wrap(skiaDevice);        // IWebGpuDeviceSource
+using (GraphicsFrame frame = graphics.BeginFrame(skiaTarget, depth))      // IWebGpuTextureTarget's pass
+{
+    using (RenderPass pass = frame.BeginRenderPass(Color4.Black)) { /* draw */ }
+    frame.Submit();
+}
+```
+
+Every WebGPU use of a shared texture is recorded into the encoder its `BeginWebGpuPass` returns; `EndWebGpuPass` submits it and hands the texture back to the other renderer. The package's `AGENT-README.txt` documents the ownership rules and lists the engine's limits (calls that end the process, and what to do instead).
+
+## Native modules
+
+A native module - Rust, C or C++ compiled separately and wrapped in its own .NET assembly - can work directly on the instance, device, queue and textures this package (and the libraries built on it) own, with no copies and no second device. The package ships the C ABI under `include/`: `webgpu.h`, `wgpu.h`, `codebrix_wgpu.h`, the generated `codebrix_wgpu_procs.h` and `codebrix_wgpu_procs.rs` (every type of the C API for Rust, no crates), and the licence of the headers.
+
+* **Direct linking** (the usual route): the module declares the C functions and links dynamically to the packaged `codebrix_wgpu` library. Call `CodeBrixWebGpuNative.EnsureLoaded()` before the module loads; the operating system then reuses the library already in the process, so every handle is shared.
+* **Function table** (no load-order dependency): `CodeBrixWebGpuNative.GetProcTable()` returns a table of every exported function, filled from the library .NET loaded; the module calls through it and never links to the library at all.
+
+`CodebrixDeviceHandoff.Fill(source, ...)` and `CodebrixFrameHandoff.BeginWebGpuPass(target, ...)` hand any `IWebGpuDeviceSource` and `IWebGpuTextureTarget` to a module as two small versioned structs, written into memory you provide (no per-frame allocation). The package's `AGENT-README.txt` (NATIVE MODULES) has the linking flags for each operating system, the version checks, the pass and threading rules and the list of calls that end the process.
 
 ## The CodeBrix.WebGpu.Skia package
 
@@ -44,7 +70,7 @@ See its [README](https://github.com/ellisnet/CodeBrix.WebGpu/blob/main/src/CodeB
 
 ## The CodeBrix.WebGpu.Graphics package
 
-This repository also produces `CodeBrix.WebGpu.Graphics.MitLicenseForever`, a friendly graphics layer over WebGPU that needs no raw binding calls. One `GraphicsContext` owns the device (or shares one, such as the device of a CodeBrix.WebGpu.Skia `WebGpuSkiaDevice`) and tracks every resource it creates: typed buffers, textures with uploads and readback, samplers, bind groups and WGSL shaders with readable compile errors. Pipeline builders derive vertex layouts from your structs; a batched `SpriteBatch` draws sprites and shapes in one draw call per texture; a `MeshRenderer` draws lit meshes with cameras, depth testing and instancing. Frames render into any texture view, a headless target read back as pixels, or a window surface created from the native handles of a window you made with any toolkit. It depends only on CodeBrix.WebGpu.Native.
+This repository also produces `CodeBrix.WebGpu.Graphics.MitLicenseForever`, a friendly graphics layer over WebGPU that needs no raw binding calls. One `GraphicsContext` owns the device (or shares one, such as the device of a CodeBrix.WebGpu.Skia `WebGpuSkiaDevice`) and tracks every resource it creates: typed buffers, textures with uploads and readback, samplers, bind groups and WGSL shaders with readable compile errors. Pipeline builders derive vertex layouts from your structs; a batched `SpriteBatch` draws sprites and shapes in one draw call per texture; a `MeshRenderer` draws lit meshes with cameras, depth testing and instancing. Image files (and animated GIFs) become textures through CodeBrix.Imaging, and glTF 2.0 models load onto the GPU through CodeBrix.Graphics3D.Gltf2 - a `Model` shared by many `ModelInstance`s, drawn in batches by a `ModelRenderer` with physically based (metallic-roughness) shading, GPU skinning and GPU morph targets, and animated per instance by an `AnimationPlayer` (clip playback, cross-fades and layered blending without per-frame allocation). Image-based lighting comes built in: HDR panoramas (Radiance `.hdr`) or a procedural sky become `EnvironmentMap`s baked on the GPU (irradiance, GGX-prefiltered reflections, a BRDF lookup table), drawn as a background by a `SkyboxRenderer`, with an HDR rendering path finished by a `ToneMapper` (ACES, Khronos PBR Neutral, Reinhard). Frames render into any texture view, a headless target read back as pixels or saved as an image file, or a window surface created from the native handles of a window you made with any toolkit. It depends on CodeBrix.WebGpu.Native, CodeBrix.Imaging and CodeBrix.Graphics3D.Gltf2.
 
 See its [README](https://github.com/ellisnet/CodeBrix.WebGpu/blob/main/src/CodeBrix.WebGpu.Graphics/README.md) and [AGENT-README.txt](https://github.com/ellisnet/CodeBrix.WebGpu/blob/main/src/CodeBrix.WebGpu.Graphics/AGENT-README.txt) in `src/CodeBrix.WebGpu.Graphics`, and the [WebGpuModelViewer sample](https://github.com/ellisnet/CodeBrix.WebGpu/tree/main/samples/WebGpuModelViewer): animated 3D models, a 2D HUD and a SkiaSharp overlay on one GPU device, in a live window or as headless PNG frames.
 

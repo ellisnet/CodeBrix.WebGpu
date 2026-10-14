@@ -18,8 +18,10 @@ namespace CodeBrix.WebGpu.Graphics;
 /// Not thread-safe: create and use the context, its resources and its frames from one thread. Errors that no
 /// error scope catches are queued (<see cref="TakeErrors" />) and raised through <see cref="UncapturedError" />
 /// from <see cref="Poll" /> and <see cref="GraphicsFrame.Submit" />, never from inside a native call.
+/// The context is itself an <see cref="IWebGpuDeviceSource" />, so anything that accepts a device source (another
+/// <see cref="Wrap(IWebGpuDeviceSource)" />, <see cref="CodebrixDeviceHandoff" /> for native modules) takes it directly.
 /// </remarks>
-public sealed unsafe partial class GraphicsContext : IDisposable
+public sealed unsafe partial class GraphicsContext : IDisposable, IWebGpuDeviceSource
 {
     private readonly Dictionary<GraphicsResource, long> resources = new Dictionary<GraphicsResource, long>();
     private readonly ConcurrentQueue<GraphicsError> pendingErrors = new ConcurrentQueue<GraphicsError>();
@@ -115,7 +117,7 @@ public sealed unsafe partial class GraphicsContext : IDisposable
         context = null;
         if (!TryLoadNative(out reason)) return false;
 
-        InstanceExtras extras = new InstanceExtras { Backends = InstanceBackends(options.Backend) };
+        InstanceExtras extras = new InstanceExtras { Backends = InstanceBackends(options.Backend), Flags = options.InstanceFlags };
         extras.Chain.SType = InstanceExtras.StructType;
         InstanceDescriptor descriptor = new InstanceDescriptor { NextInChain = &extras.Chain };
         Instance instance = Native.WebGpu.CreateInstance(&descriptor);
@@ -139,7 +141,10 @@ public sealed unsafe partial class GraphicsContext : IDisposable
             candidate.pendingSurfaceSource = options.CompatibleWindow;
         }
 
-        Adapter adapter = GpuRequests.RequestAdapter(instance, BackendTypeFor(options.Backend), options.PowerPreference, options.ForceFallbackAdapter, candidate.pendingSurface, out string adapterMessage);
+        Adapter adapter;
+        string adapterMessage;
+        if (options.AdapterSelector != null) adapter = SelectAdapter(instance, options, out adapterMessage);
+        else adapter = GpuRequests.RequestAdapter(instance, BackendTypeFor(options.Backend), options.PowerPreference, options.ForceFallbackAdapter, candidate.pendingSurface, out adapterMessage);
         if (adapter.IsNull)
         {
             candidate.Dispose();
@@ -148,7 +153,7 @@ public sealed unsafe partial class GraphicsContext : IDisposable
         }
 
         candidate.Adapter = adapter;
-        Device device = GpuRequests.RequestDevice(instance, adapter, candidate.registryId, options.Label, out string deviceMessage);
+        Device device = RequestDevice(candidate, instance, adapter, options, out string deviceMessage);
         if (device.IsNull)
         {
             candidate.Dispose();
@@ -419,4 +424,82 @@ public sealed unsafe partial class GraphicsContext : IDisposable
     };
 
     private static string Describe(string message) => string.IsNullOrEmpty(message) ? "no message" : message;
+
+    private static Device RequestDevice(GraphicsContext candidate, Instance instance, Adapter adapter, GraphicsContextOptions options, out string message)
+    {
+        List<FeatureName> features = new List<FeatureName>();
+        if (options.RequestAllAdapterFeatures)
+        {
+            GraphicsCapabilities adapterCapabilities = GraphicsCapabilities.FromAdapter(adapter);
+            foreach (FeatureName feature in adapterCapabilities.Features) features.Add(feature);
+            foreach (NativeFeature feature in adapterCapabilities.NativeFeatures)
+            {
+                if (!GraphicsCapabilities.IsExperimental(feature)) features.Add((FeatureName)(uint)feature);
+            }
+        }
+
+        if (options.RequiredFeatures != null)
+        {
+            foreach (FeatureName feature in options.RequiredFeatures)
+            {
+                if (!features.Contains(feature)) features.Add(feature);
+            }
+        }
+
+        if (options.RequiredNativeFeatures != null)
+        {
+            foreach (NativeFeature feature in options.RequiredNativeFeatures)
+            {
+                if (!features.Contains((FeatureName)(uint)feature)) features.Add((FeatureName)(uint)feature);
+            }
+        }
+
+        Limits required = default;
+        bool hasLimits = false;
+        if (options.RequiredLimits.HasValue)
+        {
+            required = options.RequiredLimits.Value;
+            hasLimits = true;
+        }
+        else if (options.RequestAdapterLimits)
+        {
+            Native.WebGpu.AdapterGetLimits(adapter, &required);
+            hasLimits = true;
+        }
+
+        required.NextInChain = null;
+        FeatureName[] array = features.ToArray();
+        fixed (FeatureName* list = array)
+        {
+            return GpuRequests.RequestDevice(instance, adapter, candidate.registryId, options.Label, array.Length == 0 ? null : list, array.Length, hasLimits ? &required : null, out message);
+        }
+    }
+
+    private static Adapter SelectAdapter(Instance instance, GraphicsContextOptions options, out string message)
+    {
+        InstanceEnumerateAdapterOptions enumerate = new InstanceEnumerateAdapterOptions { Backends = InstanceBackends(options.Backend) };
+        int count = (int)Native.WebGpu.InstanceEnumerateAdapters(instance, &enumerate, null);
+        Adapter[] adapters = new Adapter[count];
+        if (count > 0)
+        {
+            fixed (Adapter* list = adapters)
+            {
+                count = Math.Min(count, (int)Native.WebGpu.InstanceEnumerateAdapters(instance, &enumerate, list));
+            }
+        }
+
+        Adapter chosen = Adapter.Null;
+        List<string> names = new List<string>();
+        for (int index = 0; index < adapters.Length; index++)
+        {
+            if (adapters[index].IsNull) continue;
+            GraphicsAdapterInfo info = index < count ? GraphicsAdapterInfo.Read(adapters[index], index) : null;
+            if (info != null) names.Add(info.ToString());
+            if (chosen.IsNull && info != null && options.AdapterSelector(info)) chosen = adapters[index];
+            else Native.WebGpu.AdapterRelease(adapters[index]);
+        }
+
+        message = chosen.IsNull ? "the adapter selector matched none of " + (names.Count == 0 ? "(no adapters)" : string.Join("; ", names)) : null;
+        return chosen;
+    }
 }

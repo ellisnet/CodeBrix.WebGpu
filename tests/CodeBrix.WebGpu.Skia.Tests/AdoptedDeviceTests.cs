@@ -17,6 +17,19 @@ public unsafe class AdoptedDeviceTests
 {
     private const int Size = 40;
 
+    /// <summary><c>VK_API_VERSION_1_3</c>.</summary>
+    private const uint VkApiVersion13 = (1u << 22) | (3u << 12);
+
+    /// <summary>
+    /// The API version wgpu created a Vulkan instance with, from the loader-reported version the native returns:
+    /// 1.0 when the loader reports less than 1.1, otherwise 1.3 (wgpu's cap - Vulkan lets a 1.1+ loader take any
+    /// application version). The loader-reported version itself must not go into an adopt descriptor.
+    /// </summary>
+    /// <param name="loaderReported">CodebrixVulkanDeviceInfo.InstanceApiVersion.</param>
+    /// <returns>The version the instance was created with.</returns>
+    internal static uint WgpuInstanceCreationVersion(uint loaderReported) =>
+        loaderReported < NativeConstants.VkApiVersion11 ? NativeConstants.VkApiVersion10 : VkApiVersion13;
+
     private static List<string> Names(CodebrixName* names, nuint count)
     {
         List<string> result = new List<string>();
@@ -55,6 +68,32 @@ public unsafe class AdoptedDeviceTests
         gpuCopy.ReadbackCount.Should().Be(0);
     }
 
+    // An adopted device has no uncaptured-error handler, so an unchecked validation error would end the process: a
+    // texture the device rejects and a pass with an invalid command must both be caught by the target.
+    private static void RejectInvalidWorkWithoutEndingTheProcess(WebGpuSkiaDevice adopted, GRContext appContext)
+    {
+        WebGpuSkiaTargetOptions rejected = new WebGpuSkiaTargetOptions { Format = TextureFormat.BGRA8Unorm, ExtraUsage = TextureUsage.StorageBinding };
+        bool storageAllowed = Native.WebGpu.DeviceHasFeature(adopted.Device, FeatureName.BGRA8UnormStorage) != 0;
+        using WebGpuSkiaTarget refused = WebGpuSkiaTarget.Create(adopted, appContext, Size, Size, storageAllowed ? null : rejected);
+        using WebGpuSkiaTarget tooLarge = WebGpuSkiaTarget.CreateHeadless(adopted, 1 << 20, 4);
+        using WebGpuSkiaTarget target = WebGpuSkiaTarget.Create(adopted, appContext, Size, Size);
+        BufferDescriptor descriptor = new BufferDescriptor { Usage = BufferUsage.CopyDst, Size = 16 };
+        Native.Buffer scratch = Native.WebGpu.DeviceCreateBuffer(adopted.Device, &descriptor);
+        CommandEncoder invalid = target.BeginWebGpuPass();
+        Native.WebGpu.CommandEncoderClearBuffer(invalid, scratch, 2, 4);
+        Action end = () => target.EndWebGpuPass();
+        end.Should().Throw<WebGpuSkiaValidationException>();
+        CommandEncoder valid = target.BeginWebGpuPass();
+        WebGpuWork.Clear(valid, target.TextureView, 0, 0, 1);
+        target.EndWebGpuPass();
+        byte[] pixels = TestPixels.ReadWithSkia(target.Surface, Size, Size);
+        Native.WebGpu.BufferRelease(scratch);
+
+        if (!storageAllowed) refused.Tier.Should().Be(WebGpuSkiaTier.Unavailable);
+        tooLarge.Tier.Should().Be(WebGpuSkiaTier.Unavailable);
+        TestPixels.At(pixels, Size, 20, 20).Should().Be(TestPixels.Blue);
+    }
+
     [Fact]
     public void AdoptVulkan_shares_the_applications_device_and_queue()
     {
@@ -83,22 +122,43 @@ public unsafe class AdoptedDeviceTests
         Assert.SkipWhen(appContext == null, "SkiaSharp cannot create a Vulkan GRContext here.");
 
         //Act
-        WebGpuSkiaDevice adopted = WebGpuSkiaDevice.AdoptVulkan(appContext, backendContext, instanceExtensions, deviceExtensions, info.InstanceApiVersion, info.QueueIndex);
+        WebGpuSkiaDevice adopted = WebGpuSkiaDevice.AdoptVulkan(appContext, backendContext, instanceExtensions, deviceExtensions, WgpuInstanceCreationVersion(info.InstanceApiVersion), info.QueueIndex);
 
         //Assert
         adopted.IsAvailable.Should().BeTrue(adopted.Reason);
         adopted.Route.Should().Be(WebGpuSkiaDeviceRoute.Adopted);
         adopted.Backend.Should().Be(WebGpuSkiaBackend.Vulkan);
         adopted.SharesQueueWithSkia.Should().BeTrue();
+        ((IWebGpuDeviceSource)adopted).HasUncapturedErrorHandler.Should().BeFalse();
+        ((IWebGpuDeviceSource)adopted).Backend.Should().Be(BackendType.Vulkan);
         adopted.GrContext.Should().BeSameAs(appContext);
         adopted.CreateGrContext().Should().BeSameAs(appContext);
         adopted.SharesDeviceWith(appContext).Should().BeTrue();
         RunZeroCopyAndGpuCopyFrames(adopted, appContext);
+        RejectInvalidWorkWithoutEndingTheProcess(adopted, appContext);
 
         adopted.Dispose();
         appContext.IsAbandoned.Should().BeFalse();
         appContext.Dispose();
         GC.KeepAlive(procedures);
+    }
+
+    [Fact]
+    public void Adopt_descriptor_gets_the_version_the_instance_was_created_with_not_the_loader_version()
+    {
+        //Arrange
+        uint vk12 = (1u << 22) | (2u << 12);
+        uint vk14 = (1u << 22) | (4u << 12);
+
+        //Act
+        uint fromOld = WgpuInstanceCreationVersion(NativeConstants.VkApiVersion10);
+        uint from12 = WgpuInstanceCreationVersion(vk12);
+        uint from14 = WgpuInstanceCreationVersion(vk14);
+
+        //Assert
+        fromOld.Should().Be(NativeConstants.VkApiVersion10);
+        from12.Should().Be(VkApiVersion13);
+        from14.Should().Be(VkApiVersion13);
     }
 
     [Fact]
@@ -125,6 +185,7 @@ public unsafe class AdoptedDeviceTests
         adopted.Backend.Should().Be(WebGpuSkiaBackend.Metal);
         adopted.SharesQueueWithSkia.Should().BeFalse();
         RunZeroCopyAndGpuCopyFrames(adopted, appContext);
+        RejectInvalidWorkWithoutEndingTheProcess(adopted, appContext);
 
         adopted.Dispose();
         appContext.Dispose();

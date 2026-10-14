@@ -13,7 +13,7 @@ namespace CodeBrix.WebGpu.Native.Tests;
 /// wgpu-native-tools/specs/expected-exports.txt must be exactly what the generator produces from the
 /// committed YAML (the in-process equivalent of <c>BindingGenerator --check</c>).
 /// </summary>
-public class GeneratedFilesDrift
+public class GeneratedFilesDriftTests
 {
     private static readonly string Root =
         BindingGenerator.BindingGenerator.FindRepositoryRoot(AppContext.BaseDirectory)

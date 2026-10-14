@@ -1,0 +1,45 @@
+# Per-function notes for the native-module function table (WGPUCodebrixProcTable). The binding generator
+# renders each note as a comment on the table entry in the C# (Generated/ModuleInterop.g.cs), C
+# (include/codebrix_wgpu_procs.h) and Rust (include/codebrix_wgpu_procs.rs) outputs. Keep it in step with the
+# LIMITS section of the repository-root AGENT-README.txt.
+#
+# Format: <C symbol or pattern> <whitespace> <note>. '*' matches any run of characters. Every entry must match
+# at least one exported function (the generator refuses the file otherwise).
+
+wgpuGetProcAddress                          ABORTS: not implemented by the engine (use this table instead).
+wgpuInstanceWaitAny                         ABORTS: not implemented by the engine (pump wgpuInstanceProcessEvents / wgpuDevicePoll).
+wgpuDeviceCreateComputePipelineAsync        ABORTS: not implemented by the engine (create pipelines synchronously).
+wgpuDeviceCreateRenderPipelineAsync         ABORTS: not implemented by the engine (create pipelines synchronously).
+wgpuDeviceGetAdapterInfo                    ABORTS: not implemented by the engine (use wgpuAdapterGetInfo).
+wgpuDeviceGetLostFuture                     ABORTS: not implemented by the engine.
+wgpuBufferGetMapState                       ABORTS: not implemented by the engine (track the map state yourself).
+wgpuBufferReadMappedRange                   ABORTS: not implemented by the engine (use wgpuBufferGetConstMappedRange).
+wgpuBufferWriteMappedRange                  ABORTS: not implemented by the engine (use wgpuBufferGetMappedRange).
+wgpuShaderModuleGetCompilationInfo          ABORTS: not implemented by the engine (use an error scope around shader creation).
+wgpuInstanceGetWGSLLanguageFeatures         ABORTS: not implemented by the engine.
+wgpuInstanceHasWGSLLanguageFeature          ABORTS: not implemented by the engine.
+wgpuSupportedWGSLLanguageFeaturesFreeMembers ABORTS: not implemented by the engine.
+wgpuGetInstanceFeatures                     ABORTS: not implemented by the engine.
+wgpuHasInstanceFeature                      ABORTS: not implemented by the engine.
+wgpuSupportedInstanceFeaturesFreeMembers    ABORTS: not implemented by the engine.
+wgpuTextureGetTextureBindingViewDimension   ABORTS: not implemented by the engine.
+wgpuExternalTextureAddRef                   ABORTS: not implemented by the engine.
+wgpuExternalTextureRelease                  ABORTS: not implemented by the engine.
+wgpu*SetLabel                               ABORTS: not implemented by the engine (set labels through the descriptors).
+wgpuQueueSubmit                             ABORTS on an invalid command buffer (finish inside an error scope; do not submit on error), on work using a mapped buffer or a destroyed buffer/texture.
+wgpuQueueSubmitForIndex                     ABORTS on an invalid command buffer (finish inside an error scope; do not submit on error), on work using a mapped buffer or a destroyed buffer/texture.
+wgpuRenderBundleEncoderFinish               ABORTS when the bundle's commands fail validation.
+wgpuDeviceCreateRenderBundleEncoder         ABORTS on impossible colour/depth formats or sample counts.
+wgpuBufferGetMappedRange                    ABORTS when the buffer is not mapped (for this mode) or the offset/size is misaligned (8/4) or out of range.
+wgpuBufferGetConstMappedRange               ABORTS when the buffer is not mapped (for this mode) or the offset/size is misaligned (8/4) or out of range.
+wgpuDevicePoll                              ABORTS when the wait fails (a foreign submission index, a lost device).
+wgpuInstanceProcessEvents                   ABORTS when polling fails.
+wgpuInstanceCreateSurface                   ABORTS on window/display handles that do not belong together.
+wgpuSurfaceConfigure                        ABORTS on a configuration the surface's capabilities do not allow.
+wgpuSurfaceGetCurrentTexture                ABORTS on an unconfigured surface.
+wgpuQuerySetDestroy                         ABORTS together with the later wgpuQuerySetRelease (dropped twice): never call it, release the set.
+wgpuAdapterRequestDevice                    Without DeviceDescriptor.uncapturedErrorCallbackInfo.callback the default handler ENDS THE PROCESS on the first uncaptured error.
+wgpuCodebrixInstanceAdoptVulkanDevice       The adopted device has the default uncaptured-error handler: uncaptured errors END THE PROCESS (use error scopes).
+wgpuCodebrixInstanceAdoptMetalDevice        The adopted device has the default uncaptured-error handler: uncaptured errors END THE PROCESS (use error scopes).
+wgpuCodebrixInstanceAdoptD3d12Device        Always returns WGPUStatus_Error with this engine.
+wgpuQueueGetNativeMetalCommandQueue         Always returns NULL with this engine.

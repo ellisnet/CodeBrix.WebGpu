@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using CodeBrix.WebGpu.Native;
 using SilverAssertions;
 using Xunit;
@@ -86,6 +87,35 @@ public class GraphicsContextTests : IClassFixture<GraphicsGpuFixture>
 
         //Assert
         after.Read<int>().Should().Equal(5, 6);
+    }
+
+    [Fact]
+    public void Context_is_a_device_source_that_wraps_and_hands_off_directly()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        GraphicsContext owner = gpu.Context;
+        IWebGpuDeviceSource source = owner;
+
+        //Act
+        CodebrixDeviceHandoff handoff = CodebrixDeviceHandoff.From(source);
+        using GraphicsContext shared = GraphicsContext.Wrap(source);
+        using GpuBuffer buffer = shared.CreateStorageBuffer<int>(new[] { 7, 8, 9 });
+
+        //Assert
+        source.Device.Should().Be(owner.Device);
+        source.Queue.Should().Be(owner.Queue);
+        source.Instance.Should().Be(owner.Instance);
+        source.Adapter.Should().Be(owner.Adapter);
+        source.Backend.Should().Be(owner.Backend);
+        source.HasUncapturedErrorHandler.Should().BeTrue();
+        handoff.Device.Should().Be(owner.Device);
+        handoff.Queue.Should().Be(owner.Queue);
+        handoff.Backend.Should().Be(owner.Backend);
+        (handoff.Flags & CodebrixDeviceHandoff.FlagUncapturedErrorHandler).Should().Be(CodebrixDeviceHandoff.FlagUncapturedErrorHandler);
+        shared.IsWrapped.Should().BeTrue();
+        shared.HasUncapturedErrorHandler.Should().BeTrue();
+        buffer.Read<int>().Should().Equal(7, 8, 9);
     }
 
     [Fact]
@@ -228,5 +258,227 @@ public class GraphicsContextTests : IClassFixture<GraphicsGpuFixture>
 
         //Assert
         act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task WhenSubmittedWorkDoneAsync_completes_after_a_submission()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        using GpuBuffer buffer = gpu.Context.CreateStorageBuffer<uint>(new uint[] { 1 });
+        using (GraphicsFrame frame = gpu.Context.BeginFrame())
+        {
+            frame.ClearBuffer(buffer);
+            frame.Submit();
+        }
+
+        //Act
+        Task done = gpu.Context.WhenSubmittedWorkDoneAsync();
+        await done.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
+
+        //Assert
+        done.IsCompletedSuccessfully.Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenerateReport_counts_live_engine_objects()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        using GraphicsContext context = GraphicsContext.Create();
+        using GpuBuffer buffer = context.CreateStorageBuffer(16);
+
+        //Act
+        GlobalReport report = context.GenerateReport();
+
+        //Assert
+        report.Hub.Devices.NumAllocated.Should().BeGreaterThanOrEqualTo((nuint)1);
+        report.Hub.Buffers.NumAllocated.Should().BeGreaterThanOrEqualTo((nuint)1);
+        report.Hub.Buffers.ElementSize.Should().BeGreaterThan((nuint)0);
+    }
+
+    [Fact]
+    public void Graphics_debugger_capture_brackets_without_a_debugger()
+    {
+        //Arrange
+        gpu.RequireDevice();
+
+        //Act
+        bool started = gpu.Context.StartGraphicsDebuggerCapture();
+        gpu.Context.StopGraphicsDebuggerCapture();
+
+        //Assert
+        started.Should().BeTrue();
+    }
+
+    [Fact]
+    public void DestroyDevice_marks_the_context_lost_and_creation_fails()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        using GraphicsContext context = GraphicsContext.Create();
+        string lost = null;
+        context.DeviceLost += reason => lost = reason;
+
+        //Act
+        context.DestroyDevice();
+        Action create = () => context.CreateStorageBuffer(16);
+        context.Poll();
+
+        //Assert
+        context.IsLost.Should().BeTrue();
+        lost.Should().Contain("Destroyed");
+        create.Should().Throw<GraphicsException>();
+    }
+
+    [Fact]
+    public void Native_device_info_matches_the_backend()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        GraphicsContext context = gpu.Context;
+
+        //Act
+        bool vulkan = context.TryGetVulkanInfo(out VulkanDeviceInfo info);
+        bool d3d12 = context.TryGetD3D12Info(out D3D12DeviceInfo d3d12Info);
+
+        //Assert
+        vulkan.Should().Be(context.Backend == BackendType.Vulkan);
+        d3d12.Should().Be(context.Backend == BackendType.D3D12);
+        if (vulkan)
+        {
+            info.Device.Should().NotBe(IntPtr.Zero);
+            info.Queue.Should().NotBe(IntPtr.Zero);
+            info.GetInstanceProcAddr.Should().NotBe(IntPtr.Zero);
+            info.EnabledDeviceExtensions.Should().NotBeEmpty();
+            info.ToString().Should().StartWith("VkDevice 0x");
+            d3d12Info.Should().BeNull();
+        }
+
+        if (context.Backend != BackendType.Metal)
+        {
+            context.MetalDevice.Should().Be(IntPtr.Zero);
+        }
+
+        context.MetalCommandQueue.Should().Be(IntPtr.Zero);
+        context.IsAdopted.Should().BeFalse();
+    }
+
+    [Fact]
+    public void AdoptVulkanDevice_wraps_another_contexts_VkDevice()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        Assert.SkipUnless(gpu.Context.Backend == BackendType.Vulkan, "The device is not on Vulkan.");
+        gpu.Context.TryGetVulkanInfo(out VulkanDeviceInfo info).Should().BeTrue();
+
+        //Act
+        using GraphicsContext adopted = GraphicsContext.AdoptVulkanDevice(info);
+        using GpuBuffer buffer = adopted.CreateStorageBuffer<uint>(new uint[] { 0xC0DE });
+        uint[] read = buffer.Read<uint>();
+
+        //Assert
+        adopted.IsAdopted.Should().BeTrue();
+        adopted.Backend.Should().Be(BackendType.Vulkan);
+        adopted.TryGetVulkanInfo(out VulkanDeviceInfo adoptedInfo).Should().BeTrue();
+        adoptedInfo.Device.Should().Be(info.Device);
+        read.Should().Equal(0xC0DEu);
+    }
+
+    [Fact]
+    public void Adoption_of_unusable_handles_reports_a_reason()
+    {
+        //Arrange
+        gpu.RequireDevice();
+
+        //Act
+        bool vulkan = GraphicsContext.TryAdoptVulkanDevice(new VulkanDeviceInfo(), null, out GraphicsContext fromVulkan, out string vulkanReason);
+        bool d3d12 = GraphicsContext.TryAdoptD3D12Device(new D3D12DeviceInfo(), null, out GraphicsContext fromD3d12, out string d3d12Reason);
+        bool metal = GraphicsContext.TryAdoptMetalDevice(IntPtr.Zero, null, out GraphicsContext fromMetal, out string metalReason);
+
+        //Assert
+        vulkan.Should().BeFalse();
+        fromVulkan.Should().BeNull();
+        vulkanReason.Should().Contain("required");
+        d3d12.Should().BeFalse();
+        fromD3d12.Should().BeNull();
+        d3d12Reason.Should().Contain("Direct3D 12");
+        metal.Should().BeFalse();
+        fromMetal.Should().BeNull();
+        metalReason.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public void Wrapped_handles_take_their_own_references()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        GraphicsContext context = gpu.Context;
+        GpuSampler sampler = context.CreateSampler();
+        GpuShader shader = context.CreateShader(TestShaders.FullScreenRed);
+        GpuBindGroupLayout layout = context.CreateBindGroupLayout(BindingLayoutEntry.Uniform(0, ShaderStage.Fragment));
+        GpuBuffer uniform = context.CreateUniformBuffer(16);
+        GpuBindGroup group = context.CreateBindGroup(layout, BindingEntry.ForBuffer(0, uniform));
+        GpuPipelineLayout pipelineLayout = context.CreatePipelineLayout(0, "layout", layout);
+        GpuRenderPipeline pipeline = context.CreateRenderPipeline(shader).WithColorTarget(TextureFormat.RGBA8Unorm).Build();
+        GpuComputePipeline compute = context.CreateComputePipeline(context.CreateShader(TestShaders.Doubler)).Build();
+
+        //Act
+        using GpuSampler wrappedSampler = context.WrapSampler(sampler.Handle);
+        using GpuShader wrappedShader = context.WrapShader(shader.Handle);
+        using GpuBindGroupLayout wrappedLayout = context.WrapBindGroupLayout(layout.Handle);
+        using GpuBindGroup wrappedGroup = context.WrapBindGroup(group.Handle, wrappedLayout);
+        using GpuPipelineLayout wrappedPipelineLayout = context.WrapPipelineLayout(pipelineLayout.Handle);
+        using GpuRenderPipeline wrappedPipeline = context.WrapRenderPipeline(pipeline.Handle, new[] { TextureFormat.RGBA8Unorm });
+        using GpuComputePipeline wrappedCompute = context.WrapComputePipeline(compute.Handle);
+        sampler.Dispose();
+        shader.Dispose();
+        group.Dispose();
+        pipelineLayout.Dispose();
+        pipeline.Dispose();
+        compute.Dispose();
+        using HeadlessRenderTarget target = context.CreateHeadlessTarget(4, 4, withDepth: false);
+        using (GraphicsFrame frame = context.BeginFrame())
+        {
+            using (RenderPass pass = frame.BeginRenderPass(target.View, Color4.Black))
+            {
+                pass.SetPipeline(wrappedPipeline);
+                pass.Draw(3);
+            }
+
+            frame.Submit();
+        }
+
+        //Assert
+        wrappedSampler.IsWrapped.Should().BeTrue();
+        wrappedShader.Language.Should().Be(ShaderLanguage.Unknown);
+        wrappedShader.IsWrapped.Should().BeTrue();
+        wrappedLayout.IsWrapped.Should().BeTrue();
+        wrappedGroup.Layout.Should().BeSameAs(wrappedLayout);
+        wrappedPipelineLayout.IsWrapped.Should().BeTrue();
+        wrappedPipeline.ColorFormats.Should().Equal(TextureFormat.RGBA8Unorm);
+        wrappedCompute.IsWrapped.Should().BeTrue();
+        TestPixels.Near(TestPixels.At(target.ReadRgba(), 4, 1, 1), 255, 0, 0).Should().BeTrue();
+        layout.Dispose();
+        uniform.Dispose();
+    }
+
+    [Fact]
+    public void Wrapping_null_handles_throws()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        GraphicsContext context = gpu.Context;
+
+        //Act / Assert
+        ((Action)(() => context.WrapBuffer(Native.Buffer.Null))).Should().Throw<ArgumentException>();
+        ((Action)(() => context.WrapTexture(Texture.Null))).Should().Throw<ArgumentException>();
+        ((Action)(() => context.WrapSampler(Sampler.Null))).Should().Throw<ArgumentException>();
+        ((Action)(() => context.WrapShader(ShaderModule.Null))).Should().Throw<ArgumentException>();
+        ((Action)(() => context.WrapQuerySet(QuerySet.Null))).Should().Throw<ArgumentException>();
+        ((Action)(() => context.WrapRenderBundle(RenderBundle.Null))).Should().Throw<ArgumentException>();
+        ((Action)(() => context.WrapCommandBuffer(CommandBuffer.Null))).Should().Throw<ArgumentException>();
+        ((Action)(() => context.WrapWindowSurface(Surface.Null))).Should().Throw<ArgumentException>();
+        ((Action)(() => context.WrapRenderBundleEncoder(RenderBundleEncoder.Null, new[] { TextureFormat.RGBA8Unorm }))).Should().Throw<ArgumentException>();
     }
 }

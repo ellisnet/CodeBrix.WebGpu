@@ -24,7 +24,8 @@ TOOLS
 
 The binding generator: reads the WebGPU, wgpu and CodeBrix YAML specifications,
 validates them against the webgpu-headers schema and renders
-src/CodeBrix.WebGpu.Native/Generated/*.g.cs and
+src/CodeBrix.WebGpu.Native/Generated/*.g.cs, the native-module files
+src/CodeBrix.WebGpu.Native/include/codebrix_wgpu_procs.h / .rs and
 wgpu-native-tools/specs/expected-exports.txt. Run it with --check or --write
 (MAINTAINER-README.txt, THE BINDING GENERATOR).
 
@@ -59,12 +60,17 @@ A console application (not packed) in the solution's Samples folder: animated
 glTF models (Kenney Cube Pets walking, idling, eating and dancing around an
 opening chest, the Avian flying overhead) rendered by
 CodeBrix.WebGpu.Graphics, a sprite-batch HUD, and a SkiaSharp overlay drawn
-through CodeBrix.WebGpu.Skia on the same GPU texture. It loads the models with
-CodeBrix.Graphics3D.Gltf2 and opens its live window with CodeBrix.Sdl3 (X11,
-Wayland, Win32 or Metal handles handed to a Graphics window surface); with
---headless <folder> [--frames N] it writes PNG frames instead. Its README.md
-says how to run it and credits the CC0 models (THIRD-PARTY-NOTICES.txt
-section 5).
+through CodeBrix.WebGpu.Skia on the same GPU texture. The models are loaded
+with the Graphics package's LoadModel, lit by a procedural sky and drawn
+through the HDR path with tone mapping; the live window comes from
+CodeBrix.Sdl3 (X11, Wayland, Win32 or Metal handles handed to a Graphics
+window surface); with --headless <folder> [--frames N] it writes PNG frames
+instead. Its README.md says how to run it and credits the CC0 models
+(THIRD-PARTY-NOTICES.txt section 5).
 
-A small Android device-proof application (samples/WebGpuDiagnostics) is
-planned.
+    samples/WebGpuModelViewer.Android/
+
+The same sample as an Android application (net10.0-android, SDL activity): it
+links the desktop sample's sources and models and renders into the device's
+window through the same packages. Its README.md says how to build and install
+it.

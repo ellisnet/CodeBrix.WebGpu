@@ -3,6 +3,7 @@
 WebGPU rendering straight into SkiaSharp surfaces: give it an `SKSurface`, an `SKCanvas`, a `GRContext` or nothing at all, and WebGPU draws into it the fastest way the inputs allow - with no copy at all when the surface lives on the same GPU device - and tells you which way it took. CodeBrix.WebGpu.Skia is provided as a .NET library and associated `CodeBrix.WebGpu.Skia.MitLicenseForever` NuGet package.
 
 CodeBrix.WebGpu.Skia supports applications and assemblies that target Microsoft .NET version 10.0 and later.
+Microsoft .NET version 10.0 is a Long-Term Supported (LTS) version of .NET, and was released on Nov 11, 2025; and will be actively supported by Microsoft until Nov 14, 2028.
 Please update your C#/.NET code and projects to the latest LTS version of Microsoft .NET.
 
 ## Installation
@@ -33,7 +34,8 @@ CodeBrix.WebGpu.Skia depends on SkiaSharp and on CodeBrix.WebGpu.Native (`CodeBr
 * Headless rendering with no surface at all, read back as an `SKImage`, an `SKBitmap` or raw bytes - for tests, servers and screenshots
 * A readback counter, so an application (or a test) can prove a render loop never touches CPU memory
 * Optional preservation of the surface's content in the copy tiers, so a WebGPU pass that loads instead of clearing sees what SkiaSharp drew
-* Reporting instead of crashing: a missing GPU API, adapter, device or format makes the device or target unavailable with a reason string
+* Sharing through CodeBrix.WebGpu.Native's contracts: `WebGpuSkiaDevice` is an `IWebGpuDeviceSource` and `WebGpuSkiaTarget` an `IWebGpuTextureTarget`, so any library built on CodeBrix.WebGpu.Native that accepts them - for example CodeBrix.WebGpu.Graphics - shares the device and renders into the target in one call each, without either package referencing the other
+* Reporting instead of crashing: a missing GPU API, adapter, device or format - or a format and usage the device rejects - makes the device or target unavailable with a reason string; a frame whose WebGPU commands fail validation is never submitted: `EndWebGpuPass` throws `WebGpuSkiaValidationException` with WebGPU's message and the target stays ready for the next frame
 
 ## Sample Code
 
@@ -71,7 +73,8 @@ unsafe
 }
 
 using SKPaint paint = new SKPaint { Color = SKColors.White, IsAntialias = true };
-target.Surface.Canvas.DrawText("drawn by SkiaSharp", 20, 40, new SKFont { Size = 24 }, paint);
+using SKFont font = new SKFont { Size = 24 };
+target.Surface.Canvas.DrawText("drawn by SkiaSharp", 20, 40, SKTextAlign.Left, font, paint);
 ```
 
 ### Any surface you already have
@@ -93,6 +96,21 @@ CommandEncoder encoder = target.BeginWebGpuPass();
 // ... render into target.TextureView ...
 target.EndWebGpuPass();
 using SKImage image = target.ReadImage();
+```
+
+### Another WebGPU library on the same device and target
+
+`WebGpuSkiaDevice` implements `IWebGpuDeviceSource` and `WebGpuSkiaTarget` implements `IWebGpuTextureTarget` (both defined in CodeBrix.WebGpu.Native), whose pass protocol is this package's `BeginWebGpuPass` / `EndWebGpuPass`. A library that accepts those contracts needs no reference to this one - with CodeBrix.WebGpu.Graphics, for example:
+
+```csharp
+using GraphicsContext graphics = GraphicsContext.Wrap(gpu);                 // the same device
+using (GraphicsFrame frame = graphics.BeginFrame(target, depth))            // the target's WebGPU pass
+{
+    using (RenderPass pass = frame.BeginRenderPass(Color4.Black)) { /* draw */ }
+    frame.Submit();                                                          // ends the pass
+}
+
+target.Surface.Canvas.DrawText(...);                                         // SkiaSharp on the same pixels
 ```
 
 ## Documentation

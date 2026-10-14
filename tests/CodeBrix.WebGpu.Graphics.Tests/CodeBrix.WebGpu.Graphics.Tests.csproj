@@ -27,6 +27,14 @@
   </ItemGroup>
 
   <!--
+    Small CC0 glTF models and their textures (Kenney, Poly Haven) for the model-loading tests, copied to the output
+    under Assets/. Credits: THIRD-PARTY-NOTICES.txt at the repository root and the LICENSE file beside each set.
+  -->
+  <ItemGroup>
+    <None Include="Assets\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
     The Native project's committed native libraries, copied to the test output under runtimes/<rid>/native/ - the
     layout the Native library's DllImportResolver probes (a ProjectReference does not bring them, a
     PackageReference would). Same items as tests/CodeBrix.WebGpu.Native.Tests.

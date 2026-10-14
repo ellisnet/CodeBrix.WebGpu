@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using CodeBrix.WebGpu.BindingGenerator.Model;
@@ -23,6 +24,9 @@ public static class BindingGenerator
         "wgpu-native-tools/specs/wgpu.yml",
         "wgpu-native-tools/specs/codebrix.yml",
     };
+
+    /// <summary>The per-function notes of the native-module function table, relative to the repository root.</summary>
+    public const string ProcNotesPath = "wgpu-native-tools/specs/proc-table-notes.txt";
 
     /// <summary>Loads, validates and merges the inputs of a repository.</summary>
     /// <param name="repositoryRoot">The repository root.</param>
@@ -65,8 +69,26 @@ public static class BindingGenerator
             new KeyValuePair<string, string>(SchemaPath, Sha256(Path.Combine(repositoryRoot, SchemaPath))),
         };
         foreach (string path in SpecPaths) hashes.Add(new KeyValuePair<string, string>(path, Sha256(Path.Combine(repositoryRoot, path))));
-        return new CSharpRenderer(model, hashes).RenderAll();
+        hashes.Add(new KeyValuePair<string, string>(ProcNotesPath, Sha256(Path.Combine(repositoryRoot, ProcNotesPath))));
+
+        ProcNotes notes = ProcNotes.Parse(File.ReadAllText(Path.Combine(repositoryRoot, ProcNotesPath)), Path.GetFileName(ProcNotesPath));
+        notes.Validate(model.Functions.Select(f => f.CName), Path.GetFileName(ProcNotesPath));
+
+        CSharpRenderer renderer = new CSharpRenderer(model, hashes);
+        SortedDictionary<string, string> outputs = renderer.RenderAll();
+        foreach (KeyValuePair<string, string> output in new ModuleRenderer(new ModuleInterop(model, notes), renderer.Banner).RenderAll())
+        {
+            outputs.Add(output.Key, output.Value);
+        }
+
+        return outputs;
     }
+
+    /// <summary>Checks the hand-written codebrix_wgpu.h against specs/codebrix.yml.</summary>
+    /// <param name="repositoryRoot">The repository root.</param>
+    /// <returns>The problems; empty when the header is current.</returns>
+    public static List<string> CheckCodebrixHeader(string repositoryRoot) =>
+        CodebrixHeaderCheck.Check(LoadModel(repositoryRoot), File.ReadAllText(Path.Combine(repositoryRoot, CodebrixHeaderCheck.HeaderPath)));
 
     /// <summary>Compares generated outputs with the files on disk.</summary>
     /// <param name="repositoryRoot">The repository root.</param>
@@ -88,14 +110,20 @@ public static class BindingGenerator
             if (current != output.Value) differences.Add("DIFFERS " + output.Key + Environment.NewLine + LineDiff(current, output.Value));
         }
 
-        string generatedFolder = Path.Combine(repositoryRoot, CSharpRenderer.GeneratedFolder);
-        if (Directory.Exists(generatedFolder))
+        foreach ((string folder, string pattern) in new[] { (CSharpRenderer.GeneratedFolder, "*.cs"), (ModuleRenderer.IncludeFolder, "*") })
         {
-            foreach (string file in Directory.GetFiles(generatedFolder, "*.cs"))
+            string generatedFolder = Path.Combine(repositoryRoot, folder);
+            if (!Directory.Exists(generatedFolder)) continue;
+            foreach (string file in Directory.GetFiles(generatedFolder, pattern))
             {
-                string relative = CSharpRenderer.GeneratedFolder + "/" + Path.GetFileName(file);
+                string relative = folder + "/" + Path.GetFileName(file);
                 if (!outputs.ContainsKey(relative)) differences.Add("STALE " + relative + " (not produced by the generator; delete it)");
             }
+        }
+
+        foreach (string problem in CheckCodebrixHeader(repositoryRoot))
+        {
+            differences.Add("HAND-WRITTEN " + CodebrixHeaderCheck.HeaderPath + " disagrees with specs/codebrix.yml (edit the header): " + problem);
         }
 
         return differences;

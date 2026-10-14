@@ -6,8 +6,8 @@ namespace CodeBrix.WebGpu.Graphics;
 /// <summary>
 /// Where a render pass draws: a colour texture view with its format and size, and optionally a depth view. Any view
 /// works - a <see cref="HeadlessRenderTarget" />'s, a <see cref="WindowSurface" /> frame's, a <see cref="GpuTexture" />'s,
-/// or one another library owns (for a <c>WebGpuSkiaTarget</c>:
-/// <c>new RenderTargetView(target.TextureView, target.Format, target.Width, target.Height)</c>).
+/// or one another library shares through <see cref="IWebGpuTextureTarget" /> (<see cref="From" />, for example a
+/// <c>WebGpuSkiaTarget</c>). The view holds raw handles and takes no references: use it only while their owner is alive.
 /// </summary>
 public readonly struct RenderTargetView
 {
@@ -26,6 +26,27 @@ public readonly struct RenderTargetView
         Height = height;
         DepthView = depthView;
         DepthFormat = depthView.IsNull ? TextureFormat.Undefined : depthFormat;
+    }
+
+    /// <summary>
+    /// The view of a shared texture target (for example a <c>WebGpuSkiaTarget</c>), optionally with a depth texture.
+    /// Render into it only inside the target's WebGPU pass - <see cref="GraphicsContext.BeginFrame(IWebGpuTextureTarget, GpuTexture)" />
+    /// opens that pass and hands out this same view as <see cref="GraphicsFrame.Target" />.
+    /// </summary>
+    /// <param name="target">The target.</param>
+    /// <param name="depth">A depth texture of the target's size and sample count, or null for none.</param>
+    /// <returns>The view.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="target" /> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// The target has no texture (it is unavailable or disposed), or <paramref name="depth" /> is not a depth texture
+    /// of the target's size and sample count.
+    /// </exception>
+    public static RenderTargetView From(IWebGpuTextureTarget target, GpuTexture depth = null)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        if (target.TextureView.IsNull) throw new ArgumentException("The texture target has no texture view (it is unavailable or disposed).", nameof(target));
+        if (depth != null && depth.SampleCount != target.SampleCount) throw new ArgumentException("The depth texture has " + depth.SampleCount + " samples per pixel; the target has " + target.SampleCount + ".", nameof(depth));
+        return new RenderTargetView(target.TextureView, target.Format, target.Width, target.Height).WithDepth(depth);
     }
 
     /// <summary>The colour view.</summary>

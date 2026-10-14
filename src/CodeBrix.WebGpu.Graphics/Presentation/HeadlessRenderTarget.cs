@@ -1,4 +1,6 @@
 using System;
+using CodeBrix.Imaging;
+using CodeBrix.Imaging.PixelFormats;
 using CodeBrix.WebGpu.Native;
 
 namespace CodeBrix.WebGpu.Graphics;
@@ -77,6 +79,30 @@ public sealed class HeadlessRenderTarget : GraphicsResource
         float[] values = new float[Width * Height];
         System.Buffer.BlockCopy(bytes, 0, values, 0, bytes.Length);
         return values;
+    }
+
+    /// <summary>Reads the colour texture (RGBA8 or BGRA8) into a new CodeBrix.Imaging image (see <see cref="GpuTexture.ToImage" />).</summary>
+    /// <returns>The image; dispose it.</returns>
+    public Image<Rgba32> ToImage()
+    {
+        ThrowIfDisposed();
+        return Color.ToImage();
+    }
+
+    /// <summary>Saves the colour texture as a PNG file.</summary>
+    /// <param name="path">The file to write.</param>
+    public void SaveAsPng(string path)
+    {
+        ThrowIfDisposed();
+        Color.SaveAsPng(path);
+    }
+
+    /// <summary>Saves the colour texture to a file whose format is picked from the extension (see <see cref="GpuTexture.SaveAs(string)" />).</summary>
+    /// <param name="path">The file to write.</param>
+    public void SaveAs(string path)
+    {
+        ThrowIfDisposed();
+        Color.SaveAs(path);
     }
 
     private protected override void ReleaseNative()

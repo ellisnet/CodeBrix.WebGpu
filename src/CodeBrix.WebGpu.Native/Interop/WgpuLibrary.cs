@@ -49,6 +49,15 @@ internal static class WgpuLibrary
         }
     }
 
+    /// <summary>The operating-system handle of the loaded native library, or zero before it has been loaded.</summary>
+    public static IntPtr Handle
+    {
+        get
+        {
+            lock (Gate) return handle;
+        }
+    }
+
     /// <summary>True once the native library has been loaded and its contract version accepted.</summary>
     public static bool IsLoaded
     {

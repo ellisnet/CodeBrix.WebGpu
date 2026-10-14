@@ -21,8 +21,9 @@ internal static unsafe class LiveRunner
     /// <param name="height">The initial window height (logical).</param>
     /// <param name="seconds">Close by itself after this many seconds (0 = only on Escape or close).</param>
     /// <param name="videoDriver">The windowing system to force (x11, wayland, windows, cocoa), or null for the default.</param>
+    /// <param name="options">How to render.</param>
     /// <returns>The process exit code.</returns>
-    public static int Run(string assets, int width, int height, double seconds, string videoDriver)
+    public static int Run(string assets, int width, int height, double seconds, string videoDriver, ViewerOptions options)
     {
         if (!string.IsNullOrEmpty(videoDriver)) SDL_SetHint(SDL_HINT_VIDEO_DRIVER, videoDriver);
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
@@ -50,11 +51,11 @@ internal static unsafe class LiveRunner
             int pixelHeight;
             SDL_GetWindowSizeInPixels(window, &pixelWidth, &pixelHeight);
 
-            using ViewerRenderer renderer = new ViewerRenderer(assets, pixelWidth, pixelHeight);
+            using ViewerRenderer renderer = new ViewerRenderer(assets, pixelWidth, pixelHeight, options);
             using WindowSurface surface = renderer.Context.CreateWindowSurface(source);
             surface.Configure(pixelWidth, pixelHeight, PresentMode.Fifo, TextureFormat.Undefined, withDepth: false);
             Console.WriteLine("Device: " + renderer.Device.Backend + " - " + renderer.Device.AdapterName);
-            Console.WriteLine("Surface: " + surface.Width + "x" + surface.Height + " " + surface.Format + " " + surface.PresentMode + "; target " + renderer.Target);
+            Console.WriteLine("Surface: " + surface.Width + "x" + surface.Height + " " + surface.Format + " " + surface.PresentMode + "; target " + renderer.Target + "; " + (options.Hdr ? "HDR + tone mapping" : "LDR") + ", " + renderer.EnvironmentDescription);
             return Loop(renderer, surface, seconds);
         }
         finally

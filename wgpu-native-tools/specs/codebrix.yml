@@ -164,7 +164,12 @@ structs:
         type: uint32
       - name: instance_api_version
         doc: |
-          The Vulkan API version the instance was created with (`VK_MAKE_API_VERSION` packed).
+          The Vulkan API version the Vulkan loader / driver reported (`vkEnumerateInstanceVersion`,
+          `VK_MAKE_API_VERSION` packed) when wgpu created the instance. The instance itself may have been
+          created with a LOWER version (wgpu caps the version it creates the instance with at 1.3), so this
+          is not the instance's API version: do not use it as Skia's `MaxAPIVersion` (see
+          `VulkanSkiaBridge.SkiaApiVersion` in CodeBrix.WebGpu.Skia), and do not copy it into
+          @ref WGPUCodebrixVulkanAdoptDescriptor `instance_api_version` for another instance.
         type: uint32
       - name: get_instance_proc_addr
         doc: |
@@ -176,10 +181,12 @@ structs:
         doc: |
           The instance extension names wgpu enabled. Static strings; valid for the life of the device.
         type: array<struct.codebrix_name>
+        pointer: immutable
       - name: enabled_device_extensions
         doc: |
           The device extension names wgpu enabled. Static strings; valid for the life of the device.
         type: array<struct.codebrix_name>
+        pointer: immutable
 
   - name: codebrix_vulkan_texture_info
     doc: |
@@ -278,7 +285,11 @@ structs:
         type: uint32
       - name: instance_api_version
         doc: |
-          The Vulkan API version the instance was created with.
+          The Vulkan API version the application created the instance with (`VkApplicationInfo::apiVersion`,
+          `VK_MAKE_API_VERSION` packed); wgpu uses no instance-level functionality above it. The version the
+          Vulkan loader / driver reports (`vkEnumerateInstanceVersion`, and the `instance_api_version` of
+          @ref WGPUCodebrixVulkanDeviceInfo) may be higher than the instance's and is only a best-effort fallback when the
+          real value is unknown.
         type: uint32
       - name: get_instance_proc_addr
         doc: |
@@ -290,14 +301,17 @@ structs:
         doc: |
           The instance extensions the instance was created with.
         type: array<struct.codebrix_name>
+        pointer: immutable
       - name: enabled_device_extensions
         doc: |
           The device extensions the device was created with.
         type: array<struct.codebrix_name>
+        pointer: immutable
       - name: required_features
         doc: |
           The wgpu features the adopted device must expose (`WGPUFeatureName` values). May be empty.
         type: array<enum.feature_name>
+        pointer: immutable
 
   - name: codebrix_d3d12_adopt_descriptor
     doc: |
@@ -325,6 +339,7 @@ structs:
         doc: |
           The wgpu features the adopted device must expose. May be empty.
         type: array<enum.feature_name>
+        pointer: immutable
 
   - name: codebrix_metal_adopt_descriptor
     doc: |
@@ -342,6 +357,7 @@ structs:
         doc: |
           The wgpu features the adopted device must expose. May be empty.
         type: array<enum.feature_name>
+        pointer: immutable
 
 callbacks: []
 

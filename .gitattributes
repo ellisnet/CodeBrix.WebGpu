@@ -34,6 +34,21 @@
 *.flac  binary
 *.ogg   binary
 *.opus  binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.bmp   binary
+*.tga   binary
+*.tif   binary
+*.tiff  binary
+*.glb   binary
+*.bin   binary
+*.hdr   binary
+*.exr   binary
+*.ktx2  binary
+*.ttf   binary
+*.otf   binary
+*.apk   binary
 
 # ------------------------------------------------------------------------------
 # The shipped natives and the licence text beside them.

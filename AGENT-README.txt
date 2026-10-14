@@ -30,8 +30,9 @@ CodeBrix.WebGpu.Native (this package: the raw binding and the natives),
 CodeBrix.WebGpu.Skia (shares one GPU device between WebGPU and a SkiaSharp
 GRContext so WebGPU can draw straight into an SKSurface's texture), and
 CodeBrix.WebGpu.Graphics (a graphics layer: one context object owning or
-sharing the device, tracked resources, pipeline builders, a 2D sprite batch, a
-lit 3D mesh renderer, headless targets and window surfaces). If you want
+sharing the device, tracked resources, pipeline builders, a 2D sprite batch,
+3D meshes and glTF models with physically based shading, animation and
+image-based lighting, headless targets and window surfaces). If you want
 objects with Dispose, convenience overloads or ready-made renderers, those
 belong in the higher packages - not here. CodeBrix.WebGpu.Skia is published
 from this repository as CodeBrix.WebGpu.Skia.MitLicenseForever; its own guide
@@ -39,6 +40,14 @@ is src/CodeBrix.WebGpu.Skia/AGENT-README.txt (also inside that package).
 CodeBrix.WebGpu.Graphics is published as
 CodeBrix.WebGpu.Graphics.MitLicenseForever; its own guide is
 src/CodeBrix.WebGpu.Graphics/AGENT-README.txt (also inside that package).
+
+Besides the generated binding, the package carries two hand-written sharing
+contracts (IWebGpuDeviceSource, IWebGpuTextureTarget - see SHARING
+CONTRACTS) through which the higher packages, or your own libraries, share one
+device and one texture without referencing each other.
+It also ships the C ABI (headers, a generated function table, versioned
+hand-off structs, a crate-free Rust file) for NATIVE MODULES: separately built
+Rust / C / C++ code that works on the very same WebGPU objects.
 
 The binding is generated from the WebGPU C API's machine-readable YAML
 specification, the engine's extension header, and a CodeBrix specification of
@@ -71,6 +80,10 @@ LICENSE-WgpuNative.txt):
     android-arm64, android-x64  libcodebrix_wgpu.so     Vulkan, OpenGL ES
                                 (Android 13+, packed into the APK)
 
+C headers and a Rust file for native modules are in the package under
+include/ (see NATIVE MODULES); NuGet copies nothing from there into an
+application.
+
 `CodeBrixWebGpuNative.BuildInfo.Backends` reports exactly what the loaded
 library was built with. A GPU driver is still needed at run time (a Vulkan
 loader + driver on Linux/Android/Windows-Vulkan, the system's Direct3D 12 or
@@ -87,7 +100,9 @@ KEY NAMESPACES / USINGS
 `CodeBrix.WebGpu.Native` contains the generated types (WebGpu, Constants, the
 enums/bitflags/structs/handles/callback-info structs) and the small
 hand-written layer (CodeBrixWebGpuNative, WgpuString, WgpuUtf8String,
-WgpuBuildInfo, StructLayoutInfo, StructLayoutCheck, WgpuException).
+WgpuBuildInfo, StructLayoutInfo, StructLayoutCheck, WgpuException, the
+sharing contracts and the native-module types CodebrixProcTable,
+CodebrixDeviceHandoff, CodebrixFrameHandoff).
 
 NAME CLASH: the handle type `Buffer` collides with `System.Buffer` when a file
 has `using System;`. Inside your own code either alias it
@@ -119,6 +134,8 @@ LOADING AND DIAGNOSTICS: static class CodeBrixWebGpuNative
     static StructLayoutInfo? NativeStructLayout(string cName); // null if unknown
     static IReadOnlyList<StructLayoutCheck> CheckStructLayouts();
     static void VerifyStructLayouts();            // throws on any mismatch
+    static CodebrixProcTable* GetProcTable();     // function table for native
+                                                  // modules (see NATIVE MODULES)
 
     sealed record WgpuBuildInfo(uint ApiVersion, string WgpuNativeVersion,
         string WgpuCoreVersion, string Backends, string TargetTriple,
@@ -267,7 +284,9 @@ Vulkan (Linux, Android, Windows-on-Vulkan):
 
     Status CodebrixDeviceGetVulkanInfo(Device, CodebrixVulkanDeviceInfo*);
         // VkInstance, VkPhysicalDevice, VkDevice, VkQueue, queue family/index,
-        // instance API version, vkGetInstanceProcAddr, enabled instance and
+        // the LOADER-reported API version (the instance may have been created
+        // with a lower one - never use it as Skia's MaxAPIVersion or as an
+        // adopt descriptor's InstanceApiVersion), vkGetInstanceProcAddr, enabled instance and
         // device extensions (CodebrixName arrays). Owned by wgpu; valid while
         // the device lives.
     Status CodebrixTextureGetVulkanInfo(Texture, CodebrixVulkanTextureInfo*);
@@ -295,6 +314,241 @@ Synchronisation with another renderer on the same device:
 
 Contract/diagnostics: CodebrixGetApiVersion, CodebrixGetBuildInfo,
 CodebrixGetStructLayout (all wrapped by CodeBrixWebGpuNative).
+
+
+SHARING CONTRACTS (hand-written, not generated)
+===============================================
+
+Two small interfaces let libraries that build on this binding share one GPU
+device and one texture WITHOUT referencing each other. The owner implements
+them; a consumer accepts them. CodeBrix.WebGpu.Skia implements both
+(WebGpuSkiaDevice, WebGpuSkiaTarget); CodeBrix.WebGpu.Graphics accepts both
+(GraphicsContext.Wrap(source), GraphicsContext.BeginFrame(target, depth),
+RenderTargetView.From(target, depth), GraphicsContext.WrapTexture(target)),
+and its GraphicsContext is itself an IWebGpuDeviceSource. Implement them for
+your own renderer to plug into the same consumers.
+
+    interface IWebGpuDeviceSource
+        Instance Instance { get; }     // may be null
+        Adapter Adapter { get; }       // may be null
+        Device Device { get; }         // null = no usable device
+        Queue Queue { get; }           // the queue the owner submits to
+        BackendType Backend { get; }   // Undefined without a device
+        bool HasUncapturedErrorHandler { get; }
+            // false = the engine's default handler: any uncaptured error ENDS
+            // THE PROCESS (see LIMITS); check risky work in error scopes
+
+    interface IWebGpuTextureTarget
+        Texture Texture { get; }  TextureView TextureView { get; }
+        TextureFormat Format { get; }  int Width { get; }  int Height { get; }
+        int SampleCount { get; }       // pipelines and depth must match
+        TextureUsage Usage { get; }    // always includes RenderAttachment
+        bool IsInWebGpuPass { get; }
+        CommandEncoder BeginWebGpuPass();  // null encoder = unavailable
+        void EndWebGpuPass();
+
+  Ownership: the source / target owns every handle; reading a property takes
+  NO reference. Handles stay valid until the owner is disposed. A consumer
+  that keeps one longer takes its own reference (*AddRef) and releases only
+  that - then owner and consumer may be disposed in either order.
+
+  The pass protocol: BeginWebGpuPass makes the texture ready for WebGPU and
+  returns an encoder the TARGET owns. Record EVERY command that uses the
+  texture (render into it, copy it, sample it) into that encoder, never
+  finish / submit / release it yourself, and close your own passes before
+  EndWebGpuPass, which finishes and submits it and hands the texture back to
+  the other renderer. Between passes no WebGPU work may touch the texture.
+  One thread for the device and everything shared on it. An implementation
+  should finish the encoder in a validation error scope and, on an error,
+  submit nothing, close the pass and throw (an invalid submission ends the
+  process).
+
+
+NATIVE MODULES (Rust / C / C++ code on the same WebGPU objects)
+===============================================================
+
+A native module is native code built separately (Rust, C, C++), wrapped in
+its own .NET assembly, that works DIRECTLY on the instance, device, queue and
+textures this package - or a library built on it (CodeBrix.WebGpu.Skia, your
+own IWebGpuDeviceSource / IWebGpuTextureTarget) - owns. No copies, no second
+device, no translation: every module call goes into the same codebrix_wgpu
+library .NET calls.
+
+THE ONE-LIBRARY-PER-PROCESS RULE. A WGPUDevice / WGPUTexture handle is a
+pointer into the state of the ONE codebrix_wgpu library that created it; it
+means nothing to any other copy. So the process loads codebrix_wgpu exactly
+once - the one from this package. A module never bundles or statically links
+wgpu (the Rust `wgpu` / `wgpu-core` crates, another wgpu-native build) or a
+second codebrix_wgpu; its .NET package ships only the module binary and
+depends on CodeBrix.WebGpu.Native.MitLicenseForever.
+
+WHAT THE PACKAGE SHIPS FOR MODULES (include/ at the package root, e.g.
+~/.nuget/packages/codebrix.webgpu.native.mitlicenseforever/<version>/include/;
+NuGet copies none of it into applications):
+
+    webgpu.h                 the WebGPU C API (BSD-3-Clause)
+    wgpu.h                   the engine's extensions (MIT); includes webgpu.h
+    codebrix_wgpu.h          the codebrix extras (WGPU_CODEBRIX_API_VERSION)
+    codebrix_wgpu_procs.h    WGPUCodebrixProcTable + the hand-off structs
+                             (generated; _Static_assert-checked layouts)
+    codebrix_wgpu_procs.rs   the whole C ABI for Rust with NO crates: every
+                             constant, handle, enum, bitflag, callback and
+                             #[repr(C)] struct (C member names), the table,
+                             the hand-off structs, layout asserts, and behind
+                             `--cfg codebrix_wgpu_direct` an extern block of
+                             every function (module `direct`)
+    LICENSE-WgpuNative.txt   the licences of webgpu.h and wgpu.h
+  The libraries to link against are the package's runtimes/<rid>/native/ files.
+  Rust: #[allow(non_camel_case_types, non_snake_case, non_upper_case_globals,
+  dead_code)] #[path = "codebrix_wgpu_procs.rs"] mod wgpu_ffi;
+
+WHICH ROUTE
+  1. DIRECT DYNAMIC LINKING (the usual choice). The module declares the
+     functions of the headers (C: #include "codebrix_wgpu.h"; Rust: the
+     `direct` module of codebrix_wgpu_procs.rs) and links to codebrix_wgpu.
+     Zero extra hops. Needs the LOAD-ORDER RULE below.
+  2. FUNCTION TABLE. CodeBrixWebGpuNative.GetProcTable() hands the module a
+     WGPUCodebrixProcTable: one pointer per exported function (every function
+     of webgpu.h, wgpu.h and codebrix_wgpu.h, in ordinal order of the C symbol)
+     filled from the library .NET loaded. The module links to nothing, so it
+     has no load-order or library-path dependency (plug-in hosts, modules
+     loaded before or apart from .NET's own probing). Each call is one
+     indirect call - the cost of a LibraryImport call.
+  3. THE IDIOMATIC `wgpu` CRATE, for code that cannot use the C API. It has
+     its own wgpu state, so it cannot take these handles - but it can adopt
+     the SAME Vulkan / Metal / Direct3D 12 device through wgpu's from-hal
+     APIs, from the codebrix extras (CodebrixDeviceGetVulkanInfo,
+     CodebrixTextureGetVulkanInfo, DeviceGetNativeMetalDevice,
+     TextureGetNativeMetalTexture, CodebrixDeviceGetD3d12Info,
+     CodebrixTextureGetD3d12Info), and must keep to the same pass protocol
+     (one thread, submissions serialised on one queue, texture states agreed
+     with CodebrixCommandEncoderTransitionTexture). The one-library rule still
+     applies to the codebrix_wgpu library itself (never a second copy).
+
+ROUTE 1 - LINKING PER OPERATING SYSTEM
+  Linux, Android   Link against the package's libcodebrix_wgpu.so for the
+                   target (C: -L<pkg>/runtimes/<rid>/native -lcodebrix_wgpu;
+                   Rust build.rs: cargo:rustc-link-search=native=<that dir>
+                   and cargo:rustc-cfg=codebrix_wgpu_direct - the `direct`
+                   module's #[link] names codebrix_wgpu). Every packaged .so has the SONAME
+                   libcodebrix_wgpu.so, so the module records DT_NEEDED
+                   libcodebrix_wgpu.so and the dynamic loader reuses the
+                   library .NET already loaded - no rpath or LD_LIBRARY_PATH.
+                   Android: the APK carries this package's one
+                   libcodebrix_wgpu.so; the module's .so sits beside it.
+  macOS            Link against the package's libcodebrix_wgpu.dylib. Both
+                   dylibs have the install name @rpath/libcodebrix_wgpu.dylib,
+                   which the module records; dyld reuses the loaded image with
+                   that install name. Never let the module's rpath resolve to
+                   a different copy of the file.
+  Windows          Rust: #[link(name = "codebrix_wgpu", kind = "raw-dylib")]
+                   (the `direct` module does this) - no import library is
+                   needed and none is shipped. C / C++: generate an import
+                   library from a .def of the functions you call, or use the
+                   function table. The loader reuses the already-loaded
+                   codebrix_wgpu.dll by its base name; never put another
+                   codebrix_wgpu.dll beside the module.
+
+THE LOAD-ORDER RULE (route 1). Call CodeBrixWebGpuNative.EnsureLoaded()
+BEFORE the module's native library is loaded - in the module wrapper's static
+constructor, which runs before its first LibraryImport call loads the module:
+
+    public static unsafe partial class MyModule
+    {
+        static MyModule() => CodeBrixWebGpuNative.EnsureLoaded(); // codebrix_wgpu first
+
+        [LibraryImport("my_module")] private static partial int my_module_attach(CodebrixDeviceHandoff* device);
+        [LibraryImport("my_module")] private static partial void my_module_frame(CodebrixFrameHandoff* frame);
+
+        public static int Attach(CodebrixDeviceHandoff* device) => my_module_attach(device);
+        public static void Frame(CodebrixFrameHandoff* frame) => my_module_frame(frame);
+    }
+
+  Loaded first, the module would make the loader search for codebrix_wgpu on
+  its own: the load fails, or - worse - a second copy is loaded and nothing
+  works.
+
+API VERSION CHECK. Before using anything the module compares
+wgpuCodebrixGetApiVersion() (route 1) or the hand-off's / table's apiVersion
+with the WGPU_CODEBRIX_API_VERSION it was built against and refuses a
+mismatch. Through the table also: functionCount ==
+WGPU_CODEBRIX_PROC_TABLE_FUNCTION_COUNT and signatureHash ==
+WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH (FNV-1a 64 of every entry's C
+signature - any change to the function set or a signature changes it), and
+size >= sizeof(WGPUCodebrixProcTable). For a hand-off struct: version ==
+WGPU_CODEBRIX_*_HANDOFF_VERSION and size >= sizeof the struct. Build the
+module against the headers of the SAME package version it ships with.
+
+PASSING HANDLES. Either pass raw handle values (Device.Handle and friends -
+IntPtr / nint arguments, C WGPUDevice, Rust WGPUDevice) or the two hand-off
+structs, one pointer each, filled into memory you provide (no per-frame
+allocation):
+
+    partial struct CodebrixDeviceHandoff   // C WGPUCodebrixDeviceHandoff, 64 bytes
+        uint Size, Version, ApiVersion; BackendType Backend;
+        uint Flags;       // FlagUncapturedErrorHandler (1): without it any
+                          // uncaptured error ENDS THE PROCESS - use error scopes
+        uint Reserved; CodebrixProcTable* Procs;
+        Instance Instance; Adapter Adapter; Device Device; Queue Queue;
+        const uint CurrentVersion, FlagUncapturedErrorHandler;
+        static void Fill(IWebGpuDeviceSource, CodebrixDeviceHandoff*);  (+ ref overload)
+        static CodebrixDeviceHandoff From(IWebGpuDeviceSource);
+    partial struct CodebrixFrameHandoff    // C WGPUCodebrixFrameHandoff, 56 bytes
+        uint Size, Version; TextureFormat Format; uint Width, Height,
+        SampleCount; TextureUsage Usage; Texture Texture;
+        TextureView TextureView; CommandEncoder CommandEncoder; // null = no pass
+        const uint CurrentVersion;
+        static void Fill(IWebGpuTextureTarget, CommandEncoder, CodebrixFrameHandoff*);  (+ ref overload)
+        static CodebrixFrameHandoff From(IWebGpuTextureTarget, CommandEncoder);
+        static CommandEncoder BeginWebGpuPass(IWebGpuTextureTarget, CodebrixFrameHandoff*);
+            // opens the target's pass and fills the struct in one call
+    partial struct CodebrixProcTable       // C WGPUCodebrixProcTable
+        uint Size, ApiVersion, FunctionCount, Reserved; ulong SignatureHash;
+        delegate* unmanaged[Cdecl]<...> <one field per function, named like
+            the WebGpu method: DeviceCreateBuffer, QueueSubmit, ...>;
+        const uint EntryCount; const ulong ExpectedSignatureHash; const int HeaderSize;
+        static IReadOnlyList<string> Symbols;   // C symbols, table order
+    static CodebrixProcTable* CodeBrixWebGpuNative.GetProcTable();
+        // built once from the exports of the library .NET loaded (never a
+        // second copy), process-lifetime native memory (never free it),
+        // thread-safe
+
+  Ownership: every handle is BORROWED. Device-level handles stay valid while
+  the source keeps its device (until it is disposed); the frame's texture,
+  view and encoder only for that pass. A module that keeps a handle longer
+  calls its *AddRef (wgpuDeviceAddRef, wgpuTextureAddRef, ...) and later
+  *Release - then owner and module may be disposed in either order.
+
+  Per frame (no allocation):
+
+    CodebrixFrameHandoff* frame = ...;   // allocated once (NativeMemory.Alloc)
+    CommandEncoder encoder = CodebrixFrameHandoff.BeginWebGpuPass(target, frame);
+    if (!encoder.IsNull)
+    {
+        MyModule.Frame(frame);          // the module records into frame->commandEncoder
+        target.EndWebGpuPass();         // the target finishes + submits
+    }
+
+PASS AND THREADING RULES (both routes)
+  * Record work that touches the shared texture ONLY between BeginWebGpuPass
+    and EndWebGpuPass, ONLY into the encoder of that pass
+    (frame->commandEncoder), on the thread that opened the pass - the thread
+    that uses the device.
+  * Close every render / compute pass you begin before returning. Never
+    finish, submit or release the pass encoder (you may AddRef/Release your
+    own reference).
+  * Your own resources (buffers, textures, pipelines on the hand-off's
+    device) may be created and written (wgpuQueueWriteBuffer) on that same
+    thread at any time; never touch the shared texture outside a pass.
+  * Validation: errors in recorded commands surface when the target finishes
+    the encoder at EndWebGpuPass (WebGpuSkiaTarget then submits nothing and
+    throws WebGpuSkiaValidationException). Errors no scope catches go to the
+    device's uncaptured-error handler - or END THE PROCESS when the hand-off
+    has no FlagUncapturedErrorHandler. Wrap object creation in
+    wgpuDevicePushErrorScope / wgpuDevicePopErrorScope.
+  * The calls under LIMITS end the process from a module exactly as from C#:
+    the notes on the entries of codebrix_wgpu_procs.h / .rs and of
+    CodebrixProcTable mark them ("ABORTS: ...").
 
 
 COMPLETE EXAMPLES
@@ -488,14 +742,15 @@ PERFORMANCE TIPS
     loop rather than blocking with wait = 1.
 
 
-COMMON PITFALLS TO AVOID
-========================
+LIMITS
+======
 
-  * NOT CALLING EnsureLoaded. Imports work without it, but only EnsureLoaded
-    checks the contract version and every struct layout.
-  * UNIMPLEMENTED FUNCTIONS ABORT THE PROCESS. The engine release this package
-    wraps exports, but does not implement, these functions; calling one ends
-    the process (it cannot be caught):
+What the engine this package ships cannot do, and what to do instead. "Ends
+the process" means a native abort: no exception, no error callback, nothing
+an error scope can catch.
+
+  * UNIMPLEMENTED FUNCTIONS end the process when called (they are exported
+    only so the binding matches the C API):
       GetProcAddress, InstanceWaitAny, DeviceCreateComputePipelineAsync,
       DeviceCreateRenderPipelineAsync, DeviceGetAdapterInfo,
       DeviceGetLostFuture, BufferGetMapState, BufferReadMappedRange,
@@ -504,26 +759,68 @@ COMMON PITFALLS TO AVOID
       SupportedWGSLLanguageFeaturesFreeMembers, GetInstanceFeatures,
       HasInstanceFeature, SupportedInstanceFeaturesFreeMembers,
       TextureGetTextureBindingViewDimension, ExternalTextureAddRef,
-      ExternalTextureRelease, and every *SetLabel function (set labels through
-      the descriptors' Label instead).
-    Use AdapterGetInfo (not DeviceGetAdapterInfo), synchronous pipeline
-    creation, BufferGetConstMappedRange / BufferGetMappedRange, and the
-    process-events callback pattern.
-  * CallbackMode.WaitAnyOnly never fires (InstanceWaitAny is not available).
-    Use AllowProcessEvents + InstanceProcessEvents / DevicePoll, or
-    AllowSpontaneous.
+      ExternalTextureRelease, ExternalTextureSetLabel, and every *SetLabel
+      function.
+    Instead: labels through the descriptors' Label; AdapterGetInfo (not
+    DeviceGetAdapterInfo); synchronous pipeline creation; BufferGetMappedRange
+    / BufferGetConstMappedRange and track the map state yourself; shader
+    diagnostics from an error scope around DeviceCreateShaderModule;
+    AllowProcessEvents / AllowSpontaneous callbacks pumped with
+    InstanceProcessEvents / DevicePoll (CallbackMode.WaitAnyOnly callbacks never run).
+  * ERRORS THAT END THE PROCESS instead of reaching the error callback or an
+    error scope - validate before calling:
+      - QueueSubmit / QueueSubmitForIndex with an invalid command buffer
+        (one whose CommandEncoderFinish reported a validation error - finish
+        inside an error scope and do not submit on error), or with work that
+        uses a buffer while it is mapped, or a destroyed buffer or texture
+        (finish such work first, then unmap / destroy);
+      - RenderBundleEncoderFinish on a bundle whose commands fail validation;
+      - DeviceCreateRenderBundleEncoder with impossible colour / depth
+        formats or sample counts;
+      - BufferGetMappedRange / BufferGetConstMappedRange on a buffer that is
+        not mapped (or mapped for the other mode), or with an offset / size
+        that is misaligned (offset multiple of 8, size multiple of 4) or
+        outside the mapped range;
+      - DevicePoll when the wait fails (a submission index that is not from
+        this device's queue, a lost device); InstanceProcessEvents likewise;
+      - InstanceCreateSurface with handles that do not belong together,
+        SurfaceConfigure with a configuration the surface's capabilities do
+        not allow, SurfaceGetCurrentTexture on an unconfigured surface.
+  * QuerySetDestroy followed by the normal QuerySetRelease ends the process
+    (the set is dropped twice). Never call QuerySetDestroy - release the set.
+  * The DEFAULT UNCAPTURED-ERROR HANDLER ends the process. A device requested
+    without DeviceDescriptor.UncapturedErrorCallbackInfo.Callback - and every
+    device made by CodebrixInstanceAdoptVulkanDevice / AdoptMetalDevice,
+    which cannot take one - aborts on the first validation error no error
+    scope catches. Always set the callback on devices you request; on adopted
+    devices, wrap object creation and other risky calls in error scopes.
+  * Experimental native features (NativeFeature.RayQuery,
+    NativeFeature.CooperativeMatrix) are never enabled by the engine: a
+    device request that requires one fails, even when the adapter lists it.
+  * Device loss is not delivered through DeviceLostCallbackInfo: using a
+    destroyed device reports a Validation error through the uncaptured-error
+    callback instead.
+  * DeviceCreateShaderModuleSpirV (passthrough) needs a feature this engine
+    does not expose; use ShaderModuleDescriptor + ShaderSourceSPIRV.
+  * Debug groups and markers recorded into render bundles are dropped;
+    QueueGetNativeMetalCommandQueue always returns null;
+    CodebrixInstanceAdoptD3d12Device always returns Status.Error (create the
+    device here and share it the other way with CodebrixDeviceGetD3d12Info).
+
+
+COMMON PITFALLS TO AVOID
+========================
+
+  * NOT CALLING EnsureLoaded. Imports work without it, but only EnsureLoaded
+    checks the contract version and every struct layout.
+  * CALLING A FUNCTION THE ENGINE DOES NOT IMPLEMENT, or relying on an
+    error scope for the errors listed under LIMITS: both end the process.
+    Read LIMITS before using a function for the first time.
   * Fatal native panics also abort the process: passing a null handle where a
     valid one is required ("invalid device"), or an invalid enum value, is not
     a recoverable error. Check IsNull on every handle you create.
   * QueueWriteBuffer / QueueWriteTexture are staged until the next QueueSubmit.
     Mapping the buffer without a submit in between reads the old contents.
-  * Device loss is not delivered through DeviceLostCallbackInfo by this engine
-    release: using a destroyed device reports a Validation error through the
-    uncaptured-error callback instead.
-  * DeviceCreateShaderModuleSpirV is SPIR-V PASSTHROUGH and needs a
-    passthrough feature this release does not expose; it reports a validation
-    error. Create SPIR-V modules through ShaderModuleDescriptor + a chained
-    ShaderSourceSPIRV instead (validated and translated by the engine).
   * Struct and string memory must outlive the call: never pass the address of
     a field of a managed object without `fixed`; keep chained structs alive.
   * StringView length is in BYTES, not chars. Use FromPinned with the UTF-8
@@ -552,7 +849,7 @@ WHAT THIS PACKAGE DOES NOT DO
     (WGSL, SPIR-V, GLSL through ShaderSourceGLSL).
   * No SkiaSharp integration (that is CodeBrix.WebGpu.Skia - use it rather
     than wiring the codebrix extras to SkiaSharp yourself).
-  * No support for platforms other than the nine runtime identifiers listed in
+  * No support for platforms other than the runtime identifiers listed in
     INSTALLATION.
 
 
@@ -568,6 +865,10 @@ WORKING EXAMPLES ON GITHUB
   The codebrix extras (Vulkan info, texture info, transitions, adopting a
   device into a second instance):
     https://github.com/ellisnet/CodeBrix.WebGpu/blob/main/tests/CodeBrix.WebGpu.Native.Tests/CodebrixExtrasTests.cs
+  Native modules (function table vs LibraryImport, hand-offs, a "module"
+  rendering into a target through the table):
+    https://github.com/ellisnet/CodeBrix.WebGpu/blob/main/tests/CodeBrix.WebGpu.Native.Tests/CodebrixProcTableTests.cs
+    https://github.com/ellisnet/CodeBrix.WebGpu/blob/main/tests/CodeBrix.WebGpu.Native.Tests/CodebrixHandoffTests.cs
   String views:
     https://github.com/ellisnet/CodeBrix.WebGpu/blob/main/tests/CodeBrix.WebGpu.Native.Tests/WgpuStringTests.cs
 
@@ -594,6 +895,11 @@ QUICK REFERENCE CARD
   Backend         WebGpu.CodebrixDeviceGetBackend(device)
   Vulkan objects  WebGpu.CodebrixDeviceGetVulkanInfo(device, &info)
   Transition      WebGpu.CodebrixCommandEncoderTransitionTexture(enc, tex, state)
+  Share           IWebGpuDeviceSource / IWebGpuTextureTarget (SHARING CONTRACTS)
+  Native module   include/*.h + codebrix_wgpu_procs.rs; EnsureLoaded() first
+                  CodebrixDeviceHandoff.Fill(source, p) / GetProcTable()
+                  CodebrixFrameHandoff.BeginWebGpuPass(target, p) ... End
+  Avoid           everything under LIMITS (process-ending calls)
   Constants       Constants.WholeSize, Constants.Strlen, Constants.DepthSliceUndefined
   Free            *Release for handles, *FreeMembers for API-filled structs
 

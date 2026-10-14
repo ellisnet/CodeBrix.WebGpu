@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using CodeBrix.WebGpu.Native.Interop;
 
 namespace CodeBrix.WebGpu.Native;
@@ -14,6 +16,7 @@ public static unsafe class CodeBrixWebGpuNative
 {
     private static readonly object Gate = new object();
     private static bool layoutsVerified;
+    private static nint procTableAddress;
 
     /// <summary>
     /// Loads the native library (if it is not loaded yet), refuses it unless its contract version is the
@@ -88,6 +91,58 @@ public static unsafe class CodeBrixWebGpuNative
                 WgpuString.ToManaged(info.Backends),
                 WgpuString.ToManaged(info.TargetTriple),
                 WgpuString.ToManaged(info.Profile));
+        }
+    }
+
+    /// <summary>
+    /// The function table of the loaded native library, for native modules that do not link to it themselves: one
+    /// function pointer per exported function (<see cref="CodebrixProcTable.Symbols" /> order) after a header with
+    /// the size, contract version, entry count and signature hash. Built once, from the exports of the SAME library
+    /// this binding loaded (never a second copy), in native memory that lives as long as the process - never free
+    /// it. Thread-safe; cheap after the first call.
+    /// </summary>
+    /// <returns>The table.</returns>
+    /// <exception cref="WgpuException">
+    /// The library cannot be loaded, speaks another contract version, disagrees about a struct layout or lacks an
+    /// export the table needs (the message lists them).
+    /// </exception>
+    public static CodebrixProcTable* GetProcTable()
+    {
+        nint existing = Volatile.Read(ref procTableAddress);
+        if (existing != 0) return (CodebrixProcTable*)existing;
+
+        EnsureLoaded();
+        lock (Gate)
+        {
+            if (procTableAddress != 0) return (CodebrixProcTable*)procTableAddress;
+
+            IntPtr library = WgpuLibrary.Handle;
+            IReadOnlyList<string> symbols = CodebrixProcTable.Symbols;
+            CodebrixProcTable* table = (CodebrixProcTable*)NativeMemory.AlignedAlloc((nuint)sizeof(CodebrixProcTable), 16);
+            NativeMemory.Clear(table, (nuint)sizeof(CodebrixProcTable));
+            nint* entries = (nint*)((byte*)table + CodebrixProcTable.HeaderSize);
+            List<string> missing = null;
+            for (int index = 0; index < symbols.Count; index++)
+            {
+                if (NativeLibrary.TryGetExport(library, symbols[index], out IntPtr address)) entries[index] = address;
+                else (missing ??= new List<string>()).Add(symbols[index]);
+            }
+
+            if (missing != null)
+            {
+                NativeMemory.AlignedFree(table);
+                throw new WgpuException(
+                    "The native codebrix_wgpu library at '" + LoadedPath + "' does not export " + missing.Count
+                    + " function(s) the function table needs: " + string.Join(", ", missing));
+            }
+
+            table->Size = (uint)sizeof(CodebrixProcTable);
+            table->ApiVersion = WebGpu.CodebrixGetApiVersion();
+            table->FunctionCount = CodebrixProcTable.EntryCount;
+            table->Reserved = 0;
+            table->SignatureHash = CodebrixProcTable.ExpectedSignatureHash;
+            Volatile.Write(ref procTableAddress, (nint)table);
+            return table;
         }
     }
 

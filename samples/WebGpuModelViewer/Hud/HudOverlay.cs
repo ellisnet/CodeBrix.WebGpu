@@ -72,9 +72,10 @@ internal sealed class HudOverlay
     /// <param name="height">The target height.</param>
     /// <param name="stats">The frame statistics.</param>
     /// <param name="scene">The scene.</param>
-    /// <param name="meshDrawCalls">Draw calls of the last 3D pass.</param>
+    /// <param name="modelInstances">Model primitive instances the model renderer drew last frame.</param>
+    /// <param name="modelDrawCalls">Draw calls the model renderer issued last frame.</param>
     /// <param name="cameraYaw">The camera's orbit angle (for the mini map).</param>
-    public void Draw(SpriteBatch batch, int width, int height, FrameStats stats, ViewerScene scene, int meshDrawCalls, float cameraYaw)
+    public void Draw(SpriteBatch batch, int width, int height, FrameStats stats, ViewerScene scene, int modelInstances, int modelDrawCalls, float cameraYaw)
     {
         CultureInfo invariant = CultureInfo.InvariantCulture;
         float average = stats.AverageMilliseconds;
@@ -84,8 +85,8 @@ internal sealed class HudOverlay
             string.Format(invariant, "frame {0,6:F2} ms  avg {1,6:F2} ms", stats.LastMilliseconds, average),
             string.Format(invariant, "{0,4:F0} fps   frame #{1}", average > 0 ? 1000f / average : 0, stats.FrameCount),
             string.Format(invariant, "models {0} placed, {1} files", scene.ActorCount, scene.ModelFileCount),
-            string.Format(invariant, "meshes {0}  draw calls {1}", scene.LastDrawableCount, meshDrawCalls),
-            string.Format(invariant, "triangles {0:N0}", scene.LastTriangleCount),
+            string.Format(invariant, "instances {0}  draw calls {1}", modelInstances, modelDrawCalls),
+            string.Format(invariant, "triangles {0:N0}", scene.TriangleCount),
         };
 
         float panelWidth = 0;

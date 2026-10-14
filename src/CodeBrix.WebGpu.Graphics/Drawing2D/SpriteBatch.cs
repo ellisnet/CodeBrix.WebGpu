@@ -176,6 +176,31 @@ public sealed class SpriteBatch : GraphicsResource
         AddQuad(texture, a, b, c, d, uv0, new Vector2(uv1.X, uv0.Y), uv1, new Vector2(uv0.X, uv1.Y), tint.ToPackedRgba(), 1f);
     }
 
+    /// <summary>Draws the frame of an animated texture shown after <paramref name="elapsed" /> into a rectangle.</summary>
+    /// <param name="texture">The animated texture.</param>
+    /// <param name="elapsed">The playback time (see <see cref="AnimatedTexture.GetFrameIndex" />).</param>
+    /// <param name="destination">The rectangle, in pixels.</param>
+    /// <param name="tint">Multiplies the texture.</param>
+    public void Draw(AnimatedTexture texture, TimeSpan elapsed, RectangleF destination, Color4 tint)
+    {
+        ArgumentNullException.ThrowIfNull(texture);
+        Draw(texture.GetFrameTexture(elapsed), destination, tint);
+    }
+
+    /// <summary>Draws the current frame of an animated texture positioned, rotated and scaled about an origin.</summary>
+    /// <param name="texture">The animated texture.</param>
+    /// <param name="elapsed">The playback time.</param>
+    /// <param name="position">Where the origin lands, in pixels.</param>
+    /// <param name="tint">Multiplies the texture.</param>
+    /// <param name="rotation">Clockwise rotation in radians (y points down).</param>
+    /// <param name="origin">The pivot, in texels from the frame's top-left corner.</param>
+    /// <param name="scale">The scale.</param>
+    public void Draw(AnimatedTexture texture, TimeSpan elapsed, Vector2 position, Color4 tint, float rotation, Vector2 origin, Vector2 scale)
+    {
+        ArgumentNullException.ThrowIfNull(texture);
+        Draw(texture.GetFrameTexture(elapsed), position, new RectangleF(0, 0, texture.Width, texture.Height), tint, rotation, origin, scale);
+    }
+
     /// <summary>Fills a rectangle.</summary>
     /// <param name="rectangle">The rectangle, in pixels.</param>
     /// <param name="color">The colour.</param>

@@ -21,8 +21,10 @@ namespace CodeBrix.WebGpu.Skia;
 /// <remarks>
 /// Not thread-safe: use the device, its <see cref="GrContext" /> and its targets from one thread (WebGPU and
 /// Skia submit to the same native queue). Dispose every <see cref="WebGpuSkiaTarget" /> before the device.
+/// The device is an <see cref="IWebGpuDeviceSource" />: any library built on CodeBrix.WebGpu.Native that accepts
+/// one can share it (it takes its own references, so dispose order between the two does not matter).
 /// </remarks>
-public sealed unsafe class WebGpuSkiaDevice : IDisposable
+public sealed unsafe class WebGpuSkiaDevice : IDisposable, IWebGpuDeviceSource
 {
     private readonly ConcurrentQueue<string> uncapturedErrors = new ConcurrentQueue<string>();
     private readonly List<IntPtr> adoptAllocations = new List<IntPtr>();
@@ -71,16 +73,16 @@ public sealed unsafe class WebGpuSkiaDevice : IDisposable
     /// </summary>
     public bool SharesQueueWithSkia { get; private set; }
 
-    /// <summary>The WebGPU instance. Owned by this object.</summary>
-    public Instance Instance { get; }
+    /// <summary>The WebGPU instance. Owned by this object. Null after <see cref="Dispose" />.</summary>
+    public Instance Instance { get; private set; }
 
-    /// <summary>The WebGPU adapter. Owned by this object.</summary>
+    /// <summary>The WebGPU adapter. Owned by this object. Null after <see cref="Dispose" />.</summary>
     public Adapter Adapter { get; private set; }
 
-    /// <summary>The WebGPU device: create pipelines, buffers and textures on it as usual. Owned by this object.</summary>
+    /// <summary>The WebGPU device: create pipelines, buffers and textures on it as usual. Owned by this object. Null after <see cref="Dispose" />.</summary>
     public Device Device { get; private set; }
 
-    /// <summary>The device's queue. Owned by this object.</summary>
+    /// <summary>The device's queue. Owned by this object. Null after <see cref="Dispose" />.</summary>
     public Queue Queue { get; private set; }
 
     /// <summary>
@@ -91,6 +93,15 @@ public sealed unsafe class WebGpuSkiaDevice : IDisposable
 
     /// <summary>Why <see cref="CreateGrContext" /> returned null, or null.</summary>
     public string GrContextReason { get; private set; }
+
+    /// <summary>The device's backend as WebGPU names it (<see cref="Native.BackendType.Undefined" /> when unavailable).</summary>
+    Native.BackendType IWebGpuDeviceSource.Backend => IsAvailable ? BackendType(Backend) : Native.BackendType.Undefined;
+
+    /// <summary>
+    /// True for a device the library created (<see cref="WebGpuSkiaDeviceRoute.Owned" />: its uncaptured-error
+    /// callback feeds <see cref="TakeUncapturedErrors" />); false for an adopted device, which has none.
+    /// </summary>
+    bool IWebGpuDeviceSource.HasUncapturedErrorHandler => IsAvailable && Route == WebGpuSkiaDeviceRoute.Owned;
 
     /// <summary>
     /// Creates a WebGPU device on the platform's backend (Direct3D 12 on Windows, then Vulkan; Metal on macOS;
@@ -370,6 +381,7 @@ public sealed unsafe class WebGpuSkiaDevice : IDisposable
         Queue = Queue.Null;
         Device = Device.Null;
         Adapter = Adapter.Null;
+        Instance = Instance.Null;
         foreach (IntPtr allocation in adoptAllocations) NativeMemory.Free((void*)allocation);
         adoptAllocations.Clear();
         if (self.IsAllocated) self.Free();

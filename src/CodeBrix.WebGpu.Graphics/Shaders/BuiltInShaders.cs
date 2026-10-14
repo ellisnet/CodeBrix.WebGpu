@@ -44,7 +44,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 }
 ";
 
-    /// <summary>The lit mesh renderer: Blinn-Phong with one directional light and an ambient term, per-instance model and normal matrices.</summary>
+    /// <summary>The lit mesh renderer: Blinn-Phong with one directional light and an ambient term, per-instance model and normal matrices, a texture-coordinate transform and alpha modes (keep, opaque, mask).</summary>
     public const string LitMesh = @"
 struct FrameUniforms {
     view_projection: mat4x4<f32>,
@@ -57,6 +57,8 @@ struct FrameUniforms {
 struct MaterialUniforms {
     base_color: vec4<f32>,
     params: vec4<f32>,
+    uv_row0: vec4<f32>,
+    uv_row1: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: FrameUniforms;
@@ -102,7 +104,17 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(input: VertexOutput, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
-    let albedo = material.base_color * input.color * textureSample(base_texture, base_sampler, input.uv);
+    let uv = vec3<f32>(input.uv, 1.0);
+    let transformed = vec2<f32>(dot(material.uv_row0.xyz, uv), dot(material.uv_row1.xyz, uv));
+    var albedo = material.base_color * input.color * textureSample(base_texture, base_sampler, transformed);
+    if (material.params.w > 0.0) {
+        if (albedo.a < material.params.w) {
+            discard;
+        }
+        albedo.a = 1.0;
+    } else if (material.params.w < 0.0) {
+        albedo.a = 1.0;
+    }
     var n = normalize(input.normal);
     if (!front_facing) {
         n = -n;

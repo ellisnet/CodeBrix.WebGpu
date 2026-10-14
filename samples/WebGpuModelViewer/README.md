@@ -1,12 +1,16 @@
 # WebGpuModelViewer
 
-A small CodeBrix.WebGpu sample that shows animated 3D models: eight Cube Pets animals walk a ring, idle, eat and dance around a treasure chest that opens and closes, while the Avian flies circles overhead, in a little camp of trees, rocks, barrels and a fence. The camera orbits the scene under a directional light.
+A small CodeBrix.WebGpu sample that shows animated 3D models: eight Cube Pets animals walk a ring or idle, dance, eat and cheer (cross-fading from one clip to the next) around a treasure chest that opens and closes, while the Avian flies circles overhead, in a little camp of trees, rocks, barrels and a fence. The camera orbits the scene under a late-morning sky.
 
 Everything on screen is drawn by the CodeBrix.WebGpu packages on ONE GPU device:
 
-* **CodeBrix.WebGpu.Graphics** renders the 3D scene (a lit mesh renderer with a depth buffer) and the 2D HUD (a sprite batch: the statistics panel with text from a glyph atlas, the frame-time graph and the mini map).
-* **CodeBrix.WebGpu.Skia** creates the device and a SkiaSharp context on it; the frame is rendered into the texture of a zero-copy `WebGpuSkiaTarget`, and SkiaSharp then draws the rounded "Cube Pets party" panel directly onto the same pixels.
-* The glTF models are loaded with **CodeBrix.Graphics3D.Gltf2** (its runtime scene templates animate the node hierarchies) and converted once into Graphics meshes and materials; their colour-map textures are decoded with SkiaSharp.
+* **CodeBrix.WebGpu.Skia** creates the device and a SkiaSharp context on it. Each frame renders into the texture of a zero-copy `WebGpuSkiaTarget`, and SkiaSharp then draws the rounded "Cube Pets party" panel directly onto the same pixels.
+* **CodeBrix.WebGpu.Graphics** wraps that device in one call (`GraphicsContext.Wrap(skiaDevice)`) and records the whole frame into the Skia target with one `BeginFrame(target)`:
+  * the glTF models are loaded once with `LoadModel` (the kits' shared colour maps decoded and uploaded once through a `ModelTextureCache`); every actor is a `ModelInstance` with its own `AnimationPlayer` (`Play`, `CrossFade`, `AnimationPlayer.UpdateAll`), and the physically based `ModelRenderer` draws them all - one instanced draw per model part for every instance of it;
+  * the light is a sun (the key light) plus a procedural sky baked once into an environment map (`CreateProceduralSky`), which gives the models their ambient light and reflections and is drawn behind them by the `SkyboxRenderer`;
+  * the scene renders into a linear RGBA16Float texture that the `ToneMapper` (Khronos PBR Neutral) writes into the Skia target, so the kits' flat colours stay true and highlights roll off softly;
+  * the 2D HUD is a sprite batch: the statistics panel with text from a glyph atlas, the frame-time graph and the mini map.
+* The ground is a one-quad glTF model built in memory with **CodeBrix.Graphics3D.Gltf2**.
 * The live window comes from **CodeBrix.Sdl3**; the sample hands its native handles (X11, Wayland, Win32 or a Metal layer) to `GraphicsContext.CreateWindowSurface`.
 
 The sample is not packed and is not part of any NuGet package.
@@ -29,6 +33,16 @@ dotnet run --project samples/WebGpuModelViewer -- --headless frames --frames 24 
 ```
 
 Headless frames are rendered at a fixed 30 frames per second of scene time, so the same command always produces the same pictures.
+
+Rendering switches (either mode):
+
+```
+dotnet run --project samples/WebGpuModelViewer -- --ldr                          # no float scene texture or tone mapping: models and sky straight into the 8-bit target
+dotnet run --project samples/WebGpuModelViewer -- --no-skybox                    # a flat background colour instead of the sky
+dotnet run --project samples/WebGpuModelViewer -- --environment panorama.hdr     # light the scene with a Radiance .hdr (or PNG/JPEG) panorama instead of the procedural sky
+```
+
+No panorama ships with the sample; any equirectangular `.hdr` works, for example the CC0 HDRIs from Poly Haven (polyhaven.com). With a panorama the sun light is switched off, because the panorama carries its own.
 
 The sample runs wherever the CodeBrix.WebGpu packages run: Vulkan on Linux, Direct3D 12 (or Vulkan) on Windows, Metal on macOS. On Linux the live window uses X11 or Wayland, whichever the desktop session offers (`--video-driver x11` or `--video-driver wayland` to choose).
 

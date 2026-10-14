@@ -62,7 +62,7 @@ internal static unsafe class AndroidRunner
             Stopwatch setup = Stopwatch.StartNew();
             using ViewerRenderer renderer = new ViewerRenderer(assets, 960, 540);
             ViewerLog.Info("Device: " + renderer.Device.Backend + " - " + (renderer.Device.AdapterName ?? string.Empty).Replace('\n', ' '));
-            ViewerLog.Info(string.Format(CultureInfo.InvariantCulture, "Loaded {0} model files ({1} placed, {2} textures, {3} materials) in {4:F0} ms", renderer.Scene.ModelFileCount, renderer.Scene.ActorCount, renderer.Scene.Cache.TextureCount, renderer.Scene.Cache.MaterialCount, setup.Elapsed.TotalMilliseconds));
+            ViewerLog.Info(string.Format(CultureInfo.InvariantCulture, "Loaded {0} model files ({1} placed, {2} shared textures, {3} materials) and the environment in {4:F0} ms; {5}, lit by the {6}", renderer.Scene.ModelFileCount, renderer.Scene.ActorCount, renderer.Scene.TextureCache.Count, renderer.Scene.MaterialCount, setup.Elapsed.TotalMilliseconds, renderer.Options.Hdr ? "HDR (RGBA16Float + tone mapping)" : "LDR", renderer.EnvironmentDescription));
 
             // The app-specific external files folder, so "adb pull" can fetch the frames from a release (non-debuggable) build.
             string filesRoot = context.GetExternalFilesDir(null)?.AbsolutePath ?? context.FilesDir.AbsolutePath;

@@ -23,14 +23,14 @@ public unsafe class SurfaceBackingTests : IClassFixture<SkiaGpuFixture>
         gpu = fixture;
     }
 
-    private Texture CreateAppTexture()
+    private Texture CreateAppTexture(TextureFormat format = TextureFormat.RGBA8Unorm)
     {
         TextureDescriptor descriptor = new TextureDescriptor
         {
             Usage = AppUsage,
             Dimension = TextureDimension.Dimension2D,
             Size = new Extent3D { Width = Size, Height = Size, DepthOrArrayLayers = 1 },
-            Format = TextureFormat.RGBA8Unorm,
+            Format = format,
             MipLevelCount = 1,
             SampleCount = 1,
         };
@@ -82,6 +82,38 @@ public unsafe class SurfaceBackingTests : IClassFixture<SkiaGpuFixture>
         TestPixels.At(pixels, Size, 4, 4).Should().Be(TestPixels.Blue);
         TestPixels.At(pixels, Size, 20, 20).Should().Be(TestPixels.Red);
         readbacks.Should().Be(0);
+        gpu.GrContext.Flush();
+        gpu.GrContext.Submit(true);
+        Native.WebGpu.TextureRelease(appTexture);
+    }
+
+    [Fact]
+    public void a_backing_whose_format_and_usage_the_device_rejects_falls_back_with_the_WebGPU_reason()
+    {
+        //Arrange
+        gpu.RequireGrContext();
+        Assert.SkipWhen(Native.WebGpu.DeviceHasFeature(gpu.Device.Device, FeatureName.BGRA8UnormStorage) != 0, "The device supports BGRA8Unorm storage, so the combination is valid here.");
+        Texture appTexture = CreateAppTexture(TextureFormat.BGRA8Unorm);
+        using GRBackendTexture appBackend = gpu.Device.Bridge.WrapTexture(appTexture, Size, Size, AppUsage, SkiaTextureRole.RenderTarget, out string wrapReason);
+        appBackend.Should().NotBeNull(wrapReason);
+        using SKSurface appSurface = SKSurface.Create(gpu.GrContext, appBackend, GRSurfaceOrigin.TopLeft, SKColorType.Bgra8888);
+        WebGpuSkiaSurfaceBacking backing = new WebGpuSkiaSurfaceBacking
+        {
+            NativeTexture = NativeHandle(appTexture),
+            Format = TextureFormat.BGRA8Unorm,
+            Usage = AppUsage | TextureUsage.StorageBinding,
+        };
+
+        //Act
+        WebGpuSkiaTarget target = WebGpuSkiaTarget.Create(gpu.Device, appSurface, backing);
+        WebGpuSkiaTier tier = target.Tier;
+        string reason = target.TierReason;
+        target.Dispose();
+
+        //Assert
+        tier.Should().Be(WebGpuSkiaTier.GpuCopy);
+        reason.Should().StartWith("Zero copy over the application's texture is not possible (WebGPU refused the 32x32 BGRA8Unorm texture");
+        gpu.Device.TakeUncapturedErrors().Should().BeEmpty();
         gpu.GrContext.Flush();
         gpu.GrContext.Submit(true);
         Native.WebGpu.TextureRelease(appTexture);

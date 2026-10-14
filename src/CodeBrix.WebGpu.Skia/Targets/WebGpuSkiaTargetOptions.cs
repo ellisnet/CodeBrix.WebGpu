@@ -16,7 +16,10 @@ public sealed class WebGpuSkiaTargetOptions
     /// <summary>
     /// Usages to add to the target texture beyond the ones the library always sets (render attachment,
     /// texture binding, copy source and copy destination) - for example <see cref="TextureUsage.StorageBinding" />
-    /// for compute shaders that write the texture.
+    /// for compute shaders that write the texture. The device must allow the usage for <see cref="Format" />
+    /// (StorageBinding on <see cref="TextureFormat.BGRA8Unorm" /> needs the device feature
+    /// <see cref="FeatureName.BGRA8UnormStorage" />); otherwise the target is unavailable and
+    /// <see cref="WebGpuSkiaTarget.TierReason" /> carries WebGPU's message.
     /// </summary>
     public TextureUsage ExtraUsage { get; set; } = TextureUsage.None;
 

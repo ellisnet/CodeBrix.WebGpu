@@ -31,6 +31,85 @@ public sealed class ApiModel
 
     /// <summary>Every struct whose layout is checked against the native library: plain structs and callback-info structs.</summary>
     public List<ApiStruct> LayoutStructs { get; } = new List<ApiStruct>();
+
+    /// <summary>The typedefs (C name and underlying type), sorted by C name.</summary>
+    public List<ApiTypedef> Typedefs { get; } = new List<ApiTypedef>();
+}
+
+/// <summary>A typedef of a scalar type (<c>WGPUSubmissionIndex</c>).</summary>
+public sealed class ApiTypedef
+{
+    /// <summary>The C type name.</summary>
+    public string CName { get; set; }
+
+    /// <summary>The underlying type.</summary>
+    public TypeRef Type { get; set; }
+
+    /// <summary>The YAML doc.</summary>
+    public string Doc { get; set; }
+}
+
+/// <summary>
+/// A type as the C ABI sees it: a base type (scalar, enum, bitflag, struct, object handle, typedef, callback)
+/// plus an optional pointer level - what the C and Rust renderers (and the layout calculator) need, since the
+/// C# spelling loses constness and the category of a name.
+/// </summary>
+public sealed class TypeRef
+{
+    /// <summary>scalar, void, enum, bitflag, struct, handle, typedef, callback or proc.</summary>
+    public string Kind { get; set; }
+
+    /// <summary>The C base type (<c>uint32_t</c>, <c>WGPUDevice</c>, <c>void</c>, <c>char</c>).</summary>
+    public string CName { get; set; }
+
+    /// <summary>The Rust base type (<c>u32</c>, <c>WGPUDevice</c>, <c>c_void</c>, <c>c_char</c>).</summary>
+    public string RustName { get; set; }
+
+    /// <summary>null for a value, <c>immutable</c> for <c>T const *</c>, <c>mutable</c> for <c>T *</c>.</summary>
+    public string Pointer { get; set; }
+
+    /// <summary>True when this is a pointer.</summary>
+    public bool IsPointer => Pointer != null;
+
+    /// <summary>The C spelling, in webgpu.h's style (<c>WGPUBufferDescriptor const *</c>).</summary>
+    public string C => Pointer switch
+    {
+        "immutable" => CName + " const *",
+        "mutable" => CName + " *",
+        _ => CName,
+    };
+
+    /// <summary>The Rust spelling (<c>*const WGPUBufferDescriptor</c>).</summary>
+    public string Rust => Pointer switch
+    {
+        "immutable" => "*const " + RustName,
+        "mutable" => "*mut " + RustName,
+        _ => RustName,
+    };
+
+    /// <summary>A copy with another pointer level.</summary>
+    /// <param name="pointer">The pointer level.</param>
+    /// <returns>The copy.</returns>
+    public TypeRef WithPointer(string pointer) => new TypeRef { Kind = Kind, CName = CName, RustName = RustName, Pointer = pointer };
+
+    /// <summary>A scalar.</summary>
+    /// <param name="cName">The C spelling.</param>
+    /// <param name="rustName">The Rust spelling.</param>
+    /// <param name="pointer">The pointer level.</param>
+    /// <returns>The type.</returns>
+    public static TypeRef Scalar(string cName, string rustName, string pointer = null) =>
+        new TypeRef { Kind = "scalar", CName = cName, RustName = rustName, Pointer = pointer };
+
+    /// <summary>A named type of the API.</summary>
+    /// <param name="kind">The kind.</param>
+    /// <param name="cName">The C name, also used in Rust.</param>
+    /// <param name="pointer">The pointer level.</param>
+    /// <returns>The type.</returns>
+    public static TypeRef Named(string kind, string cName, string pointer = null) =>
+        new TypeRef { Kind = kind, CName = cName, RustName = cName, Pointer = pointer };
+
+    /// <summary><c>void *</c>.</summary>
+    public static TypeRef VoidPointer => new TypeRef { Kind = "void", CName = "void", RustName = "c_void", Pointer = "mutable" };
 }
 
 /// <summary>A constant.</summary>
@@ -159,6 +238,9 @@ public sealed class ApiField
     /// <summary>The C# field type.</summary>
     public string CsType { get; set; }
 
+    /// <summary>The C ABI type.</summary>
+    public TypeRef Type { get; set; }
+
     /// <summary>The YAML doc (or a synthesized one for count / chain fields).</summary>
     public string Doc { get; set; }
 }
@@ -200,6 +282,9 @@ public sealed class ApiFunction
     /// <summary>The C# return type.</summary>
     public string ReturnType { get; set; }
 
+    /// <summary>The C ABI return type, or null for void.</summary>
+    public TypeRef Return { get; set; }
+
     /// <summary>The YAML doc of the return value, or null.</summary>
     public string ReturnDoc { get; set; }
 
@@ -230,6 +315,9 @@ public sealed class ApiParameter
 
     /// <summary>The C# type.</summary>
     public string CsType { get; set; }
+
+    /// <summary>The C ABI type.</summary>
+    public TypeRef Type { get; set; }
 
     /// <summary>The YAML doc.</summary>
     public string Doc { get; set; }

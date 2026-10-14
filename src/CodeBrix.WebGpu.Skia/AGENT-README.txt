@@ -35,7 +35,9 @@ class, blittable structs, handle structs) and adds exactly two ideas:
 
 Everything WebGPU (pipelines, buffers, shaders, render passes) is still the
 raw CodeBrix.WebGpu.Native API - read that package's AGENT-README for it. This
-package never wraps it.
+package never wraps it. Another library built on CodeBrix.WebGpu.Native can
+share the device and render into targets through the Native package's
+sharing contracts (see SHARING WITH OTHER WEBGPU LIBRARIES).
 
 
 INSTALLATION
@@ -84,7 +86,7 @@ class WebGpuSkiaDeviceOptions
   PowerPreference       PowerPreference     passed to the adapter request
   ForceFallbackAdapter  bool                software adapter
 
-class WebGpuSkiaDevice : IDisposable
+class WebGpuSkiaDevice : IDisposable, IWebGpuDeviceSource
   static Create()                                    owned route, platform backend
   static Create(WebGpuSkiaDeviceOptions options)
   static AdoptVulkan(GRContext grContext, GRVkBackendContext backendContext,
@@ -93,8 +95,9 @@ class WebGpuSkiaDevice : IDisposable
                      uint instanceApiVersion = 0, uint queueIndex = 0)
   static AdoptMetal(GRContext grContext, GRMtlBackendContext backendContext)
   static AdoptDirect3D(GRContext grContext, GRD3DBackendContext backendContext)
-                                                     ALWAYS unavailable today
-                                                     (see LIMITS); reports why
+                                                     ALWAYS unavailable with the
+                                                     shipped natives (see
+                                                     LIMITS); reports why
   bool IsAvailable; string Reason                    check before use
   WebGpuSkiaDeviceRoute Route; WebGpuSkiaBackend Backend; string AdapterName
   bool SharesQueueWithSkia     true: WebGPU and SkiaSharp submit to one native
@@ -113,14 +116,19 @@ class WebGpuSkiaDevice : IDisposable
   bool SharesDeviceWith(GRRecordingContext context)
   string[] TakeUncapturedErrors()   WebGPU validation errors (owned route)
   void Dispose()               disposes the owned GRContext, then the WebGPU
-                               objects. Dispose targets FIRST.
+                               objects; every handle (Instance included) is
+                               null afterwards. Dispose targets FIRST.
 
 class WebGpuSkiaTargetOptions
   TextureFormat Format         Undefined = follow the surface (BGRA8Unorm for a
                                Bgra8888 surface, else RGBA8Unorm). Only
                                RGBA8Unorm and BGRA8Unorm are supported.
   TextureUsage ExtraUsage      added to RenderAttachment | TextureBinding |
-                               CopySrc | CopyDst (e.g. StorageBinding)
+                               CopySrc | CopyDst (e.g. StorageBinding). A
+                               format/usage the device rejects (StorageBinding
+                               on BGRA8Unorm without the BGRA8UnormStorage
+                               feature) -> target Unavailable, TierReason
+                               carries WebGPU's message
   bool PreserveSurfaceContent  copy tiers only: copy the surface into the
                                texture at every BeginWebGpuPass so a LoadOp.Load
                                pass sees SkiaSharp's pixels (ZeroCopy has this
@@ -134,7 +142,7 @@ class WebGpuSkiaSurfaceBacking     the native texture behind an APP-created
   TextureUsage Usage           the usages it was created with (as WebGPU
                                names them); must include RenderAttachment
 
-class WebGpuSkiaTarget : IDisposable
+class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
   static Create(WebGpuSkiaDevice device, SKSurface surface, options = null)
   static Create(WebGpuSkiaDevice device, SKSurface surface,
                 WebGpuSkiaSurfaceBacking backing, options = null)
@@ -143,6 +151,7 @@ class WebGpuSkiaTarget : IDisposable
                 int height, options = null)          null context = headless
   static CreateHeadless(WebGpuSkiaDevice device, int width, int height,
                 options = null)
+  WebGpuSkiaDevice Device      the device it was created on
   WebGpuSkiaTier Tier; string TierReason; bool IsAvailable
   SKSurface Surface            the app's, or the target's own (owned by the
                                target when it created it)
@@ -151,15 +160,26 @@ class WebGpuSkiaTarget : IDisposable
   TextureUsage Usage
   Texture Texture; TextureView TextureView    render into these; owned by the
                                target - never release them
-  long FrameCount              passes ended
+  long FrameCount              passes ended AND submitted (a rejected pass is
+                               not counted)
   long ReadbackCount           GPU-to-CPU transfers this target performed
-  bool IsInWebGpuPass; string LastError
+  bool IsInWebGpuPass
+  string LastError             last non-fatal problem (failed map, rejected
+                               pass's validation message), or null
   CommandEncoder BeginWebGpuPass()
-  void EndWebGpuPass()
+  void EndWebGpuPass()         finishes the encoder inside a validation error
+                               scope; invalid commands -> NOTHING submitted or
+                               drawn, the pass is closed, the target stays
+                               usable (Skia may draw, the next pass works) and
+                               WebGpuSkiaValidationException is thrown
   bool ReadPixels(Span<byte> destination)   tight rows, Format byte order
   SKImage ReadImage();  SKBitmap ReadBitmap()
   string ToString()            e.g. "ZeroCopy 512x512 RGBA8Unorm on Vulkan"
   void Dispose()
+
+class WebGpuSkiaValidationException : Exception
+  string WebGpuMessage         WebGPU's own validation message (Message
+                               contains it too). Thrown by EndWebGpuPass.
 
 
 TIER SELECTION
@@ -346,6 +366,72 @@ COMPLETE EXAMPLES
   Debug.Assert(target.ReadbackCount == before);   // ZeroCopy / GpuCopy
 
 
+SHARING WITH OTHER WEBGPU LIBRARIES
+===================================
+
+CodeBrix.WebGpu.Native defines two contracts; this package implements them,
+so a library that accepts them shares the device and draws into a target
+without either package referencing the other:
+
+  WebGpuSkiaDevice : IWebGpuDeviceSource
+    Instance, Adapter, Device, Queue   the device's own handles (no
+                                       references taken; consumers AddRef)
+    Backend (BackendType)              Undefined when unavailable/disposed
+    HasUncapturedErrorHandler          true for the OWNED route (errors go to
+                                       TakeUncapturedErrors); false for an
+                                       ADOPTED device (uncaptured errors are
+                                       fatal) and when unavailable
+  WebGpuSkiaTarget : IWebGpuTextureTarget
+    Texture, TextureView, Format, Width, Height, Usage   as above
+    SampleCount                        always 1
+    IsInWebGpuPass, BeginWebGpuPass(), EndWebGpuPass()   THE FRAME PROTOCOL
+                                       (EndWebGpuPass validates first; see
+                                       LIMITS)
+
+The interface's pass protocol IS the frame protocol: every WebGPU use of the
+texture (render, copy, sample) goes into the encoder BeginWebGpuPass hands
+out; between passes SkiaSharp owns the pixels (ZeroCopy: only DRAW on the
+surface between passes).
+
+One call each with CodeBrix.WebGpu.Graphics, for example (a separate
+package; install it only if you want its API):
+
+  using GraphicsContext graphics = GraphicsContext.Wrap(device);
+  using (GraphicsFrame frame = graphics.BeginFrame(target, depthTexture))
+  {
+      using (RenderPass pass = frame.BeginRenderPass(Color4.Black)) { ... }
+      frame.Submit();                 // calls target.EndWebGpuPass(); invalid
+                                      // commands -> WebGpuSkiaValidationException
+  }
+  target.Surface.Canvas.DrawText(...);   // SkiaSharp on the same pixels
+
+The consumer takes its own references on the handles, so it may be disposed
+before or after the device and target. A target of another size is a new
+target with new handles.
+
+
+NATIVE MODULES
+==============
+
+Native code (Rust, C, C++) can render into a target too, on the same device:
+CodeBrix.WebGpu.Native ships the C headers, a function table and two
+versioned hand-off structs for it (its AGENT-README, NATIVE MODULES, has the
+linking rules per operating system). The Skia types plug straight in:
+
+  CodebrixDeviceHandoff.Fill(gpu, deviceHandoff);        // WebGpuSkiaDevice
+  CommandEncoder e = CodebrixFrameHandoff.BeginWebGpuPass(target, frameHandoff);
+  if (!e.IsNull)
+  {
+      MyModule.Frame(frameHandoff);   // records into frameHandoff->CommandEncoder
+      target.EndWebGpuPass();         // validates + submits; may throw
+  }
+
+Every rule of THE FRAME PROTOCOL applies to the module's commands (record
+only into the pass encoder, close its own passes, never finish or submit;
+one thread). Flags carries FlagUncapturedErrorHandler for the OWNED route
+only: on an ADOPTED device a module's uncaptured error ends the process.
+
+
 PER-PLATFORM BACKENDS
 =====================
 
@@ -377,6 +463,16 @@ LIMITS
     optional features are performance extras).
   * Formats: RGBA8Unorm and BGRA8Unorm (premultiplied alpha), one mip level,
     one sample.
+  * The WebGPU engine ends the process when invalid work is SUBMITTED. The
+    library checks first: every texture/view/buffer it creates is created in
+    a validation error scope (a rejected one makes the target Unavailable with
+    WebGPU's message; nothing is submitted), and EndWebGpuPass finishes the
+    pass's encoder in an error scope and throws WebGpuSkiaValidationException
+    instead of submitting. This holds for adopted devices too, which have no
+    uncaptured-error handler. The check costs one error-scope push/pop per
+    pass (no GPU wait). Still fatal: work you submit YOURSELF (another
+    encoder, QueueSubmit) and uncaptured errors on an ADOPTED device outside
+    the library's calls.
 
 
 COMMON PITFALLS TO AVOID
@@ -385,7 +481,13 @@ COMMON PITFALLS TO AVOID
   * Disposing gpu.GrContext yourself - the device owns it (owned route).
   * Releasing target.Texture / TextureView or the device's handles - owned.
   * Submitting your own command buffer that writes target.Texture instead of
-    recording into the encoder from BeginWebGpuPass.
+    recording into the encoder from BeginWebGpuPass (it is not validated -
+    an invalid one ends the process).
+  * Ignoring WebGpuSkiaValidationException from EndWebGpuPass: the frame was
+    NOT rendered (the surface keeps its previous pixels); fix the commands.
+  * ExtraUsage = StorageBinding with Format = BGRA8Unorm: unavailable unless
+    the device has the BGRA8UnormStorage feature - use RGBA8Unorm for
+    storage writes.
   * Calling SKSurface.ReadPixels / Snapshot on a ZeroCopy surface inside the
     render loop (see THE FRAME PROTOCOL). Use target.ReadPixels.
   * A pipeline whose colour target format differs from target.Format.
@@ -448,7 +550,8 @@ QUICK REFERENCE CARD
   Render into   target.TextureView (format target.Format)
   Read          target.ReadPixels(span) / ReadImage() / ReadBitmap()
   Count         target.ReadbackCount, target.FrameCount
-  Errors        gpu.TakeUncapturedErrors()
+  Errors        gpu.TakeUncapturedErrors(); EndWebGpuPass throws
+                WebGpuSkiaValidationException (nothing submitted)
   Order         dispose targets, then the device
 
 

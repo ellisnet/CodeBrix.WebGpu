@@ -8,14 +8,26 @@ public sealed class GpuRenderPipeline : GraphicsResource
 {
     private PipelineLayout layout;
 
-    internal GpuRenderPipeline(GraphicsContext context, RenderPipeline handle, PipelineLayout layout, IReadOnlyList<TextureFormat> colorFormats, TextureFormat depthFormat, string label)
+    internal GpuRenderPipeline(GraphicsContext context, RenderPipeline handle, PipelineLayout layout, IReadOnlyList<TextureFormat> colorFormats, TextureFormat depthFormat, string label, int sampleCount = 1, uint immediateSize = 0, bool isWrapped = false)
         : base(context, label)
     {
         Handle = handle;
         this.layout = layout;
         ColorFormats = colorFormats;
         DepthFormat = depthFormat;
+        SampleCount = sampleCount;
+        ImmediateSize = immediateSize;
+        IsWrapped = isWrapped;
     }
+
+    /// <summary>The sample count of its targets.</summary>
+    public int SampleCount { get; }
+
+    /// <summary>The bytes of immediate data (push constants) its layout declares (0 for none).</summary>
+    public uint ImmediateSize { get; }
+
+    /// <summary>True when the pipeline belongs to another library and this object holds only its own reference.</summary>
+    public bool IsWrapped { get; }
 
     /// <summary>The native pipeline. Owned by this object.</summary>
     public RenderPipeline Handle { get; private set; }
@@ -53,12 +65,20 @@ public sealed class GpuComputePipeline : GraphicsResource
 {
     private PipelineLayout layout;
 
-    internal GpuComputePipeline(GraphicsContext context, ComputePipeline handle, PipelineLayout layout, string label)
+    internal GpuComputePipeline(GraphicsContext context, ComputePipeline handle, PipelineLayout layout, string label, uint immediateSize = 0, bool isWrapped = false)
         : base(context, label)
     {
         Handle = handle;
         this.layout = layout;
+        ImmediateSize = immediateSize;
+        IsWrapped = isWrapped;
     }
+
+    /// <summary>The bytes of immediate data (push constants) its layout declares (0 for none).</summary>
+    public uint ImmediateSize { get; }
+
+    /// <summary>True when the pipeline belongs to another library and this object holds only its own reference.</summary>
+    public bool IsWrapped { get; }
 
     /// <summary>The native pipeline. Owned by this object.</summary>
     public ComputePipeline Handle { get; private set; }

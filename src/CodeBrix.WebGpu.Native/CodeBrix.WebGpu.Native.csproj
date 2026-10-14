@@ -7,11 +7,11 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!--
-      Keep the committed native libraries out of the SDK's default item globs. Without this they arrive as
+      Keep the committed native libraries (and the generated include/ files) out of the SDK's default item globs. Without this they arrive as
       None items with no metadata AS WELL AS through the explicit item below, and the metadata-less copies
       win, so nothing reaches the package.
     -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);runtimes\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);runtimes\**;include\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <!--
@@ -60,7 +60,7 @@
     <Product>CodeBrix.WebGpu.Native</Product>
     <Title>CodeBrix.WebGpu.Native</Title>
     <Authors>Jeremy Ellis</Authors>
-    <Description>Thin, generated .NET bindings over a native WebGPU implementation (the wgpu engine) shipped inside the package: every C function as a blittable LibraryImport, every C struct with its exact layout (checked against the native library at load time), enums, bitflags, object handles and callback-info structs - nothing marshalled, nothing hidden. Adds native-device access for Vulkan, Direct3D 12 and Metal (get the backend objects behind a device or texture, wrap existing ones, transition texture states) for sharing a GPU device with other renderers. Native libraries for Windows x64 and ARM64, macOS Intel and Apple Silicon, Linux x64, ARM64 and RISC-V 64, and Android 13+ ARM64 and x64.</Description>
+    <Description>Thin, generated .NET bindings over a native WebGPU implementation (the wgpu engine) shipped inside the package: every C function as a blittable LibraryImport, every C struct with its exact layout (checked against the native library at load time), enums, bitflags, object handles and callback-info structs - nothing marshalled, nothing hidden. Adds native-device access for Vulkan, Direct3D 12 and Metal (get the backend objects behind a device or texture, wrap existing ones, transition texture states) for sharing a GPU device with other renderers, small sharing contracts so libraries built on it share one device and texture without referencing each other, and the C headers, a generated function table and versioned hand-off structs for native modules (Rust, C, C++) working on the same WebGPU objects. Native libraries for Windows x64 and ARM64, macOS Intel and Apple Silicon, Linux x64, ARM64 and RISC-V 64, and Android 13+ ARM64 and x64.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/ellisnet/CodeBrix.WebGpu</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ellisnet/CodeBrix.WebGpu</RepositoryUrl>
@@ -71,7 +71,7 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <IsPackable>true</IsPackable>
-    <PackageTags>webgpu;wgpu;gpu;graphics;compute;vulkan;metal;direct3d;native;CodeBrix</PackageTags>
+    <PackageTags>webgpu;wgpu;gpu;graphics;compute;vulkan;metal;direct3d;native;interop;CodeBrix</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -100,6 +100,22 @@
       worth checking the package for after any change - see MAINTAINER-README.txt.
     -->
     <None Include="@(_WgpuNativeLibrary)" Pack="true" PackagePath="runtimes\" />
+  </ItemGroup>
+
+  <!--
+    The C ABI for native modules (see NATIVE MODULES in AGENT-README.txt), packed flat under include/ at the
+    package root - a folder NuGet hands to no consumer build and copies to no output. webgpu.h / wgpu.h / the
+    hand-written codebrix_wgpu.h come straight from wgpu-native-tools/ (the headers the natives are built from);
+    codebrix_wgpu_procs.h / .rs are generated into include/ here by the binding generator. The licence covers
+    webgpu.h (BSD-3-Clause) and wgpu.h (MIT); codebrix_wgpu*.h / .rs are this package's MIT code.
+  -->
+  <ItemGroup>
+    <None Include="..\..\wgpu-native-tools\wgpu-native\ffi\webgpu-headers\webgpu.h" Pack="true" PackagePath="include\" />
+    <None Include="..\..\wgpu-native-tools\wgpu-native\ffi\wgpu.h" Pack="true" PackagePath="include\" />
+    <None Include="..\..\wgpu-native-tools\codebrix-wgpu\include\codebrix_wgpu.h" Pack="true" PackagePath="include\" />
+    <None Include="include\codebrix_wgpu_procs.h" Pack="true" PackagePath="include\" />
+    <None Include="include\codebrix_wgpu_procs.rs" Pack="true" PackagePath="include\" />
+    <None Include="..\..\wgpu-native-tools\licenses\LICENSE-WgpuNative.txt" Pack="true" PackagePath="include\" />
   </ItemGroup>
 
 </Project>

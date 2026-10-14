@@ -237,14 +237,14 @@ public sealed unsafe partial class GraphicsContext
         SamplerDescriptor descriptor = new SamplerDescriptor
         {
             Label = text.View(description.Label),
-            AddressModeU = description.AddressMode,
-            AddressModeV = description.AddressMode,
+            AddressModeU = description.AddressModeU ?? description.AddressMode,
+            AddressModeV = description.AddressModeV ?? description.AddressMode,
             AddressModeW = description.AddressMode,
             MagFilter = description.MagFilter,
             MinFilter = description.MinFilter,
             MipmapFilter = description.MipmapFilter,
             LodMinClamp = 0,
-            LodMaxClamp = 32,
+            LodMaxClamp = Math.Max(0f, description.MaxLod),
             Compare = description.Compare,
             MaxAnisotropy = (ushort)Math.Clamp(description.MaxAnisotropy, 1, 16),
         };

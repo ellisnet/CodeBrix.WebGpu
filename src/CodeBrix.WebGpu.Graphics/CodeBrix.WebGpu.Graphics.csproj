@@ -54,7 +54,7 @@
     <Product>CodeBrix.WebGpu.Graphics</Product>
     <Title>CodeBrix.WebGpu.Graphics</Title>
     <Authors>Jeremy Ellis</Authors>
-    <Description>A small, friendly graphics layer over WebGPU for .NET: one context object owning (or sharing) the GPU device, typed buffers, textures, samplers, bind groups and WGSL shaders with readable compile errors, render and compute pipeline builders with vertex layouts derived from your structs, a batched 2D sprite and shape renderer, a lit 3D mesh renderer with cameras, depth and per-instance transforms, and presentation to any texture view, a headless render target or a window surface created from native window handles (X11, Wayland, Win32, Metal, Android). System.Numerics maths throughout; no windowing toolkit. Built on CodeBrix.WebGpu.Native.</Description>
+    <Description>A friendly graphics layer over WebGPU for .NET: one context object owning (or sharing) the GPU device, typed buffers, textures, samplers, bind groups and WGSL shaders with readable compile errors, render and compute pipeline builders with vertex layouts derived from your structs, a batched 2D sprite and shape renderer, lit 3D meshes with cameras and instancing, image files and animated GIFs as textures (decoded by CodeBrix.Imaging, GPU mipmaps), glTF 2.0 models (CodeBrix.Graphics3D.Gltf2) drawn in instanced batches with physically based shading, GPU skinning, morph targets and per-instance animation playback with cross-fades and blending, image-based lighting from HDR panoramas or a procedural sky with a skybox and tone mapping, queries and GPU timing, indirect draws and render bundles, and presentation to any texture view, a headless render target or a window surface created from native window handles (X11, Wayland, Win32, Metal, Android). Shares a device and texture with other libraries through the CodeBrix.WebGpu.Native sharing contracts. System.Numerics maths throughout; no windowing toolkit. Built on CodeBrix.WebGpu.Native.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/ellisnet/CodeBrix.WebGpu</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ellisnet/CodeBrix.WebGpu</RepositoryUrl>
@@ -65,7 +65,7 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <IsPackable>true</IsPackable>
-    <PackageTags>webgpu;wgsl;gpu;graphics;2d;3d;sprites;rendering;vulkan;metal;direct3d;CodeBrix</PackageTags>
+    <PackageTags>webgpu;wgsl;gpu;graphics;2d;3d;sprites;rendering;gltf;glb;models;pbr;animation;skinning;ibl;hdr;textures;images;vulkan;metal;direct3d;CodeBrix</PackageTags>
   </PropertyGroup>
 
   <!--
@@ -85,6 +85,15 @@
 
   <ItemGroup Condition="'$(WebGpuNativePackageVersion)' != ''">
     <PackageReference Include="CodeBrix.WebGpu.Native.MitLicenseForever" Version="$(WebGpuNativePackageVersion)" />
+  </ItemGroup>
+
+  <!--
+    Image decoding/encoding (CodeBrix.Imaging, Apache-2.0) and glTF 2.0 reading (CodeBrix.Graphics3D.Gltf2, MIT), both
+    from nuget.org. They are the package's only dependencies besides CodeBrix.WebGpu.Native.
+  -->
+  <ItemGroup>
+    <PackageReference Include="CodeBrix.Imaging.ApacheLicenseForever" Version="1.0.285.619" />
+    <PackageReference Include="CodeBrix.Graphics3D.Gltf2.MitLicenseForever" Version="1.0.261.293" />
   </ItemGroup>
 
   <!--

@@ -137,6 +137,15 @@ PREREQUISITES PER MACHINE
                rustup target add aarch64-apple-darwin x86_64-apple-darwin --toolchain 1.93
            Deployment target 11.0 for BOTH RIDs; two thin dylibs, never universal.
 
+NATIVE MODULES DEPEND ON THESE BINARIES' IDENTITY: the CodeBrix.WebGpu.Native
+package ships webgpu.h, wgpu.h and codebrix-wgpu/include/codebrix_wgpu.h under
+include/ so separately built modules can link to codebrix_wgpu directly, and
+the dynamic loaders reuse the copy .NET loaded only by its identity: the ELF
+SONAME libcodebrix_wgpu.so (Linux, Android) and the Mach-O install name
+@rpath/libcodebrix_wgpu.dylib (macOS; set by codebrix-wgpu/build.rs). Every
+rebuild must keep both - the Native tests (PackageContentTests) fail otherwise. The
+binding generator's --check also holds codebrix_wgpu.h to specs/codebrix.yml.
+
 HOW TO REBUILD
 --------------------------------------------------------------------------------
   cd wgpu-native-tools/linux   && ./build.sh            # all three Linux RIDs
@@ -253,7 +262,9 @@ FILES
   codebrix-wgpu/          OUR crate: Cargo.toml, Cargo.lock, build.rs, src/{lib,codebrix,
                           layouts,vk_format}.rs, bridge/bridge.rs, include/codebrix_wgpu.h
   patches/                0001 rlib, 0002 bridge module (+ README.txt)
-  specs/                  codebrix.yml (the contract), wgpu.yml, expected-exports.txt
+  specs/                  codebrix.yml (the contract), wgpu.yml, expected-exports.txt,
+                          proc-table-notes.txt (per-function notes for the native-module
+                          function table; read by the binding generator only)
   smoke-test.c            the gate's load-and-run program
   licenses/               LICENSE-WgpuNative.txt + compose-license-wgpunative.sh + its inputs
   linux/                  build.sh, container-build.sh, container-gate.sh, export-sysroot.sh,

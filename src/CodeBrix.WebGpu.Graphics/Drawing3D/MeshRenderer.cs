@@ -14,13 +14,17 @@ namespace CodeBrix.WebGpu.Graphics;
 /// <see cref="Begin" /> with a camera and lighting, <see cref="Draw(Mesh, LitMaterial, Matrix4x4)" /> or
 /// <see cref="DrawInstanced" /> any number of times, then <see cref="End" />.
 /// </summary>
-/// <remarks>Several Begin/End pairs may run in one <see cref="GraphicsFrame" />; each keeps its own data. Not thread-safe.</remarks>
+/// <remarks>
+/// A mirroring world matrix (negative determinant) draws with clockwise front faces, so mirrored instances stay
+/// visible and shade like the original. Several Begin/End pairs may run in one <see cref="GraphicsFrame" />; each keeps
+/// its own data. Not thread-safe.
+/// </remarks>
 public sealed class MeshRenderer : GraphicsResource
 {
     private const int UniformSlotSize = 256;
     private static readonly int InstanceSize = Marshal.SizeOf<InstanceData>();
 
-    private readonly Dictionary<(TextureFormat Color, TextureFormat Depth, bool DoubleSided, bool Translucent), GpuRenderPipeline> pipelines = new Dictionary<(TextureFormat, TextureFormat, bool, bool), GpuRenderPipeline>();
+    private readonly Dictionary<(TextureFormat Color, TextureFormat Depth, bool DoubleSided, bool Translucent, MeshVertexKind Kind, bool Mirrored), GpuRenderPipeline> pipelines = new Dictionary<(TextureFormat, TextureFormat, bool, bool, MeshVertexKind, bool), GpuRenderPipeline>();
     private readonly List<DrawItem> draws = new List<DrawItem>();
     private readonly GpuShader shader;
     private readonly GpuBindGroupLayout frameLayout;
@@ -46,7 +50,7 @@ public sealed class MeshRenderer : GraphicsResource
         frameLayout = context.CreateBindGroupLayout("mesh frame", BindingLayoutEntry.Uniform(0, ShaderStage.Vertex | ShaderStage.Fragment, true, 128));
         materialLayout = context.CreateBindGroupLayout(
             "mesh material",
-            BindingLayoutEntry.Uniform(0, ShaderStage.Fragment, false, 32),
+            BindingLayoutEntry.Uniform(0, ShaderStage.Fragment, false, LitMaterial.UniformSize),
             BindingLayoutEntry.Texture(1, ShaderStage.Fragment),
             BindingLayoutEntry.Sampler(2, ShaderStage.Fragment));
         CreateFrameUniforms(8);
@@ -128,27 +132,59 @@ public sealed class MeshRenderer : GraphicsResource
     public void DrawInstanced(Mesh mesh, LitMaterial material, ReadOnlySpan<Matrix4x4> worlds)
     {
         ArgumentNullException.ThrowIfNull(mesh);
+        mesh.ThrowIfDisposed();
+        DrawGeometry(new MeshGeometry(mesh.VertexBuffer, mesh.IndexBuffer, IndexFormat.Uint32, 0, (uint)mesh.IndexCount, 0, MeshVertexKind.Mesh), material, worlds);
+    }
+
+    /// <summary>
+    /// Draws a range of indices from any vertex and index buffer with a material, once per matrix.
+    /// </summary>
+    /// <param name="geometry">The buffers and range.</param>
+    /// <param name="material">The material.</param>
+    /// <param name="worlds">One model-to-world matrix per instance.</param>
+    internal void DrawGeometry(in MeshGeometry geometry, LitMaterial material, ReadOnlySpan<Matrix4x4> worlds)
+    {
         ArgumentNullException.ThrowIfNull(material);
         ThrowIfNotDrawing();
-        mesh.ThrowIfDisposed();
         material.ThrowIfDisposed();
         if (!ReferenceEquals(material.Renderer, this)) throw new ArgumentException("The material belongs to another MeshRenderer.", nameof(material));
         if (worlds.Length == 0) return;
         if (instanceCount + worlds.Length > instances.Length) Array.Resize(ref instances, Math.Max(instances.Length * 2, instanceCount + worlds.Length));
-        int first = instanceCount;
-        foreach (Matrix4x4 world in worlds) instances[instanceCount++] = InstanceData.For(world);
 
+        // A mirroring world matrix (negative determinant) turns clockwise triangles into front faces, so each run of
+        // matrices with the same winding becomes its own draw with the matching pipeline.
+        int start = 0;
+        while (start < worlds.Length)
+        {
+            bool mirrored = IsMirroring(worlds[start]);
+            int end = start + 1;
+            while (end < worlds.Length && IsMirroring(worlds[end]) == mirrored) end++;
+            int first = instanceCount;
+            for (int index = start; index < end; index++) instances[instanceCount++] = InstanceData.For(worlds[index]);
+            AddDraw(geometry, material, first, end - start, mirrored);
+            start = end;
+        }
+    }
+
+    /// <summary>True when a matrix mirrors (its upper 3 x 3 has a negative determinant).</summary>
+    /// <param name="m">The matrix.</param>
+    /// <returns>True for a mirroring transform.</returns>
+    internal static bool IsMirroring(in Matrix4x4 m) =>
+        (m.M11 * ((m.M22 * m.M33) - (m.M23 * m.M32))) - (m.M12 * ((m.M21 * m.M33) - (m.M23 * m.M31))) + (m.M13 * ((m.M21 * m.M32) - (m.M22 * m.M31))) < 0f;
+
+    private void AddDraw(in MeshGeometry geometry, LitMaterial material, int first, int count, bool mirrored)
+    {
         if (draws.Count > 0)
         {
             DrawItem last = draws[^1];
-            if (ReferenceEquals(last.Mesh, mesh) && ReferenceEquals(last.Material, material) && last.FirstInstance + last.InstanceCount == first)
+            if (last.Geometry.Equals(geometry) && ReferenceEquals(last.Material, material) && last.Mirrored == mirrored && last.FirstInstance + last.InstanceCount == first)
             {
-                draws[^1] = new DrawItem(mesh, material, last.FirstInstance, last.InstanceCount + worlds.Length);
+                draws[^1] = new DrawItem(geometry, material, last.FirstInstance, last.InstanceCount + count, mirrored);
                 return;
             }
         }
 
-        draws.Add(new DrawItem(mesh, material, first, worlds.Length));
+        draws.Add(new DrawItem(geometry, material, first, count, mirrored));
     }
 
     /// <summary>Uploads the frame and instance data and records the draws into the pass.</summary>
@@ -196,7 +232,7 @@ public sealed class MeshRenderer : GraphicsResource
     internal GpuBindGroup CreateMaterialGroup(GpuBuffer uniforms, GpuTexture texture, GpuSampler sampler)
     {
         sampler ??= MaterialSampler;
-        return Context.CreateBindGroup(materialLayout, "material", BindingEntry.ForBuffer(0, uniforms, 0, 32), BindingEntry.ForTexture(1, texture ?? Context.WhiteTexture), BindingEntry.ForSampler(2, sampler));
+        return Context.CreateBindGroup(materialLayout, "material", BindingEntry.ForBuffer(0, uniforms, 0, LitMaterial.UniformSize), BindingEntry.ForTexture(1, texture ?? Context.WhiteTexture), BindingEntry.ForSampler(2, sampler));
     }
 
     private GpuSampler materialSampler;
@@ -212,13 +248,14 @@ public sealed class MeshRenderer : GraphicsResource
 
     private void DrawOrdered(RenderPass current, RenderTargetView target, Span<uint> offsets, ref GpuRenderPipeline bound, bool translucent)
     {
-        Mesh boundMesh = null;
+        GpuBuffer boundVertices = null;
+        GpuBuffer boundIndices = null;
         LitMaterial boundMaterial = null;
         foreach (DrawItem item in draws)
         {
             if (item.Material.IsTranslucent != translucent) continue;
             item.Material.Upload();
-            GpuRenderPipeline pipeline = Pipeline(target.ColorFormat, target.DepthFormat, item.Material.DoubleSided, translucent);
+            GpuRenderPipeline pipeline = Pipeline(target.ColorFormat, target.DepthFormat, item.Material.DoubleSided, translucent, item.Geometry.Kind, item.Mirrored);
             if (!ReferenceEquals(pipeline, bound))
             {
                 current.SetPipeline(pipeline);
@@ -226,7 +263,8 @@ public sealed class MeshRenderer : GraphicsResource
                 current.SetVertexBuffer(1, instanceBuffer, instanceCursor, (ulong)(instanceCount * InstanceSize));
                 bound = pipeline;
                 boundMaterial = null;
-                boundMesh = null;
+                boundVertices = null;
+                boundIndices = null;
             }
 
             if (!ReferenceEquals(item.Material, boundMaterial))
@@ -235,33 +273,44 @@ public sealed class MeshRenderer : GraphicsResource
                 boundMaterial = item.Material;
             }
 
-            if (!ReferenceEquals(item.Mesh, boundMesh))
+            MeshGeometry geometry = item.Geometry;
+            if (!ReferenceEquals(geometry.VertexBuffer, boundVertices))
             {
-                current.SetVertexBuffer(0, item.Mesh.VertexBuffer);
-                current.SetIndexBuffer(item.Mesh.IndexBuffer, IndexFormat.Uint32);
-                boundMesh = item.Mesh;
+                current.SetVertexBuffer(0, geometry.VertexBuffer);
+                boundVertices = geometry.VertexBuffer;
             }
 
-            current.DrawIndexed((uint)item.Mesh.IndexCount, (uint)item.InstanceCount, 0, 0, (uint)item.FirstInstance);
+            if (!ReferenceEquals(geometry.IndexBuffer, boundIndices))
+            {
+                current.SetIndexBuffer(geometry.IndexBuffer, geometry.IndexFormat);
+                boundIndices = geometry.IndexBuffer;
+            }
+
+            current.DrawIndexed(geometry.IndexCount, (uint)item.InstanceCount, geometry.FirstIndex, geometry.BaseVertex, (uint)item.FirstInstance);
             LastDrawCallCount++;
         }
     }
 
-    private GpuRenderPipeline Pipeline(TextureFormat color, TextureFormat depth, bool doubleSided, bool translucent)
+    private GpuRenderPipeline Pipeline(TextureFormat color, TextureFormat depth, bool doubleSided, bool translucent, MeshVertexKind kind, bool mirrored)
     {
-        if (pipelines.TryGetValue((color, depth, doubleSided, translucent), out GpuRenderPipeline pipeline)) return pipeline;
+        if (pipelines.TryGetValue((color, depth, doubleSided, translucent, kind, mirrored), out GpuRenderPipeline pipeline)) return pipeline;
         RenderPipelineBuilder builder = Context.CreateRenderPipeline(shader)
-            .WithLabel("lit mesh " + color + (doubleSided ? " double-sided" : string.Empty) + (translucent ? " translucent" : string.Empty))
-            .WithVertexBuffer<MeshVertex>()
+            .WithLabel("lit mesh " + color + (doubleSided ? " double-sided" : string.Empty) + (translucent ? " translucent" : string.Empty) + (kind == MeshVertexKind.Mesh ? string.Empty : " " + kind) + (mirrored ? " mirrored" : string.Empty))
+            .WithVertexBuffer(VertexLayoutFor(kind))
             .WithVertexBuffer<InstanceData>(VertexStepMode.Instance, 4)
             .WithColorTarget(color, translucent ? BlendPreset.AlphaBlend : BlendPreset.Opaque)
-            .WithCulling(doubleSided ? CullPreset.None : CullPreset.Back)
+            .WithCulling(doubleSided ? CullPreset.None : CullPreset.Back, mirrored ? FrontFace.CW : FrontFace.CCW)
             .WithBindGroupLayouts(frameLayout, materialLayout);
         if (depth != TextureFormat.Undefined) builder.WithDepth(depth, translucent ? DepthPreset.ReadOnly : DepthPreset.ReadWrite);
         pipeline = builder.Build();
-        pipelines[(color, depth, doubleSided, translucent)] = pipeline;
+        pipelines[(color, depth, doubleSided, translucent, kind, mirrored)] = pipeline;
         return pipeline;
     }
+
+    /// <summary>The vertex layout feeding locations 0-3 (position, normal, texture coordinate, colour) for a vertex kind.</summary>
+    /// <param name="kind">The kind.</param>
+    /// <returns>The layout.</returns>
+    private static VertexLayout VertexLayoutFor(MeshVertexKind kind) => VertexLayout.FromStruct<MeshVertex>();
 
     private void CreateFrameUniforms(int slots)
     {
@@ -292,7 +341,7 @@ public sealed class MeshRenderer : GraphicsResource
         shader.Dispose();
     }
 
-    private readonly record struct DrawItem(Mesh Mesh, LitMaterial Material, int FirstInstance, int InstanceCount);
+    private readonly record struct DrawItem(MeshGeometry Geometry, LitMaterial Material, int FirstInstance, int InstanceCount, bool Mirrored);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct FrameUniforms
@@ -337,3 +386,20 @@ internal struct InstanceData
         };
     }
 }
+
+/// <summary>Which vertex layout a <see cref="MeshGeometry" /> uses.</summary>
+internal enum MeshVertexKind
+{
+    /// <summary><see cref="MeshVertex" /> (48 bytes).</summary>
+    Mesh,
+}
+
+/// <summary>A range of indexed triangles in a vertex and index buffer.</summary>
+/// <param name="VertexBuffer">The vertex buffer.</param>
+/// <param name="IndexBuffer">The index buffer.</param>
+/// <param name="IndexFormat">The index format.</param>
+/// <param name="FirstIndex">The first index.</param>
+/// <param name="IndexCount">The number of indices.</param>
+/// <param name="BaseVertex">Added to every index.</param>
+/// <param name="Kind">The vertex layout.</param>
+internal readonly record struct MeshGeometry(GpuBuffer VertexBuffer, GpuBuffer IndexBuffer, IndexFormat IndexFormat, uint FirstIndex, uint IndexCount, int BaseVertex, MeshVertexKind Kind);

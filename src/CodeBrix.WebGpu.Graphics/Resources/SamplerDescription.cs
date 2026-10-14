@@ -20,6 +20,15 @@ public sealed class SamplerDescription
     /// <summary>The address mode for U, V and W. Default <see cref="AddressMode.ClampToEdge" />.</summary>
     public AddressMode AddressMode { get; set; } = AddressMode.ClampToEdge;
 
+    /// <summary>The address mode for U only, or null (the default) for <see cref="AddressMode" />.</summary>
+    public AddressMode? AddressModeU { get; set; }
+
+    /// <summary>The address mode for V only, or null (the default) for <see cref="AddressMode" />.</summary>
+    public AddressMode? AddressModeV { get; set; }
+
+    /// <summary>The largest mip level the sampler may read (0 = only the top level, as a glTF NEAREST or LINEAR minification filter asks). Default 32.</summary>
+    public float MaxLod { get; set; } = 32;
+
     /// <summary>The magnification filter. Default <see cref="FilterMode.Linear" />.</summary>
     public FilterMode MagFilter { get; set; } = FilterMode.Linear;
 

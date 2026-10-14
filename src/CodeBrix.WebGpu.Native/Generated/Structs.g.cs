@@ -4,7 +4,8 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   a96a4d2c32a5787aef76308217d4fce60d25834d2a288394bab769e577e0bbee  wgpu-native-tools/specs/codebrix.yml
+//   dcf6270f6e6f2ddb8a33a0ac108d58cf046f561eaed4679c9fab1fd350cb0c9b  wgpu-native-tools/specs/codebrix.yml
+//   9cdbd3d22f3ae770d1f0243f83eb2d9a7bc869976d3c337cc40043a958ad2426  wgpu-native-tools/specs/proc-table-notes.txt
 
 using System.Runtime.InteropServices;
 
@@ -630,7 +631,11 @@ public unsafe struct CodebrixVulkanAdoptDescriptor
     public uint QueueIndex;
 
     /// <summary>
-    /// The Vulkan API version the instance was created with.
+    /// The Vulkan API version the application created the instance with (<c>VkApplicationInfo::apiVersion</c>,
+    /// <c>VK_MAKE_API_VERSION</c> packed); wgpu uses no instance-level functionality above it. The version the
+    /// Vulkan loader / driver reports (<c>vkEnumerateInstanceVersion</c>, and the <c>instance_api_version</c> of
+    /// <see cref="CodebrixVulkanDeviceInfo" />) may be higher than the instance's and is only a best-effort fallback when the
+    /// real value is unknown.
     /// </summary>
     public uint InstanceApiVersion;
 
@@ -712,7 +717,12 @@ public unsafe struct CodebrixVulkanDeviceInfo
     public uint QueueIndex;
 
     /// <summary>
-    /// The Vulkan API version the instance was created with (<c>VK_MAKE_API_VERSION</c> packed).
+    /// The Vulkan API version the Vulkan loader / driver reported (<c>vkEnumerateInstanceVersion</c>,
+    /// <c>VK_MAKE_API_VERSION</c> packed) when wgpu created the instance. The instance itself may have been
+    /// created with a LOWER version (wgpu caps the version it creates the instance with at 1.3), so this
+    /// is not the instance's API version: do not use it as Skia's <c>MaxAPIVersion</c> (see
+    /// <c>VulkanSkiaBridge.SkiaApiVersion</c> in CodeBrix.WebGpu.Skia), and do not copy it into
+    /// <see cref="CodebrixVulkanAdoptDescriptor" /> <c>instance_api_version</c> for another instance.
     /// </summary>
     public uint InstanceApiVersion;
 

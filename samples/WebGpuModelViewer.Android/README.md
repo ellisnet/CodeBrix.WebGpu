@@ -1,6 +1,6 @@
 # WebGpuModelViewer.Android
 
-The WebGpuModelViewer sample on Android phones, tablets and laptops (ARM64 and x64 devices with Vulkan; the minimum Android release is set in the project file): the same animated Cube Pets scene, HUD and SkiaSharp overlay as the desktop sample, full screen in landscape, presented at the display's refresh rate.
+The WebGpuModelViewer sample on Android phones, tablets and laptops (ARM64 and x64 devices with Vulkan; the minimum Android release is set in the project file): the same animated Cube Pets scene, HUD and SkiaSharp overlay as the desktop sample - physically based glTF models with their own animation players, lit by a procedural sky and a sun, drawn into a linear RGBA16Float texture and tone mapped into a zero-copy SkiaSharp target - full screen in landscape, presented at the display's refresh rate. It always uses the desktop sample's default rendering (no command-line switches on Android).
 
 The viewer code (scene, renderer, HUD) is the desktop sample's own source, linked into this project from `../WebGpuModelViewer`; only the hosting is Android-specific:
 
@@ -30,7 +30,7 @@ The APK carries both ARM64 and x64 code, so the same file installs on either kin
 
 ## Checking it
 
-The viewer logs under the tag `WebGpuModelViewer`: the device, the GPU backend and adapter, the surface format and size, the assets copied, the frame rate every two seconds, and any WebGPU errors.
+The viewer logs under the tag `WebGpuModelViewer`: the device, the GPU backend and adapter, the models and environment loaded, the surface format and size, the assets copied, the frame rate every two seconds, and any WebGPU errors.
 
 ```
 adb -s <serial> logcat -s WebGpuModelViewer

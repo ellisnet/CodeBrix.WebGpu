@@ -15,6 +15,16 @@ public sealed class GpuSampler : GraphicsResource
         IsComparison = description.Compare != CompareFunction.Undefined;
     }
 
+    internal GpuSampler(GraphicsContext context, Sampler handle, string label)
+        : base(context, label)
+    {
+        Handle = handle;
+        IsWrapped = true;
+    }
+
+    /// <summary>True when the sampler belongs to another library and this object holds only its own reference (its settings are then unknown).</summary>
+    public bool IsWrapped { get; }
+
     /// <summary>The native sampler. Owned by this object.</summary>
     public Sampler Handle { get; private set; }
 

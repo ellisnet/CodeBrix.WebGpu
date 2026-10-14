@@ -48,6 +48,71 @@ public unsafe class WebGpuSkiaDeviceTests : IClassFixture<SkiaGpuFixture>
     }
 
     [Fact]
+    public void Owned_device_exposes_its_handles_through_IWebGpuDeviceSource()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        WebGpuSkiaDevice device = gpu.Device;
+
+        //Act
+        IWebGpuDeviceSource source = device;
+
+        //Assert
+        source.Instance.Should().Be(device.Instance);
+        source.Adapter.Should().Be(device.Adapter);
+        source.Device.Should().Be(device.Device);
+        source.Queue.Should().Be(device.Queue);
+        source.Backend.Should().Be(Native.WebGpu.CodebrixDeviceGetBackend(device.Device));
+        source.HasUncapturedErrorHandler.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Unavailable_and_disposed_devices_expose_no_device_through_IWebGpuDeviceSource()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        WebGpuSkiaDevice disposed = WebGpuSkiaDevice.Create();
+        disposed.Dispose();
+        using WebGpuSkiaDevice absent = WebGpuSkiaDevice.Create(new WebGpuSkiaDeviceOptions { PreferredBackend = AbsentBackend, AllowFallbackBackend = false });
+
+        //Act
+        IWebGpuDeviceSource disposedSource = disposed;
+        IWebGpuDeviceSource absentSource = absent;
+
+        //Assert
+        disposedSource.Device.IsNull.Should().BeTrue();
+        disposedSource.Queue.IsNull.Should().BeTrue();
+        disposedSource.Backend.Should().Be(BackendType.Undefined);
+        disposedSource.HasUncapturedErrorHandler.Should().BeFalse();
+        absentSource.Device.IsNull.Should().BeTrue();
+        absentSource.Backend.Should().Be(BackendType.Undefined);
+        absentSource.HasUncapturedErrorHandler.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Dispose_clears_every_handle_including_the_instance()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        WebGpuSkiaDevice device = WebGpuSkiaDevice.Create();
+        bool hadInstance = !device.Instance.IsNull;
+
+        //Act
+        device.Dispose();
+        IWebGpuDeviceSource source = device;
+
+        //Assert
+        hadInstance.Should().BeTrue();
+        device.Instance.IsNull.Should().BeTrue();
+        device.Adapter.IsNull.Should().BeTrue();
+        device.Device.IsNull.Should().BeTrue();
+        device.Queue.IsNull.Should().BeTrue();
+        source.Instance.IsNull.Should().BeTrue();
+        source.Adapter.IsNull.Should().BeTrue();
+        device.IsAvailable.Should().BeFalse();
+    }
+
+    [Fact]
     public void CreateGrContext_returns_one_context_on_the_matching_skia_backend()
     {
         //Arrange
