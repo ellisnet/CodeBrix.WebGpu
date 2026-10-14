@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using CodeBrix.Imaging;
 using CodeBrix.Imaging.Advanced;
+using CodeBrix.Imaging.Formats.Jxl;
 using CodeBrix.Imaging.PixelFormats;
 
 namespace CodeBrix.WebGpu.Graphics.Images;
@@ -16,9 +17,44 @@ internal static class ImageUpload
 {
     /// <summary>
     /// The decoding configuration: a clone of the default with contiguous image buffers preferred, so a decoded image
-    /// is one block that uploads in a single queue write.
+    /// is one block that uploads in a single queue write. (Its format manager is the shared default one, so decoders
+    /// are never replaced in it; JPEG XL goes through <see cref="JxlTextureDecoder" /> instead.)
     /// </summary>
     public static readonly Configuration Decoding = CreateDecodingConfiguration();
+
+    /// <summary>
+    /// The JPEG XL decoder for textures: output converted to sRGB (wide-gamut, linear-light and HDR sources included;
+    /// PQ/HLG tone mapped for a 255-nit display), because RGBA8 textures are taken as sRGB-encoded. CodeBrix.Imaging's
+    /// default keeps a lossless file's original encoding, which would upload linear-light or wide-gamut samples as if
+    /// they were sRGB.
+    /// </summary>
+    public static readonly JxlDecoder JxlTextureDecoder = new JxlDecoder { TargetColor = JxlTargetColor.Srgb, TargetDisplayLuminance = 255 };
+
+    /// <summary>
+    /// The JPEG XL decoder for high-dynamic-range use (environments): sRGB primaries and the sRGB curve, values outside
+    /// 0..1 kept (no tone mapping), so linearising with <see cref="SrgbToLinearExtended" /> gives linear-light radiance.
+    /// The decoder holds options only and is safe to share.
+    /// </summary>
+    public static readonly JxlDecoder JxlHdrDecoder = new JxlDecoder { TargetColor = JxlTargetColor.Srgb };
+
+    private static readonly JxlImageFormatDetector JxlDetector = new JxlImageFormatDetector();
+
+    /// <summary>True when the bytes start like a JPEG XL codestream or container.</summary>
+    /// <param name="data">The first bytes of a file (12 are enough).</param>
+    /// <returns>True for JPEG XL.</returns>
+    public static bool IsJpegXl(ReadOnlySpan<byte> data) => JxlDetector.DetectFormat(data) != null;
+
+    /// <summary>
+    /// The inverse sRGB curve extended to every real value (mirrored for negatives, the power segment continued above
+    /// 1), the exact inverse of the encoding CodeBrix.Imaging's JPEG XL decoder applies for sRGB output.
+    /// </summary>
+    /// <param name="value">An sRGB-encoded value (may lie outside 0..1).</param>
+    /// <returns>The linear value.</returns>
+    public static float SrgbToLinearExtended(float value)
+    {
+        float magnitude = Math.Abs(value);
+        return MathF.CopySign(magnitude <= 0.04045f ? magnitude / 12.92f : MathF.Pow((magnitude + 0.055f) / 1.055f, 2.4f), value);
+    }
 
     /// <summary>Decodes an encoded image (any format CodeBrix.Imaging detects) to RGBA.</summary>
     /// <param name="encoded">The file bytes.</param>
@@ -29,7 +65,7 @@ internal static class ImageUpload
     {
         try
         {
-            return Image.Load<Rgba32>(Decoding, encoded);
+            return IsJpegXl(encoded) ? DecodeJpegXl<Rgba32>(JxlTextureDecoder, encoded) : Image.Load<Rgba32>(Decoding, encoded);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -43,8 +79,20 @@ internal static class ImageUpload
     /// <returns>The image.</returns>
     public static Image<Rgba32> Decode(Stream stream, string what)
     {
+        if (!stream.CanSeek)
+        {
+            using MemoryStream copy = new MemoryStream();
+            stream.CopyTo(copy);
+            return Decode(new ReadOnlySpan<byte>(copy.GetBuffer(), 0, (int)copy.Length), what);
+        }
+
         try
         {
+            Span<byte> header = stackalloc byte[12];
+            long start = stream.Position;
+            int read = stream.ReadAtLeast(header, header.Length, false);
+            stream.Position = start;
+            if (IsJpegXl(header.Slice(0, read))) return JxlTextureDecoder.Decode<Rgba32>(Decoding, stream, default);
             return Image.Load<Rgba32>(Decoding, stream);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -138,6 +186,21 @@ internal static class ImageUpload
         finally
         {
             ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    /// <summary>Decodes JPEG XL bytes with a configured decoder (the bytes are read in place, not copied).</summary>
+    /// <typeparam name="TPixel">The pixel type.</typeparam>
+    /// <param name="decoder">The decoder.</param>
+    /// <param name="encoded">The file bytes.</param>
+    /// <returns>The image.</returns>
+    public static unsafe Image<TPixel> DecodeJpegXl<TPixel>(JxlDecoder decoder, ReadOnlySpan<byte> encoded)
+        where TPixel : unmanaged, IPixel<TPixel>
+    {
+        fixed (byte* bytes = encoded)
+        {
+            using UnmanagedMemoryStream stream = new UnmanagedMemoryStream(bytes, encoded.Length);
+            return decoder.Decode<TPixel>(Decoding, stream, default);
         }
     }
 

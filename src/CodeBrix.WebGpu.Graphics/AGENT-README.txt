@@ -26,8 +26,8 @@ binding call:
     images (`AnimatedTexture`);
   * MODELS: glTF 2.0 files loaded onto the GPU (`Model`), placed any number
     of times (`ModelInstance`) and drawn in batches (`ModelRenderer`);
-  * ENVIRONMENTS: image-based lighting from HDR panoramas (Radiance .hdr)
-    or a procedural sky (`EnvironmentMap`, baked on the GPU), a sky
+  * ENVIRONMENTS: image-based lighting from HDR panoramas (Radiance .hdr,
+    JPEG XL) or a procedural sky (`EnvironmentMap`, baked on the GPU), a sky
     background (`SkyboxRenderer`) and an HDR path with tone mapping
     (`ToneMapper`);
   * PRESENTATION: any texture view (`RenderTargetView`), a headless target
@@ -374,8 +374,12 @@ GraphicsContext
   CreateTextureFromStream(stream, options = null)
   CreateTextureFromEncoded(ReadOnlySpan<byte> fileBytes, options = null)
   CreateTextureFromImage(CodeBrix.Imaging.Image, options = null)
-        format detected from the content: PNG, JPEG, GIF (first frame), BMP,
-        TGA, TIFF, PBM, still WebP. Pixels become RGBA8 and are uploaded
+        format detected from the content: PNG, JPEG, JPEG XL, GIF, BMP, TGA,
+        TIFF, PBM, still WebP (an animation gives its first frame). JPEG XL
+        is decoded to sRGB: wide-gamut and linear-light files are converted,
+        HDR (PQ / HLG) files are tone mapped for an SDR display, float
+        values above 1 clip (for HDR light use CreateEnvironment, which keeps
+        the range). Pixels become RGBA8 and are uploaded
         straight from the decoded memory (an Image<Rgba32> you pass uploads
         without a copy; other pixel types are converted). Your image is never
         modified or disposed. Undecodable input -> InvalidDataException.
@@ -397,7 +401,10 @@ GpuTexture
   ToImage(mipLevel = 0, layer = 0) -> Image<Rgba32> (RGBA8/BGRA8 textures,
         sRGB included - the stored bytes; needs CopySrc; dispose the image)
   SaveAsPng(path), SaveAs(path) (format from the extension: .png .jpg .jpeg
-        .bmp .gif .tga .tif .tiff .webp .pbm), SaveAs(Stream, IImageFormat)
+        .jxl .bmp .gif .tga .tif .tiff .webp .pbm; .jxl is lossy at Imaging's
+        default distance - for lossless: using var image = texture.ToImage();
+        image.SaveAsJxl(path, new JxlEncoder { Lossless = true });),
+        SaveAs(Stream, IImageFormat)
   CreateLayerView(layer, label = null) -> GpuTexture: a 2D view of one array
         layer (all mips) usable anywhere a 2D texture is (SpriteBatch,
         materials, BindingEntry.ForTexture); own reference; IsWrapped = true
@@ -410,8 +417,12 @@ Animated textures
 -----------------
 GraphicsContext
   CreateAnimatedTexture(path | Stream | Image, AnimatedTextureOptions = null)
-        every frame of an animated GIF (or any multi-frame Imaging image);
-        GIF delays are honoured (0 or 1 hundredths -> 100 ms, as browsers do)
+        every frame of an animated GIF or JPEG XL (or any multi-frame Imaging
+        image); GIF delays are honoured (0 or 1 hundredths -> 100 ms, as
+        browsers do) and so are JPEG XL frame durations (ticks at the file's
+        ticks-per-second rate; a zero duration -> DefaultFrameDuration).
+        Animated WebP and APNG are not animated by CodeBrix.Imaging (see
+        LIMITS)
   CreateAnimatedTexture(IReadOnlyList<Image> frames, options = null)
         equally sized frames (each image's first frame, copied)
 AnimatedTextureOptions: LoopMode (AnimationLoopMode.Loop | PingPong | Once),
@@ -643,13 +654,20 @@ Environments, sky and tone mapping (image-based lighting)
 GraphicsContext
   CreateEnvironment(string path, EnvironmentOptions options = null)
         equirectangular (2:1) panorama: Radiance .hdr (linear HDR, detected
-        by its #?RADIANCE / #?RGBE signature) or any image CodeBrix.Imaging
-        decodes (PNG, JPEG ...: taken as sRGB and linearised = LDR light).
+        by its #?RADIANCE / #?RGBE signature), JPEG XL (detected by its
+        signature; float, linear-light, PQ, HLG and wide-gamut files are
+        converted to linear sRGB with the HDR range kept - values above 1
+        stay; 8/16-bit sRGB files give LDR light), or any other image
+        CodeBrix.Imaging decodes (PNG, JPEG ...: taken as sRGB and linearised
+        = LDR light).
         OpenEXR -> NotSupportedException; missing -> FileNotFoundException;
         undecodable -> InvalidDataException. Label = the file name.
   CreateEnvironment(Stream, options), CreateEnvironment(FloatImage, options)
   CreateEnvironment(CodeBrix.Imaging.Image, options)   Image<RgbaVector> /
-        Image<HalfVector4> = linear floats; other pixel types = sRGB
+        Image<HalfVector4> = linear floats; other pixel types = sRGB. GOTCHA:
+        Image.Load<RgbaVector>("x.jxl") keeps the file's own transfer curve
+        (Imaging writes float JPEG XL on the sRGB curve), so pass .jxl files
+        by path or stream instead - those decode to linear light
   CreateProceduralSky(ProceduralSkyOptions sky = null, EnvironmentOptions options = null)
   DefaultEnvironment   procedural sky (ProceduralSkyOptions defaults, cube
         256), built on first use, owned by the context - do not dispose
@@ -1293,9 +1311,8 @@ LIMITS
     RGBA8 / BGRA8 only (a box filter on the stored bytes); image loading and
     GraphicsContext.GenerateMipmaps generate them on the GPU (sRGB-correct).
   * Images are decoded to 8 bits per channel (16-bit PNG/TIFF lose precision).
-    With the CodeBrix.Imaging version this package uses, animated GIF is the
-    animated format: APNG decodes as its first frame and animated WebP is
-    refused by the decoder (InvalidDataException). JPEG XL is not decoded.
+    Animated formats: GIF and JPEG XL. CodeBrix.Imaging decodes APNG as its
+    first frame and refuses animated WebP (InvalidDataException).
   * MeshRenderer lighting is computed in the target's own colour space (no
     sRGB conversion unless you choose sRGB formats yourself). ModelRenderer
     shades in linear space and encodes for 8/10-bit UNORM targets itself.
@@ -1458,8 +1475,8 @@ WHAT THIS PACKAGE DOES NOT DO
   mesh compression); animation is glTF node animation (translation,
   rotation, scale, morph weights) with blending and cross-fades - no
   KHR_animation_pointer channels, retargeting, root-motion extraction, inverse
-  kinematics or animation state machines. Environments: Radiance .hdr and
-  LDR panoramas and the procedural sky only (no OpenEXR, cube-map files,
+  kinematics or animation state machines. Environments: Radiance .hdr,
+  JPEG XL and LDR panoramas and the procedural sky only (no OpenEXR, cube-map files,
   KTX2 environments, reflection probes or real-time scene capture); no
   bloom, auto-exposure or other post effects beyond tone mapping. No text
   rendering (draw glyphs from an atlas texture with the sprite batch). No
@@ -1502,7 +1519,9 @@ WORKING EXAMPLES ON GITHUB
     Regions, layouts, structs     TextureRegionTests.cs
     Image files, GPU mipmaps,
       readback, saving, arrays    ImageTextureTests.cs
-    Animated GIFs and frames      AnimatedTextureTests.cs
+    Animated GIF / JPEG XL,
+      frame lists                 AnimatedTextureTests.cs
+    JPEG XL test files (in-test)  TestJxl.cs
     glTF models, instances,
       model renderer              ModelLoadingTests.cs
     PBR shading, skinning,
@@ -1558,12 +1577,12 @@ QUICK REFERENCE CARD
   Immediates: WithImmediates<T>() -> pass.SetImmediates(in value)
   Images: CreateTextureFromFile(path[, TextureLoadOptions.Data]) -> ToImage /
           SaveAsPng / SaveAs(path)
-  Animated: CreateAnimatedTexture("a.gif") -> batch.Draw(anim, elapsed, rect, tint)
+  Animated: CreateAnimatedTexture("a.gif" or "a.jxl") -> batch.Draw(anim, elapsed, rect, tint)
   Models: LoadModel("m.glb") -> CreateInstance(world) ->
           CreateModelRenderer(): Begin / Draw(instance) / End  (PBR, GPU
           skinning + morphs; SetLocalTransform / SetMorphWeight /
           BeginPoseEdit to pose)
-  Environments: gpu.CreateEnvironment("x.hdr") -> lighting.Environment =
+  Environments: gpu.CreateEnvironment("x.hdr" or "x.jxl") -> lighting.Environment =
           env (default: gpu.DefaultEnvironment sky); EnvironmentRotation /
           EnvironmentIntensity; gpu.CreateSkyboxRenderer().Draw(pass, camera,
           lighting); HDR: RGBA16Float target -> gpu.CreateToneMapper().Apply(

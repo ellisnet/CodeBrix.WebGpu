@@ -56,8 +56,10 @@ public sealed unsafe partial class GpuTexture
     }
 
     /// <summary>
-    /// Saves mip level 0 to a file whose format CodeBrix.Imaging picks from the extension (.png, .jpg / .jpeg, .bmp,
-    /// .gif, .tga, .tif / .tiff, .webp, .pbm).
+    /// Saves mip level 0 to a file whose format CodeBrix.Imaging picks from the extension (.png, .jpg / .jpeg, .jxl,
+    /// .bmp, .gif, .tga, .tif / .tiff, .webp, .pbm; .jxl is written lossy at CodeBrix.Imaging's default visually
+    /// near-lossless distance; for lossless JPEG XL call <see cref="ToImage" /> and save it with
+    /// <c>SaveAsJxl(path, new JxlEncoder { Lossless = true })</c>).
     /// </summary>
     /// <param name="path">The file to write.</param>
     /// <exception cref="NotSupportedException">The extension names no format CodeBrix.Imaging can write.</exception>

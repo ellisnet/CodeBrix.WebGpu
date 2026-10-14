@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using CodeBrix.Imaging;
+using CodeBrix.Imaging.Formats.Jxl;
 using CodeBrix.Imaging.Formats.Png;
 using CodeBrix.Imaging.PixelFormats;
 using CodeBrix.WebGpu.Native;
@@ -228,6 +229,104 @@ public class ImageTextureTests : IClassFixture<GraphicsGpuFixture>
         finally
         {
             File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public void lossless_jpeg_xl_loads_from_bytes_streams_and_files_with_exact_pixels()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        using Image<Rgba32> source = Checker(5);
+        source[1, 1] = new Rgba32(10, 20, 30, 0);
+        source[3, 2] = new Rgba32(200, 100, 50, 128);
+        byte[] jxl = TestJxl.Encode(source);
+        TextureLoadOptions linear = new TextureLoadOptions { ColorSpace = TextureColorSpace.Linear, Mipmaps = false };
+        string folder = Directory.CreateTempSubdirectory("webgpu-jxl-").FullName;
+        try
+        {
+            string path = Path.Combine(folder, "checker.jxl");
+            File.WriteAllBytes(path, jxl);
+
+            //Act
+            using GpuTexture fromBytes = gpu.Context.CreateTextureFromEncoded(jxl, linear);
+            using GpuTexture fromStream = gpu.Context.CreateTextureFromStream(new MemoryStream(jxl), linear);
+            using GpuTexture fromForwardOnly = gpu.Context.CreateTextureFromStream(new TestJxl.ForwardOnlyStream(new MemoryStream(jxl)), linear);
+            using GpuTexture fromFile = gpu.Context.CreateTextureFromFile(path);
+
+            //Assert
+            fromFile.Label.Should().Be("checker.jxl");
+            fromFile.Format.Should().Be(TextureFormat.RGBA8UnormSrgb);
+            fromFile.MipLevelCount.Should().Be(3);
+            foreach (GpuTexture texture in new[] { fromBytes, fromStream, fromForwardOnly })
+            {
+                using Image<Rgba32> back = texture.ToImage();
+                for (int y = 0; y < 5; y++)
+                {
+                    for (int x = 0; x < 5; x++) back[x, y].Should().Be(source[x, y]);
+                }
+            }
+
+            using Image<Rgba32> fileBack = fromFile.ToImage();
+            fileBack[3, 2].Should().Be(source[3, 2]);
+            gpu.Context.TakeErrors().Should().BeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(folder, true);
+        }
+    }
+
+    [Fact]
+    public void linear_light_and_float_jpeg_xl_files_are_converted_to_srgb_for_textures()
+    {
+        //Arrange - linear 0.18 is sRGB 0.4614 = 118; an HDR value above 1 clips to 255 (no PQ/HLG curve to tone map)
+        gpu.RequireDevice();
+        byte[] grey = TestJxl.LinearFloat(4, 2, 0.18f, 0.18f, 4f);
+        TextureLoadOptions linear = new TextureLoadOptions { ColorSpace = TextureColorSpace.Linear, Mipmaps = false };
+
+        //Act
+        using GpuTexture texture = gpu.Context.CreateTextureFromEncoded(grey, linear);
+        using Image<Rgba32> back = texture.ToImage();
+
+        //Assert
+        ((int)back[0, 0].R).Should().BeInRange(117, 119);
+        ((int)back[3, 1].G).Should().BeInRange(117, 119);
+        back[2, 1].B.Should().Be((byte)255);
+        back[2, 1].A.Should().Be((byte)255);
+    }
+
+    [Fact]
+    public void textures_save_as_jpeg_xl_by_extension_and_losslessly_through_the_image()
+    {
+        //Arrange
+        gpu.RequireDevice();
+        using Image<Rgba32> source = Checker(6);
+        using GpuTexture texture = gpu.Context.CreateTextureFromImage(source, new TextureLoadOptions { ColorSpace = TextureColorSpace.Linear, Mipmaps = false });
+        string folder = Directory.CreateTempSubdirectory("webgpu-jxl-save-").FullName;
+        try
+        {
+            string lossy = Path.Combine(folder, "lossy.jxl");
+            string exact = Path.Combine(folder, "exact.jxl");
+
+            //Act
+            texture.SaveAs(lossy);
+            using (Image<Rgba32> image = texture.ToImage()) image.SaveAsJxl(exact, new JxlEncoder { Lossless = true, Effort = 3 });
+            using Image<Rgba32> lossyBack = Image.Load<Rgba32>(lossy);
+            using Image<Rgba32> exactBack = Image.Load<Rgba32>(exact);
+
+            //Assert
+            lossyBack.Format.Should().BeSameAs(JxlFormat.Instance);
+            lossyBack.Width.Should().Be(6);
+            lossyBack.Height.Should().Be(6);
+            for (int y = 0; y < 6; y++)
+            {
+                for (int x = 0; x < 6; x++) exactBack[x, y].Should().Be(source[x, y]);
+            }
+        }
+        finally
+        {
+            Directory.Delete(folder, true);
         }
     }
 }

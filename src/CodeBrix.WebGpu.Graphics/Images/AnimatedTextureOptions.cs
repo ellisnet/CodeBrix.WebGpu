@@ -46,7 +46,7 @@ public sealed class AnimatedTextureOptions
     /// <summary>True to premultiply colour by alpha once, while loading. Default false.</summary>
     public bool PremultiplyAlpha { get; set; }
 
-    /// <summary>The duration of frames whose file carries no timing (and of every frame of a non-GIF source). Default 100 ms.</summary>
+    /// <summary>The duration of frames whose file carries no timing (and of every frame of a source other than GIF or JPEG XL). Default 100 ms.</summary>
     public TimeSpan DefaultFrameDuration { get; set; } = TimeSpan.FromMilliseconds(100);
 
     /// <summary>Per-frame durations that replace the file's timing (null = use the file's). Shorter arrays repeat their last value.</summary>

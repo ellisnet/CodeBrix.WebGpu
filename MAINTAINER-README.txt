@@ -631,7 +631,7 @@ switch as the Skia package (default ProjectReference to the Native project;
 published Native package). Same order: publish Native V, wait for nuget.org,
     dotnet pack src/CodeBrix.WebGpu.Graphics -c Release -p:WebGpuNativePackageVersion=V -o <folder>
 check the nuspec (exactly three dependencies: CodeBrix.WebGpu.Native.MitLicenseForever
-V, CodeBrix.Imaging.ApacheLicenseForever 1.0.285.619 and
+V, CodeBrix.Imaging.ApacheLicenseForever 1.0.287.220 and
 CodeBrix.Graphics3D.Gltf2.MitLicenseForever 1.0.261.293), publish, then a plain
 `dotnet restore`. The Graphics package does NOT depend on
 the Skia package, so the two can be published in either order after Native.
@@ -661,7 +661,7 @@ THE PUBLISH SEQUENCE (all three packages, from the repository root)
      = src/CodeBrix.WebGpu.Skia/README.md); no runtimes/. Publish.
   4. dotnet pack src/CodeBrix.WebGpu.Graphics -c Release -p:WebGpuNativePackageVersion=V -o <folder>
      Check: dependencies = CodeBrix.WebGpu.Native.MitLicenseForever V,
-     CodeBrix.Imaging.ApacheLicenseForever 1.0.285.619 and
+     CodeBrix.Imaging.ApacheLicenseForever 1.0.287.220 and
      CodeBrix.Graphics3D.Gltf2.MitLicenseForever 1.0.261.293 only; lib dll +
      xml and the five documents (README.md =
      src/CodeBrix.WebGpu.Graphics/README.md); no runtimes/. Publish.
@@ -684,15 +684,18 @@ VERSIONS AND DEPENDENCY PINS
   file (PURPOSE AND SCOPE, the publish sequence above) and, for SkiaSharp,
   the test / sample SkiaSharp.NativeAssets.* versions (same version as
   SkiaSharp). The package docs name no versions.
-  FOLLOW-UP (planned): .Graphics moves its CodeBrix.Imaging.ApacheLicenseForever
-  pin from 1.0.285.619 to the upcoming CodeBrix.Imaging release with JPEG XL
-  (including animation). Then: change the pin + PackageContentTests; add the
-  JPEG XL frame-duration case in AnimatedTexture.ReadDurations (the one place
-  format-specific timing is read; today it reads GIF delays); add a JXL
-  (animated) test image made in-test; update the Graphics README.md /
-  AGENT-README.txt format lists and the LIMITS line about animated formats
-  (APNG / animated WebP / JPEG XL); re-run the gate; republish Graphics only
-  (against the already published Native).
+  JPEG XL FOLLOW-UP: DONE. The CodeBrix.Imaging pin moved from 1.0.285.619 to
+  1.0.287.220 (JPEG XL stills, animation and HDR). Graphics decodes JPEG XL
+  textures to sRGB (Images/ImageUpload.JxlTextureDecoder: TargetColor Srgb,
+  PQ/HLG tone mapped for a 255-nit display), reads JPEG XL frame durations
+  in AnimatedTexture.ReadDurations (ticks at the file's ticks-per-second),
+  and decodes .jxl environments to linear light with the HDR range kept
+  (ImageUpload.JxlHdrDecoder + the extended inverse sRGB curve). Every JXL
+  test file is made in-test with Imaging's encoder (tests/.../TestJxl.cs).
+  Still not animated by Imaging: animated WebP (refused by its decoder) and
+  APNG (the PNG decoder reads the default image only). Releasing this = the
+  usual gate, then republish Graphics only (against the already published
+  Native).
 
 
 CODING CONVENTIONS

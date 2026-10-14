@@ -78,7 +78,7 @@ public class PackageContentTests
         //Assert
         dependencies.Select(dependency => dependency.Id).Should().BeEquivalentTo(new[] { "CodeBrix.WebGpu.Native.MitLicenseForever", "CodeBrix.Imaging.ApacheLicenseForever", "CodeBrix.Graphics3D.Gltf2.MitLicenseForever" });
         dependencies.Single(dependency => dependency.Id == "CodeBrix.WebGpu.Native.MitLicenseForever").Version.Should().StartWith("1.");
-        dependencies.Single(dependency => dependency.Id == "CodeBrix.Imaging.ApacheLicenseForever").Version.Should().Be("1.0.285.619");
+        dependencies.Single(dependency => dependency.Id == "CodeBrix.Imaging.ApacheLicenseForever").Version.Should().Be("1.0.287.220");
         dependencies.Single(dependency => dependency.Id == "CodeBrix.Graphics3D.Gltf2.MitLicenseForever").Version.Should().Be("1.0.261.293");
     }
 

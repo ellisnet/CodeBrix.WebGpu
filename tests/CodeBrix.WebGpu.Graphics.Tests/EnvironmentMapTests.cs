@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Numerics;
 using CodeBrix.Imaging;
+using CodeBrix.Imaging.Formats.Jxl;
 using CodeBrix.Imaging.PixelFormats;
 using CodeBrix.WebGpu.Graphics.Lighting;
 using SilverAssertions;
@@ -481,6 +482,61 @@ public class EnvironmentMapTests : IClassFixture<GraphicsGpuFixture>
         //Assert
         AllNear(fromLdr.IrradianceArray, 0, new Vector3(0.5029f), 0.004f);
         AllNear(fromHdr.IrradianceArray, 0, new Vector3(3f, 2f, 1f), 0.01f);
+    }
+
+    [Fact]
+    public void jpeg_xl_panoramas_keep_their_high_dynamic_range_in_linear_light()
+    {
+        //Arrange - a linear-light float file (3, 2, 1); an Imaging float file on the sRGB curve (encoded 1.5 = linear
+        //2.5372); an 8-bit sRGB file (188 = linear 0.5029)
+        gpu.RequireDevice();
+        byte[] linearFloat = TestJxl.LinearFloat(32, 16, 3f, 2f, 1f);
+        byte[] srgbFloat;
+        using (Image<RgbaVector> image = new Image<RgbaVector>(32, 16, new RgbaVector(1.5f, 1.5f, 1.5f, 1f))) srgbFloat = TestJxl.Encode(image);
+        byte[] eightBit;
+        using (Image<Rgba32> image = new Image<Rgba32>(32, 16, new Rgba32(188, 188, 188, 255))) eightBit = TestJxl.Encode(image);
+        string folder = Directory.CreateTempSubdirectory("webgpu-env-jxl-").FullName;
+        try
+        {
+            string path = Path.Combine(folder, "pano.jxl");
+            File.WriteAllBytes(path, linearFloat);
+
+            //Act
+            using EnvironmentMap fromFile = gpu.Context.CreateEnvironment(path, Small);
+            using EnvironmentMap fromSrgbFloat = gpu.Context.CreateEnvironment(new MemoryStream(srgbFloat), Small);
+            using EnvironmentMap fromEightBit = gpu.Context.CreateEnvironment(new MemoryStream(eightBit), Small);
+            FloatImage decoded = GraphicsContext.DecodeJpegXlPanorama(linearFloat, "test");
+
+            //Assert
+            gpu.Context.TakeErrors().Should().BeEmpty();
+            fromFile.Label.Should().Be("pano.jxl");
+            decoded.GetPixel(5, 5, out float r, out float g, out float b);
+            r.Should().BeApproximately(3f, 0.001f);
+            g.Should().BeApproximately(2f, 0.001f);
+            b.Should().BeApproximately(1f, 0.001f);
+            AllNear(fromFile.IrradianceArray, 0, new Vector3(3f, 2f, 1f), 0.01f);
+            AllNear(fromSrgbFloat.IrradianceArray, 0, new Vector3(2.5372f), 0.01f);
+            AllNear(fromEightBit.IrradianceArray, 0, new Vector3(0.5029f), 0.004f);
+        }
+        finally
+        {
+            Directory.Delete(folder, true);
+        }
+    }
+
+    [Fact]
+    public void the_extended_srgb_curve_inverts_the_jpeg_xl_encoding_beyond_one_and_below_zero()
+    {
+        //Arrange
+        float[] linear = { -2f, -0.002f, 0f, 0.002f, 0.18f, 0.5f, 1f, 4f, 100f };
+
+        //Act / Assert
+        foreach (float value in linear)
+        {
+            float magnitude = MathF.Abs(value);
+            float encoded = MathF.CopySign(magnitude <= 0.0031308f ? 12.92f * magnitude : (1.055f * MathF.Pow(magnitude, 1f / 2.4f)) - 0.055f, value);
+            CodeBrix.WebGpu.Graphics.Images.ImageUpload.SrgbToLinearExtended(encoded).Should().BeApproximately(value, Math.Max(1e-5f, magnitude * 1e-5f));
+        }
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using System;
 using CodeBrix.Imaging;
 using CodeBrix.Imaging.Formats.Gif;
+using CodeBrix.Imaging.Formats.Jxl;
 using CodeBrix.Imaging.PixelFormats;
 using CodeBrix.WebGpu.Graphics.Images;
 using CodeBrix.WebGpu.Native;
@@ -8,7 +9,7 @@ using CodeBrix.WebGpu.Native;
 namespace CodeBrix.WebGpu.Graphics;
 
 /// <summary>
-/// An animated image on the GPU (an animated GIF, or any multi-frame CodeBrix.Imaging image, or a list of frames)
+/// An animated image on the GPU (an animated GIF or JPEG XL, or any multi-frame CodeBrix.Imaging image, or a list of frames)
 /// with per-frame durations. <see cref="GetFrameTexture(TimeSpan)" /> gives the frame to show at an elapsed time as an
 /// ordinary 2D <see cref="GpuTexture" /> - draw it with a <see cref="SpriteBatch" /> (or
 /// <see cref="SpriteBatch.Draw(AnimatedTexture, TimeSpan, System.Drawing.RectangleF, Color4)" />), bind it, or use it
@@ -25,7 +26,8 @@ namespace CodeBrix.WebGpu.Graphics;
 /// </para>
 /// <para>
 /// Timing: GIF frame delays are read from the file (a delay of 0 or 1 hundredths of a second plays as 100 ms, as web
-/// browsers do); sources without timing use <see cref="AnimatedTextureOptions.DefaultFrameDuration" />, and
+/// browsers do), and so are JPEG XL frame durations (ticks at the file's ticks-per-second rate; a zero duration plays
+/// as <see cref="AnimatedTextureOptions.DefaultFrameDuration" />); sources without timing use <see cref="AnimatedTextureOptions.DefaultFrameDuration" />, and
 /// <see cref="AnimatedTextureOptions.FrameDurations" /> overrides both.
 /// </para>
 /// </remarks>
@@ -36,6 +38,7 @@ public sealed class AnimatedTexture : GraphicsResource
     private readonly GpuTexture[] views;
     private readonly int[] slotFrames;
     private Image<Rgba32> retained;
+    private Memory<Rgba32>[] retainedPixels;
     private int nextSlot;
 
     private AnimatedTexture(GraphicsContext context, Image<Rgba32> image, bool owned, AnimatedTextureOptions options)
@@ -76,6 +79,16 @@ public sealed class AnimatedTexture : GraphicsResource
                 int slots = Math.Clamp(options.StreamingSlots, 2, 16);
                 retained = owned ? image : image.Clone(ImageUpload.Decoding);
                 if (options.PremultiplyAlpha) PremultiplyAll(retained);
+
+                // Each frame's pixel block is looked up once here: CodeBrix.Imaging's single-block lookup enumerates
+                // (allocates), and streaming uploads happen during playback. Empty = a multi-block frame, uploaded
+                // segment by segment.
+                retainedPixels = new Memory<Rgba32>[count];
+                for (int index = 0; index < count; index++)
+                {
+                    if (retained.Frames[index].DangerousTryGetSinglePixelMemory(out Memory<Rgba32> pixels)) retainedPixels[index] = pixels;
+                }
+
                 ArrayTexture = context.CreateTextureArray(Width, Height, slots, Format, TextureUsage.TextureBinding | TextureUsage.CopyDst | TextureUsage.CopySrc, 1, Label == null ? "animated ring" : Label + " ring");
                 views = new GpuTexture[slots];
                 slotFrames = new int[slots];
@@ -192,6 +205,7 @@ public sealed class AnimatedTexture : GraphicsResource
         ArrayTexture = null;
         retained?.Dispose();
         retained = null;
+        retainedPixels = null;
     }
 
     private int Resident(int frame)
@@ -206,7 +220,9 @@ public sealed class AnimatedTexture : GraphicsResource
 
         int target = nextSlot;
         nextSlot = (nextSlot + 1) % slotFrames.Length;
-        ImageUpload.Upload(ArrayTexture, retained.Frames[frame], target, false);
+        Memory<Rgba32> pixels = retainedPixels[frame];
+        if (pixels.Length == Width * Height) ArrayTexture.WriteRegion(new TextureRegion(0, 0, Width, Height, 0, target), System.Runtime.InteropServices.MemoryMarshal.AsBytes(pixels.Span));
+        else ImageUpload.Upload(ArrayTexture, retained.Frames[frame], target, false);
         slotFrames[target] = frame;
         return target;
     }
@@ -225,11 +241,26 @@ public sealed class AnimatedTexture : GraphicsResource
         return low;
     }
 
+    /// <summary>
+    /// Reads the per-frame durations: the one place format-specific timing is read (GIF delays, JPEG XL tick
+    /// durations); options override, sources without timing use the default duration.
+    /// </summary>
+    /// <param name="image">The decoded image.</param>
+    /// <param name="options">The options.</param>
+    /// <returns>One duration per frame (all positive).</returns>
     private static TimeSpan[] ReadDurations(Image<Rgba32> image, AnimatedTextureOptions options)
     {
         int count = image.Frames.Count;
         TimeSpan[] result = new TimeSpan[count];
         bool gif = image.Format is GifFormat;
+        bool jxl = image.Format is JxlFormat;
+        double jxlTicksToSeconds = 0;
+        if (jxl)
+        {
+            JxlMetadata metadata = image.Metadata.GetJxlMetadata();
+            if (metadata.TicksPerSecondNumerator != 0) jxlTicksToSeconds = (double)metadata.TicksPerSecondDenominator / metadata.TicksPerSecondNumerator;
+        }
+
         TimeSpan fallback = options.DefaultFrameDuration > TimeSpan.Zero ? options.DefaultFrameDuration : TimeSpan.FromMilliseconds(100);
         for (int index = 0; index < count; index++)
         {
@@ -242,6 +273,11 @@ public sealed class AnimatedTexture : GraphicsResource
             {
                 int delay = image.Frames[index].Metadata.GetGifMetadata().FrameDelay;
                 duration = delay <= 1 ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromMilliseconds(delay * 10.0);
+            }
+            else if (jxl && count > 1 && jxlTicksToSeconds > 0)
+            {
+                uint ticks = image.Frames[index].Metadata.GetJxlMetadata().Duration;
+                if (ticks > 0) duration = TimeSpan.FromTicks((long)Math.Round(ticks * jxlTicksToSeconds * TimeSpan.TicksPerSecond));
             }
 
             result[index] = duration > TimeSpan.Zero ? duration : fallback;

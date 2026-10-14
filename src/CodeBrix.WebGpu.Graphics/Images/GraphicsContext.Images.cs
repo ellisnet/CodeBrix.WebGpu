@@ -15,8 +15,10 @@ public sealed unsafe partial class GraphicsContext
 
     /// <summary>
     /// Creates a texture from an image file. The format is detected from the content by CodeBrix.Imaging (PNG, JPEG,
-    /// GIF (first frame), BMP, TGA, TIFF, PBM, still WebP); the pixels are decoded to RGBA8 and uploaded straight from
-    /// the decoded memory.
+    /// JPEG XL, GIF, BMP, TGA, TIFF, PBM, still WebP; the first frame of an animation); the pixels are decoded to RGBA8
+    /// and uploaded straight from the decoded memory. JPEG XL is decoded to sRGB: wide-gamut and linear-light files
+    /// are converted, HDR (PQ / HLG) files tone mapped for an SDR display (for an HDR panorama use
+    /// <see cref="CreateEnvironment(string, EnvironmentOptions)" />, which keeps the range).
     /// </summary>
     /// <param name="path">The file.</param>
     /// <param name="options">The options (null for <see cref="TextureLoadOptions.Default" />: mipmaps, sRGB).</param>
@@ -162,8 +164,8 @@ public sealed unsafe partial class GraphicsContext
     }
 
     /// <summary>
-    /// Creates an animated texture from an image file: every frame of an animated GIF (or of any multi-frame image
-    /// CodeBrix.Imaging decodes), with the file's frame delays. A single-frame image becomes a one-frame animation.
+    /// Creates an animated texture from an image file: every frame of an animated GIF or JPEG XL (or of any multi-frame
+    /// image CodeBrix.Imaging decodes), with the file's frame durations. A single-frame image becomes a one-frame animation.
     /// </summary>
     /// <param name="path">The file.</param>
     /// <param name="options">The options (null for the defaults: looping, sRGB, no mipmaps, storage chosen by size).</param>
@@ -195,8 +197,8 @@ public sealed unsafe partial class GraphicsContext
     }
 
     /// <summary>
-    /// Creates an animated texture from every frame of a CodeBrix.Imaging image you already have (GIF timing is read
-    /// from its frame metadata). The image is not modified or disposed; streaming storage keeps its own copy.
+    /// Creates an animated texture from every frame of a CodeBrix.Imaging image you already have (GIF and JPEG XL
+    /// timing is read from its frame metadata when the image was decoded from such a file). The image is not modified or disposed; streaming storage keeps its own copy.
     /// </summary>
     /// <param name="image">The image.</param>
     /// <param name="options">The options, or null.</param>

@@ -58,8 +58,10 @@ public sealed partial class GraphicsContext
 
     /// <summary>
     /// Builds an environment from an equirectangular (2:1 latitude-longitude) panorama file: Radiance <c>.hdr</c>
-    /// (linear HDR; the usual HDRI download), or any image CodeBrix.Imaging decodes (PNG, JPEG ...; treated as sRGB and
-    /// linearised, so the light it gives is low-dynamic-range). OpenEXR is not supported.
+    /// (linear HDR; the usual HDRI download), JPEG XL <c>.jxl</c> (HDR kept: float, linear-light, PQ and HLG files are
+    /// converted to linear sRGB radiance with values above 1 preserved; 8/16-bit files too), or any other image
+    /// CodeBrix.Imaging decodes (PNG, JPEG ...; treated as sRGB and linearised, so the light it gives is
+    /// low-dynamic-range). OpenEXR is not supported.
     /// </summary>
     /// <param name="path">The file.</param>
     /// <param name="options">The options (null for <see cref="EnvironmentOptions.Default" />).</param>
@@ -106,7 +108,9 @@ public sealed partial class GraphicsContext
     /// <summary>
     /// Builds an environment from a CodeBrix.Imaging image holding an equirectangular panorama (its first frame).
     /// Float pixel types (<c>RgbaVector</c>, <c>HalfVector4</c>) are taken as linear; every other pixel type is taken as
-    /// sRGB-encoded and linearised. The image is not modified or disposed.
+    /// sRGB-encoded and linearised. The image is not modified or disposed. (A float image decoded from a JPEG XL file
+    /// carries the file's own transfer curve - often sRGB - so pass HDR <c>.jxl</c> files to the path or stream
+    /// overloads, which decode them to linear light.)
     /// </summary>
     /// <param name="panorama">The image.</param>
     /// <param name="options">The options (null for the defaults).</param>
@@ -163,6 +167,59 @@ public sealed partial class GraphicsContext
         }
     }
 
+    /// <summary>
+    /// Decodes a JPEG XL panorama to linear light: CodeBrix.Imaging converts any source encoding (float, linear, PQ,
+    /// HLG, wide gamut) to the sRGB curve with values outside 0..1 kept, and the extended inverse curve undoes it.
+    /// Negative (out-of-gamut) and NaN components become 0; radiance is capped at the half-float maximum.
+    /// </summary>
+    /// <param name="data">The file bytes.</param>
+    /// <param name="what">What is decoded (for messages).</param>
+    /// <returns>The panorama.</returns>
+    /// <exception cref="InvalidDataException">The file could not be decoded.</exception>
+    internal static FloatImage DecodeJpegXlPanorama(ReadOnlySpan<byte> data, string what)
+    {
+        Image<RgbaVector> image;
+        try
+        {
+            image = ImageUpload.DecodeJpegXl<RgbaVector>(ImageUpload.JxlHdrDecoder, data);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            throw new InvalidDataException("The environment image " + what + " could not be decoded: " + exception.Message, exception);
+        }
+
+        using (image)
+        {
+            int width = image.Width;
+            int height = image.Height;
+            float[] rgb = new float[width * height * 3];
+            image.Frames.RootFrame.ProcessPixelRows(accessor =>
+            {
+                for (int row = 0; row < accessor.Height; row++)
+                {
+                    Span<RgbaVector> pixels = accessor.GetRowSpan(row);
+                    int target = row * width * 3;
+                    for (int column = 0; column < pixels.Length; column++, target += 3)
+                    {
+                        rgb[target] = ToRadiance(pixels[column].R);
+                        rgb[target + 1] = ToRadiance(pixels[column].G);
+                        rgb[target + 2] = ToRadiance(pixels[column].B);
+                    }
+                }
+            });
+            return new FloatImage(width, height, rgb);
+        }
+    }
+
+    /// <summary>Linearises one extended-sRGB sample into a radiance the half-float cubes hold (negative and NaN to 0, at most 65504).</summary>
+    /// <param name="encoded">The sRGB-encoded sample.</param>
+    /// <returns>The radiance.</returns>
+    private static float ToRadiance(float encoded)
+    {
+        float linear = ImageUpload.SrgbToLinearExtended(encoded);
+        return linear > 0f ? Math.Min(linear, 65504f) : 0f;
+    }
+
     private static float SrgbToLinear(float value)
     {
         if (value <= 0.04045f) return Math.Max(value, 0f) / 12.92f;
@@ -192,6 +249,10 @@ public sealed partial class GraphicsContext
         if (RadianceHdrDecoder.IsRadianceHdr(data))
         {
             panorama = RadianceHdrDecoder.Decode(data);
+        }
+        else if (ImageUpload.IsJpegXl(data))
+        {
+            panorama = DecodeJpegXlPanorama(data, what);
         }
         else
         {
