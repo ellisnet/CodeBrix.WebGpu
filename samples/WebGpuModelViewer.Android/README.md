@@ -8,7 +8,7 @@ The viewer code (scene, renderer, HUD) is the desktop sample's own source, linke
 * `Hosting/AndroidRunner.cs` - opens a full-screen window, creates the WebGPU surface over its `ANativeWindow` (`NativeWindowSource.FromAndroid`), writes six PNG frames as a check, then renders live. One finger drags to orbit the camera; two fingers pinch to zoom. The Back button quits.
 * `Hosting/AssetInstaller.cs` - the models and textures travel in the APK as assets (the desktop sample's `Assets` folder, linked, not copied) and are copied once to the app's files folder, where the model loader reads them.
 
-The native WebGPU library is packaged into the APK's `lib/<abi>/` folders from the Native project's `runtimes/android-arm64` and `runtimes/android-x64` folders.
+The native WebGPU library is packaged into the APK's `lib/<abi>/` folders from the CodeBrix.WebGpu.Native package; when the repository is built with `-p:UseLocalNativeProject=true` (Native as a project reference) it comes from the Native project's `runtimes/android-arm64` and `runtimes/android-x64` folders instead.
 
 ## Building and deploying
 

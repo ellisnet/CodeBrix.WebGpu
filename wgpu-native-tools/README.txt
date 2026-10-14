@@ -247,7 +247,9 @@ BUMPING WGPU (the exact recipe)
      structs changed) and bump api_version in codebrix.yml + the C header.
   5. tools-scripts/gen-layouts.sh
   6. licenses/compose-license-wgpunative.sh --refresh
-  7. ./build-host.sh ; dotnet test   (the laptop loop: smoke test + managed tests)
+  7. ./build-host.sh ; dotnet test --solution ../CodeBrix.WebGpu.slnx -p:UseLocalNativeProject=true
+       (the laptop loop: smoke test + managed tests; local mode so the Skia and
+       Graphics tests use this repo's Native, not the published package)
   8. FORCE_IMAGE_REBUILD=1 linux/build.sh all     (new RUST_TOOLCHAIN -> new image)
      android/build.sh ; Windows + macOS scripts on Jeremy's machines
   9. UPSTREAM.txt, BUILD-PROVENANCE.txt, THIRD-PARTY-NOTICES.txt; commit; publish

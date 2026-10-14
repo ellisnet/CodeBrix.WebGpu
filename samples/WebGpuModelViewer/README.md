@@ -15,6 +15,8 @@ Everything on screen is drawn by the CodeBrix.WebGpu packages on ONE GPU device:
 
 The sample is not packed and is not part of any NuGet package.
 
+The sample uses the CodeBrix.WebGpu.Native package that the Skia and Graphics projects pin, and its native libraries come from that package. To build everything against the Native project in this repository instead (before that Native version is published, or while changing Native), add `-p:UseLocalNativeProject=true` to the commands below; the sample then copies the Native project's committed native libraries itself.
+
 ## Running it
 
 Live, in a window (Escape or closing the window quits; drag with the left mouse button to orbit, use the wheel to zoom; the average frame rate is printed on exit):

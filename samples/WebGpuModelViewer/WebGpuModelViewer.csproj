@@ -23,13 +23,24 @@
 
   <!--
     The Native project's committed native libraries, copied to the output under runtimes/<rid>/native/ - the layout
-    the Native library's DllImportResolver probes (a ProjectReference does not bring them; an application that uses
-    the published packages gets them from the Native package instead).
+    the Native library's DllImportResolver probes. Needed only when Native comes in as a ProjectReference (the
+    projects built with -p:UseLocalNativeProject=true), which brings no native binaries. When the Native PACKAGE is
+    among the resolved package assets it brings the same files itself, so the target below drops these items again
+    and the package's natives are the only ones copied.
   -->
   <ItemGroup>
     <None Remove="..\..\src\CodeBrix.WebGpu.Native\runtimes\**\*" />
     <None Include="..\..\src\CodeBrix.WebGpu.Native\runtimes\**\*" Link="runtimes\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <Target Name="_DropCommittedNativesWhenNativePackageResolved" AfterTargets="ResolvePackageAssets">
+    <ItemGroup>
+      <_WebGpuNativePackageAsset Include="@(RuntimeTargetsCopyLocalItems->WithMetadataValue('NuGetPackageId', 'CodeBrix.WebGpu.Native.MitLicenseForever'))" />
+      <_WebGpuNativePackageAsset Include="@(NativeCopyLocalItems->WithMetadataValue('NuGetPackageId', 'CodeBrix.WebGpu.Native.MitLicenseForever'))" />
+      <_WebGpuNativePackageAsset Include="@(RuntimeCopyLocalItems->WithMetadataValue('NuGetPackageId', 'CodeBrix.WebGpu.Native.MitLicenseForever'))" />
+      <None Remove="..\..\src\CodeBrix.WebGpu.Native\runtimes\**\*" Condition="'@(_WebGpuNativePackageAsset)' != ''" />
+    </ItemGroup>
+  </Target>
 
   <!-- The models, their textures and their licence files (CC0; see README.md). -->
   <ItemGroup>

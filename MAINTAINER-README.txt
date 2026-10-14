@@ -177,6 +177,15 @@ generated members: by fixing the YAML doc or the fallback in the renderer),
 never with NoWarn. The library needs AllowUnsafeBlocks; nothing else is
 special. Building does NOT run the generator - Generated/ is committed.
 
+Skia and Graphics consume the PUBLISHED Native package by default (pinned in
+their csprojs). Until that pin exists on nuget.org, and whenever a Native
+change is to be built and tested together with Skia/Graphics, add
+-p:UseLocalNativeProject=true to every build, test and run command (it swaps
+in a ProjectReference to src/CodeBrix.WebGpu.Native; see PACKAGING /
+PUBLISHING, HOW SKIA AND GRAPHICS REFERENCE NATIVE):
+
+    dotnet build -c Release CodeBrix.WebGpu.slnx -p:UseLocalNativeProject=true
+
 
 TESTING
 =======
@@ -197,11 +206,17 @@ their counts:
     dotnet tests/CodeBrix.WebGpu.Skia.Tests/bin/Debug/net10.0/CodeBrix.WebGpu.Skia.Tests.dll
     dotnet tests/CodeBrix.WebGpu.Graphics.Tests/bin/Debug/net10.0/CodeBrix.WebGpu.Graphics.Tests.dll
 
-Which native the tests load: each test project copies the committed
-src/CodeBrix.WebGpu.Native/runtimes/** into its output (exactly what the
-package ships). To test a native you have just built on this box, run
-wgpu-native-tools/build-host.sh and adopt its output into
-runtimes/linux-x64/native/ first (see wgpu-native-tools/README.txt).
+Which native the tests load: Native.Tests (always a ProjectReference to
+Native's source) copies the committed src/CodeBrix.WebGpu.Native/runtimes/**
+into its output (exactly what the package ships). The Skia and Graphics test
+projects and both samples carry the same copy (the Android sample as
+AndroidNativeLibrary items), but a target in each drops it again when the
+Native PACKAGE is among the resolved package assets (default mode): then the
+package's natives are the only ones copied. In local mode
+(-p:UseLocalNativeProject=true) they use the committed copy. To test a native
+you have just built on this box, run wgpu-native-tools/build-host.sh and adopt
+its output into runtimes/linux-x64/native/ first (see
+wgpu-native-tools/README.txt), and run the Skia/Graphics tests in local mode.
 
 The GPU tests need a WebGPU adapter. Every one of them SKIPS (with the reason)
 when none is found - a skip is not a pass. The development laptop has Intel
@@ -236,8 +251,9 @@ skip elsewhere: AdoptMetal on non-macOS, the Windows backend-order and
 Vulkan-on-Windows tests on non-Windows, AdoptVulkan where the platform has no
 Vulkan. TimingTests prints frames per second per tier (test output and
 bin/<config>/net10.0/skia-tier-timing.txt) and asserts only sanity.
-PackageContentTests checks the newest Skia nupkg (documents, no runtimes/,
-dependencies = SkiaSharp 4.153.1 + CodeBrix.WebGpu.Native.MitLicenseForever).
+PackageContentTests checks the Skia nupkg of the same build (documents, no
+runtimes/, dependencies = SkiaSharp 4.153.1 + CodeBrix.WebGpu.Native.MitLicenseForever
+at exactly the pinned version); it skips in local mode, which packs nothing.
 
 The Graphics tests (tests/CodeBrix.WebGpu.Graphics.Tests) copy the same
 committed natives; their fixture (GraphicsGpuFixture) uses
@@ -250,9 +266,10 @@ translucency). SkiaSharingTests reference the Skia project and
 SkiaSharp.NativeAssets.Linux (test-only; the Graphics package references
 neither): a GraphicsContext wraps a WebGpuSkiaDevice's device and renders into
 a WebGpuSkiaTarget through the frame protocol. PackageContentTests checks the
-newest Graphics nupkg (documents, no runtimes/, dependencies = exactly
+Graphics nupkg of the same build (documents, no runtimes/, dependencies = exactly
 CodeBrix.WebGpu.Native.MitLicenseForever, CodeBrix.Imaging.ApacheLicenseForever
-and CodeBrix.Graphics3D.Gltf2.MitLicenseForever at their pinned versions).
+and CodeBrix.Graphics3D.Gltf2.MitLicenseForever at their pinned versions); it
+skips in local mode, which packs nothing.
 ImageTextureTests / AnimatedTextureTests generate their images in-test with
 CodeBrix.Imaging; ModelLoadingTests load the CC0 models in
 tests/CodeBrix.WebGpu.Graphics.Tests/Assets (credited in THIRD-PARTY-NOTICES.txt,
@@ -568,7 +585,8 @@ commands, with hand edits only where the C API itself changed.
      codebrix.yml changes, bump its api_version and edit codebrix_wgpu.h to
      match (--check names every difference).
   5. wgpu-native-tools/build-host.sh   (host build + smoke test)
-  6. dotnet test --solution CodeBrix.WebGpu.slnx   (Debug and Release; every
+  6. dotnet test --solution CodeBrix.WebGpu.slnx -p:UseLocalNativeProject=true
+     (Debug and Release, local mode so Skia/Graphics test the new Native; every
      struct layout, the export list, the GPU round trips)
   7. The nine builds (five here, four by Jeremy), each through the gate
      (exports == expected-exports.txt, dependencies, floor, licence file,
@@ -595,46 +613,57 @@ out as well doubles the path; check the nupkg after any csproj change
 (PackageContentTests). The generator and the test projects are not packable.
 Jeremy publishes.
 
-PUBLISHING THE SKIA PACKAGE. src/CodeBrix.WebGpu.Skia has a switch:
+HOW SKIA AND GRAPHICS REFERENCE NATIVE (UseLocalNativeProject). Each of
+src/CodeBrix.WebGpu.Skia and src/CodeBrix.WebGpu.Graphics carries, in its own
+csproj (no shared props file):
 
-  * default (no property): ProjectReference to ../CodeBrix.WebGpu.Native. This
-    is how the repository builds and tests. A package packed this way depends
-    on CodeBrix.WebGpu.Native.MitLicenseForever at the version the Native
-    project computes AT THAT PACK (the date-stamped minute) - a version that
-    was never published. Never publish a Skia package packed this way.
-  * -p:WebGpuNativePackageVersion=<v>: PackageReference to the PUBLISHED
-    CodeBrix.WebGpu.Native.MitLicenseForever <v> instead; the nuspec then
-    carries version="<v>" (NuGet's usual minimum-version form, >= <v>).
-
-  Order: (1) publish CodeBrix.WebGpu.Native (note its version V); (2) wait
-  until nuget.org lists V; (3)
-      dotnet pack src/CodeBrix.WebGpu.Skia -c Release -p:WebGpuNativePackageVersion=V -o <folder>
-  (4) check the nuspec: dependencies CodeBrix.WebGpu.Native.MitLicenseForever
-  V and SkiaSharp 4.153.1, nothing else; (5) publish. Afterwards run a plain
-  `dotnet restore` so obj/ is back on the ProjectReference form.
-  Before V exists on nuget.org step (3) fails at restore with
+  * default, UseLocalNativeProject=false: a PackageReference to the PUBLISHED
+    CodeBrix.WebGpu.Native.MitLicenseForever at the version pinned in that
+    csproj. This is the only form that may be packed and published; the
+    nuspec then depends on exactly the pinned version. Until the first Native
+    publish the pin is the placeholder 1.0.0 (marked as such in the csproj),
+    and every default build/restore of Skia, Graphics, their tests and the
+    samples fails with
       error NU1101: Unable to find package CodeBrix.WebGpu.Native.MitLicenseForever.
       No packages exist with this id in source(s): ..., nuget.org
-  (or NU1102 "Unable to find package ... with version (= V)" once some other
-  version exists). Verified 2026-10-11: with a scratch folder feed holding a
-  locally packed Native 1.0.284.372, the switch produced a Skia nuspec that
-  depends on exactly 1.0.284.372 and SkiaSharp 4.153.1. Re-verified
-  2026-10-13 for Skia and Graphics with a scratch Native 1.0.0-check (feed via
-  -p:RestoreAdditionalProjectSources=<folder>, packages via
-  -p:RestorePackagesPath=<scratch folder> so the global cache stays clean; a
-  prerelease V only adds NuGet warning NU5104).
+    (NU1102 "Unable to find package ... with version (>= V)" once some other
+    version exists).
+  * -p:UseLocalNativeProject=true (or flipping the default in the csproj for
+    a while): a ProjectReference to this repo's src/CodeBrix.WebGpu.Native
+    instead - for building before the pinned Native is on nuget.org, and for
+    changing Native and Skia/Graphics together. It also turns
+    GeneratePackageOnBuild off, and packing in this mode stops with the error
+    "UseLocalNativeProject=true is for local development only...". It is a
+    global property, so it reaches every project of one command: pass it on
+    every build / test / run command of the solution, the tests and the
+    samples. Their committed-native copies switch themselves (see TESTING).
+  Never configure a local folder as a NuGet source holding a freshly built
+  Native package: every Native build restamps its version, so such a source
+  could shadow nuget.org and Skia/Graphics would be built against a Native
+  version that was never published.
 
-
-PUBLISHING THE GRAPHICS PACKAGE. src/CodeBrix.WebGpu.Graphics has the same
-switch as the Skia package (default ProjectReference to the Native project;
--p:WebGpuNativePackageVersion=<v> turns it into a PackageReference to the
-published Native package). Same order: publish Native V, wait for nuget.org,
-    dotnet pack src/CodeBrix.WebGpu.Graphics -c Release -p:WebGpuNativePackageVersion=V -o <folder>
-check the nuspec (exactly three dependencies: CodeBrix.WebGpu.Native.MitLicenseForever
-V, CodeBrix.Imaging.ApacheLicenseForever 1.0.287.220 and
-CodeBrix.Graphics3D.Gltf2.MitLicenseForever 1.0.261.293), publish, then a plain
-`dotnet restore`. The Graphics package does NOT depend on
-the Skia package, so the two can be published in either order after Native.
+PUBLISHING SKIA AND GRAPHICS. (1) Publish CodeBrix.WebGpu.Native (note its
+version V); (2) wait until nuget.org lists V; (3) in BOTH
+src/CodeBrix.WebGpu.Skia/CodeBrix.WebGpu.Skia.csproj and
+src/CodeBrix.WebGpu.Graphics/CodeBrix.WebGpu.Graphics.csproj replace the
+pinned Native version with V (the UseLocalNativeProject default is already
+false); (4) build and test in the default mode (Release and Debug) - this
+packs each into its bin/<configuration>/, and PackageContentTests check that
+very nupkg, including that its Native dependency is exactly V; (5) pack and
+push Skia and Graphics. The two packages do not depend on each other, so
+they can be published in either order after Native.
+  Skia nuspec: dependencies CodeBrix.WebGpu.Native.MitLicenseForever V and
+  SkiaSharp 4.153.1, nothing else. Graphics nuspec: exactly three
+  dependencies - CodeBrix.WebGpu.Native.MitLicenseForever V,
+  CodeBrix.Imaging.ApacheLicenseForever 1.0.287.220 and
+  CodeBrix.Graphics3D.Gltf2.MitLicenseForever 1.0.261.293.
+  Verified 2026-10-14 with a scratch copy of the repository whose pin named a
+  Native packed into a scratch folder feed (passed with --source on the
+  command line, packages restored into a scratch NUGET_PACKAGES): Skia and
+  Graphics nuspecs depend on exactly that version, the tests and the
+  desktop sample load the natives from the Native package (no committed-native
+  copy, no duplicate-file warnings), and the Android APK's lib/<abi>/ folders
+  hold the package's libraries.
 
 
 THE PUBLISH SEQUENCE (all three packages, from the repository root)
@@ -643,10 +672,14 @@ THE PUBLISH SEQUENCE (all three packages, from the repository root)
      --solution CodeBrix.WebGpu.slnx` in both configurations (0 failed; only
      the documented skips), `dotnet run --project
      tools/CodeBrix.WebGpu.BindingGenerator -- --check` clean, the
-     forbidden-word grep empty. Commit and push; the nuspec records the HEAD
-     commit.
+     forbidden-word grep empty. Before the pinned Native exists on nuget.org
+     this gate runs with -p:UseLocalNativeProject=true on every build and
+     test command (the Skia and Graphics PackageContentTests then skip).
+     Commit and push; the nuspec records the HEAD commit.
   1. dotnet pack src/CodeBrix.WebGpu.Native -c Release -o <folder>
      -> CodeBrix.WebGpu.Native.MitLicenseForever.<V>.nupkg (about 23 MB).
+     (GeneratePackageOnBuild is on, so pack does not build: run it after the
+     Release build of step 0.)
      Check: NO dependencies; lib/net10.0/CodeBrix.WebGpu.Native.dll + .xml;
      README.md (# CodeBrix.WebGpu.Native), AGENT-README.txt,
      THIRD-PARTY-NOTICES.txt, LICENSE, icon-codebrix-128.png;
@@ -655,25 +688,33 @@ THE PUBLISH SEQUENCE (all three packages, from the repository root)
      codebrix_wgpu_procs.h, codebrix_wgpu_procs.rs, LICENSE-WgpuNative.txt;
      nothing else (no pdb, no test assets). Publish it; note V.
   2. Wait until nuget.org lists V (the next restores need it).
-  3. dotnet pack src/CodeBrix.WebGpu.Skia -c Release -p:WebGpuNativePackageVersion=V -o <folder>
+  3. Pin V in the Skia and Graphics csprojs (PUBLISHING SKIA AND GRAPHICS
+     above); build Release and Debug and run the tests in the default mode;
+     commit.
+  4. dotnet pack src/CodeBrix.WebGpu.Skia -c Release -o <folder>
      Check: dependencies = CodeBrix.WebGpu.Native.MitLicenseForever V and
      SkiaSharp 4.153.1 only; lib dll + xml and the five documents (README.md
      = src/CodeBrix.WebGpu.Skia/README.md); no runtimes/. Publish.
-  4. dotnet pack src/CodeBrix.WebGpu.Graphics -c Release -p:WebGpuNativePackageVersion=V -o <folder>
+  5. dotnet pack src/CodeBrix.WebGpu.Graphics -c Release -o <folder>
      Check: dependencies = CodeBrix.WebGpu.Native.MitLicenseForever V,
      CodeBrix.Imaging.ApacheLicenseForever 1.0.287.220 and
      CodeBrix.Graphics3D.Gltf2.MitLicenseForever 1.0.261.293 only; lib dll +
      xml and the five documents (README.md =
      src/CodeBrix.WebGpu.Graphics/README.md); no runtimes/. Publish.
-     (3 and 4 are independent of each other.)
-  5. `dotnet restore CodeBrix.WebGpu.slnx` so obj/ is back on the
-     ProjectReference form; tag the commit as usual.
+     (4 and 5 are independent of each other.) Tag the commit as usual.
   Inspect a nupkg with `unzip -l <file>` and `unzip -p <file> '*.nuspec'`.
-  The PackageContentTests classes (one per package test project) assert the same against
-  the newest nupkg in each project's bin/<configuration>/ (the ProjectReference
-  form, so their Native dependency check only asserts "1."): exact file set,
-  documents byte-identical to their sources, metadata (id, date-stamped
-  version, MIT expression, icon, readme, repository URL) and dependencies.
+  The PackageContentTests classes (one per package test project) assert the
+  same. Native's reads the newest nupkg in its bin/<configuration>/. Skia's
+  and Graphics' read the nupkg produced by the SAME build as the library
+  under test (bin/<configuration>/<id>.<that assembly's version>.nupkg, never
+  a stale one) and assert its Native dependency equals the pinned version;
+  both facts come from AssemblyMetadata the csproj stamps into the library
+  (CodeBrix.WebGpu.Native.Reference = Package or Project,
+  CodeBrix.WebGpu.Native.PackageVersion = the pin). In local mode
+  (UseLocalNativeProject=true) no package is built and they skip with that
+  reason. All of them check: exact file set, documents byte-identical to
+  their sources, metadata (id, date-stamped version, MIT expression, icon,
+  readme, repository URL) and dependencies.
 
 VERSIONS AND DEPENDENCY PINS
   Package versions need no bump: every pack stamps 1.<years since
@@ -683,7 +724,11 @@ VERSIONS AND DEPENDENCY PINS
   PackageReference, the PackageContentTests dependency assertion, this
   file (PURPOSE AND SCOPE, the publish sequence above) and, for SkiaSharp,
   the test / sample SkiaSharp.NativeAssets.* versions (same version as
-  SkiaSharp). The package docs name no versions.
+  SkiaSharp). The package docs name no versions. The Native pin is the
+  exception: it lives only in the Skia and Graphics csprojs (their
+  PackageContentTests read it from the library's AssemblyMetadata), and it
+  moves with every Native publish that Skia/Graphics should pick up
+  (HOW SKIA AND GRAPHICS REFERENCE NATIVE, above).
   JPEG XL FOLLOW-UP: DONE. The CodeBrix.Imaging pin moved from 1.0.285.619 to
   1.0.287.220 (JPEG XL stills, animation and HDR). Graphics decodes JPEG XL
   textures to sRGB (Images/ImageUpload.JxlTextureDecoder: TargetColor Srgb,
@@ -798,7 +843,9 @@ Per-platform backend table:
                  adopted: AdoptMetal - wgpu gets its own MTLCommandQueue, so
                  hand-overs wait (SharesQueueWithSkia = false), UNTESTED here
 
-What Jeremy runs on the other machines (from the repository root):
+What Jeremy runs on the other machines (from the repository root; add
+-p:UseLocalNativeProject=true to each command while the pinned Native is not
+yet on nuget.org):
   Windows (D3D12 primary; Vulkan secondary + Vulkan owned when a Vulkan
   driver is present):
       dotnet build -c Release CodeBrix.WebGpu.slnx
@@ -933,7 +980,9 @@ Gltf2's Schema2 toolkit. Live windows: CodeBrix.Sdl3 window properties ->
 NativeWindowSource (x11 / wayland / windows / cocoa via SDL_Metal_CreateView +
 GetLayer; Android: the ANativeWindow).
 
-What Jeremy runs on the other machines (from the repository root):
+What Jeremy runs on the other machines (from the repository root; add
+-p:UseLocalNativeProject=true to each command while the pinned Native is not
+yet on nuget.org):
       dotnet build -c Release CodeBrix.WebGpu.slnx
       dotnet test --solution CodeBrix.WebGpu.slnx -c Release
       (or) dotnet tests/CodeBrix.WebGpu.Graphics.Tests/bin/Release/net10.0/CodeBrix.WebGpu.Graphics.Tests.dll

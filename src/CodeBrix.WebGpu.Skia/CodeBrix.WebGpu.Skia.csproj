@@ -77,23 +77,61 @@
   </ItemGroup>
 
   <!--
-    The CodeBrix.WebGpu.Native dependency has two forms (see MAINTAINER-README.txt, PUBLISHING THE SKIA
-    PACKAGE):
+    CodeBrix.WebGpu.Native is normally consumed as the PUBLISHED package rather than a ProjectReference: a
+    ProjectReference would stamp into this package's nuspec the version the Native project computes at pack
+    time (its date-stamped minute), a version that was never published. See MAINTAINER-README.txt,
+    PUBLISHING THE SKIA PACKAGE.
 
-      * Default: a ProjectReference to the sibling project, for building and testing inside this repository.
-      * With -p:WebGpuNativePackageVersion=<version>: a PackageReference to the PUBLISHED
-        CodeBrix.WebGpu.Native.MitLicenseForever at exactly that version. Publish the Native package first,
-        then pack this project with the switch, so the Skia package depends on a Native version that exists
-        on nuget.org (a ProjectReference would stamp the version the Native project computes at pack time,
-        which never matches a published one).
+    Take care that no local folder is configured as a NuGet source holding a freshly-built Native package.
+    Every Native build restamps its version, so a local source could shadow nuget.org and this package would
+    be built against a Native version that was never published.
+
+    LOCAL VERIFICATION ESCAPE HATCH (-p:UseLocalNativeProject=true): it swaps the PackageReference for a
+    ProjectReference so a local build compiles this project against THIS repo's Native source, for building
+    before Native is published or for developing a Native change and this package together. Local mode can
+    never be packed (the guard below) and forces GeneratePackageOnBuild off, because a package built that way
+    would depend on a Native version that does not exist. The default is false: a normal build uses the
+    published Native pinned below.
   -->
-  <ItemGroup Condition="'$(WebGpuNativePackageVersion)' == ''">
+  <PropertyGroup>
+    <UseLocalNativeProject Condition="'$(UseLocalNativeProject)' == ''">false</UseLocalNativeProject>
+    <GeneratePackageOnBuild Condition="'$(UseLocalNativeProject)' == 'true'">false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(UseLocalNativeProject)' != 'true'">
+    <!-- PLACEHOLDER version: replace 1.0.0 with the published CodeBrix.WebGpu.Native.MitLicenseForever version. -->
+    <PackageReference Include="CodeBrix.WebGpu.Native.MitLicenseForever" Version="1.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UseLocalNativeProject)' == 'true'">
     <ProjectReference Include="..\CodeBrix.WebGpu.Native\CodeBrix.WebGpu.Native.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(WebGpuNativePackageVersion)' != ''">
-    <PackageReference Include="CodeBrix.WebGpu.Native.MitLicenseForever" Version="$(WebGpuNativePackageVersion)" />
-  </ItemGroup>
+  <Target Name="_BlockPackWithLocalNativeProject" BeforeTargets="GenerateNuspec;Pack"
+          Condition="'$(UseLocalNativeProject)' == 'true'">
+    <Error Text="UseLocalNativeProject=true is for local development only. The resulting package would depend on a CodeBrix.WebGpu.Native version that was never published. Publish CodeBrix.WebGpu.Native first, then flip the UseLocalNativeProject default in this project to false and pin the published Native version." />
+  </Target>
+
+  <!--
+    Records in the assembly how this build consumed Native - AssemblyMetadata "CodeBrix.WebGpu.Native.Reference"
+    = Project or Package, and in package mode "CodeBrix.WebGpu.Native.PackageVersion" = the pinned version - so
+    the package tests can skip in local mode (no package is built) and check that the nupkg depends on exactly
+    the pinned Native version.
+  -->
+  <Target Name="_StampNativeReference" BeforeTargets="GetAssemblyAttributes">
+    <ItemGroup>
+      <_PinnedWebGpuNative Include="@(PackageReference->WithMetadataValue('Identity', 'CodeBrix.WebGpu.Native.MitLicenseForever'))" />
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>CodeBrix.WebGpu.Native.Reference</_Parameter1>
+        <_Parameter2 Condition="'$(UseLocalNativeProject)' == 'true'">Project</_Parameter2>
+        <_Parameter2 Condition="'$(UseLocalNativeProject)' != 'true'">Package</_Parameter2>
+      </AssemblyAttribute>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute" Condition="'$(UseLocalNativeProject)' != 'true'">
+        <_Parameter1>CodeBrix.WebGpu.Native.PackageVersion</_Parameter1>
+        <_Parameter2>@(_PinnedWebGpuNative->'%(Version)')</_Parameter2>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
 
   <!--
     The icon, LICENSE and the third-party notices come from the repo root and cover both packages; the README

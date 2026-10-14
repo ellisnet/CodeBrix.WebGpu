@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using SilverAssertions;
@@ -9,7 +10,7 @@ using Xunit;
 
 namespace CodeBrix.WebGpu.Skia.Tests;
 
-/// <summary>Opens the newest Skia package of the build configuration the tests were built in and checks its contents and dependencies.</summary>
+/// <summary>Opens the Skia package produced by the same build as the Skia library under test and checks its contents and dependencies; skips when that library was built in local mode (UseLocalNativeProject=true), which builds no package.</summary>
 public class PackageContentTests
 {
     private static string Configuration =>
@@ -22,21 +23,52 @@ public class PackageContentTests
         return directory?.FullName;
     }
 
-    private static string NewestPackage()
+    private static readonly Assembly Library = typeof(WebGpuSkiaTarget).Assembly;
+
+    /// <summary>A value the library's csproj stamped as AssemblyMetadata (how this build consumed CodeBrix.WebGpu.Native).</summary>
+    private static string LibraryMetadata(string key) =>
+        Library.GetCustomAttributes<AssemblyMetadataAttribute>().FirstOrDefault(attribute => attribute.Key == key)?.Value;
+
+    private static bool BuiltInLocalMode => LibraryMetadata("CodeBrix.WebGpu.Native.Reference") == "Project";
+
+    /// <summary>The path of the nupkg the build of the library under test produced: bin/&lt;configuration&gt;/ and the library's own version, in NuGet's normalized form (a zero revision is dropped).</summary>
+    private static string ThisBuildsPackage()
     {
+        Version version = Library.GetName().Version;
+        string normalized = version.Revision > 0 ? version.ToString() : version.ToString(3);
         string root = RepositoryRoot();
-        string folder = root == null ? null : Path.Combine(root, "src", "CodeBrix.WebGpu.Skia", "bin", Configuration);
-        return folder != null && Directory.Exists(folder)
-            ? Directory.GetFiles(folder, "CodeBrix.WebGpu.Skia.MitLicenseForever.*.nupkg").OrderBy(File.GetLastWriteTimeUtc).LastOrDefault()
-            : null;
+        return root == null ? null : Path.Combine(root, "src", "CodeBrix.WebGpu.Skia", "bin", Configuration, "CodeBrix.WebGpu.Skia.MitLicenseForever." + normalized + ".nupkg");
+    }
+
+    /// <summary>This build's package; skips in local mode, fails when a package-mode build left no package.</summary>
+    private static string PackageUnderTest()
+    {
+        Assert.SkipWhen(BuiltInLocalMode, "The Skia library was built with UseLocalNativeProject=true (Native as a ProjectReference); local mode never builds a package.");
+        string package = ThisBuildsPackage();
+        Assert.True(package != null && File.Exists(package), "The package-mode build of the Skia library should have packed " + (package ?? "CodeBrix.WebGpu.Skia.MitLicenseForever.<version>.nupkg") + ".");
+        return package;
+    }
+
+    [Fact]
+    public void library_records_how_it_consumed_the_native_package()
+    {
+        //Arrange
+        string reference = LibraryMetadata("CodeBrix.WebGpu.Native.Reference");
+
+        //Act
+        string pinned = LibraryMetadata("CodeBrix.WebGpu.Native.PackageVersion");
+
+        //Assert
+        reference.Should().BeOneOf("Project", "Package");
+        if (reference == "Package") pinned.Should().NotBeNullOrWhiteSpace();
+        else pinned.Should().BeNull();
     }
 
     [Fact]
     public void package_contains_the_assembly_and_its_own_documents()
     {
         //Arrange
-        string package = NewestPackage();
-        Assert.SkipWhen(package == null, "No " + Configuration + " Skia package has been built yet.");
+        string package = PackageUnderTest();
 
         //Act
         using ZipArchive zip = ZipFile.OpenRead(package);
@@ -63,8 +95,7 @@ public class PackageContentTests
     public void package_depends_on_SkiaSharp_and_the_native_package_only()
     {
         //Arrange
-        string package = NewestPackage();
-        Assert.SkipWhen(package == null, "No " + Configuration + " Skia package has been built yet.");
+        string package = PackageUnderTest();
 
         //Act
         using ZipArchive zip = ZipFile.OpenRead(package);
@@ -78,15 +109,14 @@ public class PackageContentTests
         //Assert
         dependencies.Select(dependency => dependency.Id).Should().BeEquivalentTo(new[] { "SkiaSharp", "CodeBrix.WebGpu.Native.MitLicenseForever" });
         dependencies.Single(dependency => dependency.Id == "SkiaSharp").Version.Should().Be("4.153.1");
-        dependencies.Single(dependency => dependency.Id == "CodeBrix.WebGpu.Native.MitLicenseForever").Version.Should().StartWith("1.");
+        dependencies.Single(dependency => dependency.Id == "CodeBrix.WebGpu.Native.MitLicenseForever").Version.Should().Be(LibraryMetadata("CodeBrix.WebGpu.Native.PackageVersion"));
     }
 
     [Fact]
     public void package_contains_nothing_but_the_assembly_the_documents()
     {
         //Arrange
-        string package = NewestPackage();
-        Assert.SkipWhen(package == null, "No " + Configuration + " Skia package has been built yet.");
+        string package = PackageUnderTest();
         string[] expected =
         {
             "_rels/.rels", "[Content_Types].xml", "CodeBrix.WebGpu.Skia.MitLicenseForever.nuspec",
@@ -109,8 +139,7 @@ public class PackageContentTests
     public void package_documents_are_the_packages_own_files()
     {
         //Arrange
-        string package = NewestPackage();
-        Assert.SkipWhen(package == null, "No " + Configuration + " Skia package has been built yet.");
+        string package = PackageUnderTest();
         string root = RepositoryRoot();
         (string Packed, string Source)[] documents =
         {
@@ -139,8 +168,7 @@ public class PackageContentTests
     public void package_metadata_is_complete()
     {
         //Arrange
-        string package = NewestPackage();
-        Assert.SkipWhen(package == null, "No " + Configuration + " Skia package has been built yet.");
+        string package = PackageUnderTest();
 
         //Act
         using ZipArchive zip = ZipFile.OpenRead(package);
