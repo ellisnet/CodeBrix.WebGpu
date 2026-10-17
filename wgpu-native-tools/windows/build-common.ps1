@@ -28,6 +28,17 @@
 #   Recorded in ..\BUILD-PROVENANCE.txt. If something else breaks on another machine, fix it IN
 #   THE SCRIPT and record it there too.
 #
+#   SECOND RUN 2026-10-17, same machine (Visual Studio 2026 18.11.0, same MSVC 14.51 toolset, rustup
+#   1.29.1, toolchain 1.93 = rustc 1.93.1), contract v2 + patches 0003-0009, the first time
+#   -CheckReproducible ran on Windows: both RIDs built and passed every static check (win-x64 the
+#   77-check smoke test on Vulkan too) and then FAILED the reproducibility check, because the
+#   second build went into target-2\ and the target path is embedded in the DLL (one string: the
+#   panic location of glutin_wgl_sys's OUT_DIR-generated wgl_extra_bindings.rs). Two fixes here,
+#   both RIDs rebuilt: the target folder is now --remap-path-prefix'ed to "cargo-target" (so the
+#   shipped DLL no longer carries %TEMP%\codebrix-wgpu-build-<rid>\...; the 2026-10-10 DLLs did),
+#   and the second build goes into a fresh folder at the SAME path (target-1\ keeps the first).
+#   Recorded in ..\BUILD-PROVENANCE.txt.
+#
 # Dot-source this from an architecture script; do not run it directly.
 #
 #     . "$PSScriptRoot\build-common.ps1"
@@ -46,9 +57,14 @@
 #         rustup toolchain install 1.93
 #         rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc --toolchain 1.93
 #     (the toolchain is the RUST_TOOLCHAIN pin in ..\linux\pins.env).
-#   * LLVM's libclang.dll for bindgen: winget install LLVM.LLVM   (or choco install llvm). The
+#   * libclang.dll for bindgen. THE RECOMMENDED PATH (Jeremy's ruling of 2026-10-17; both Windows
+#     rounds used it): Visual Studio's own LLVM, handed in through LIBCLANG_PATH before the run -
+#         $env:LIBCLANG_PATH = "<VS install>\VC\Tools\Llvm\x64\bin"
+#     (the x64 libclang.dll serves both RIDs - bindgen runs on the host; nothing to install). The
+#     alternative is LLVM's installer (winget install LLVM.LLVM, or choco install llvm): the
 #     scripts find C:\Program Files\LLVM\bin\libclang.dll themselves; anywhere else, set
-#     LIBCLANG_PATH to the folder that holds libclang.dll.
+#     LIBCLANG_PATH to the folder that holds libclang.dll. ..\README.txt, "WINDOWS: THE
+#     RECOMMENDED RUN", has the whole recommended invocation (switches, managed proof).
 #   * Git for Windows (git apply, for ..\patches): winget install Git.Git
 # =============================================================================================
 
@@ -243,8 +259,9 @@ Install it:
     return [pscustomobject]@{ Rustup = $rustup; Rustc = "$rustc"; Cargo = "$cargo" }
 }
 
-# libclang.dll for bindgen (wgpu-native's build script). LIBCLANG_PATH wins; else LLVM's default
-# install folder is used (and LIBCLANG_PATH set for the build).
+# libclang.dll for bindgen (wgpu-native's build script). LIBCLANG_PATH wins - the recommended path
+# is Visual Studio's own LLVM handed in that way (see the header); else LLVM's default install
+# folder is used (and LIBCLANG_PATH set for the build).
 function Assert-Libclang {
     $candidates = @()
     if ($env:LIBCLANG_PATH) { $candidates += $env:LIBCLANG_PATH }
@@ -257,7 +274,10 @@ function Assert-Libclang {
     }
     throw @"
 libclang.dll was not found (wgpu-native's build runs bindgen over webgpu.h / wgpu.h, which needs LLVM's libclang).
-Install LLVM:   winget install LLVM.LLVM      (or: choco install llvm)
+The recommended path is Visual Studio's own LLVM, through LIBCLANG_PATH (nothing to install):
+    `$env:LIBCLANG_PATH = "<VS install>\VC\Tools\Llvm\x64\bin"
+    (e.g. C:\Program Files\Microsoft Visual Studio\18\Professional\VC\Tools\Llvm\x64\bin)
+Or install LLVM:   winget install LLVM.LLVM      (or: choco install llvm)
 It lands in C:\Program Files\LLVM\bin, which this script finds by itself; anywhere else, set
 LIBCLANG_PATH to the folder holding libclang.dll.
 "@
@@ -297,7 +317,12 @@ function Copy-SourceToScratch {
 #   --locked      Cargo.lock is the pin; cargo fails rather than change it
 #   +crt-static   the static CRT: the DLL imports no Visual C++ runtime
 #   /Brepro       no timestamps in the PE / PDB, so a rebuild gives the same bytes
-#   --remap-path-prefix   no scratch or cargo-home path in the binary or the PDB
+#   --remap-path-prefix   no scratch, cargo-home or TARGET path in the binary or the PDB. The
+#                 target folder joined the list on 2026-10-17 (second run): a build script's
+#                 OUT_DIR lives under it, OUT_DIR files are compiled by path, and glutin_wgl_sys's
+#                 generated wgl_extra_bindings.rs names its path in a panic location - so every
+#                 Windows DLL built before carried %TEMP%\codebrix-wgpu-build-<rid>\target\...
+#                 (one string), and the -CheckReproducible build into target-2\ could never match.
 # ---------------------------------------------------------------------------------------------
 function Invoke-CargoBuild {
     param(
@@ -311,7 +336,8 @@ function Invoke-CargoBuild {
     # CARGO_ENCODED_RUSTFLAGS (0x1F-separated) so a path with spaces stays ONE argument. With
     # --target given, cargo applies it to the target's crates only, never to build scripts.
     $flags = @('-C', 'target-feature=+crt-static', '-C', 'link-arg=/Brepro',
-               "--remap-path-prefix=$ScratchDir=wgpu-native-tools", "--remap-path-prefix=$cargoHome=cargo-home")
+               "--remap-path-prefix=$ScratchDir=wgpu-native-tools", "--remap-path-prefix=$cargoHome=cargo-home",
+               "--remap-path-prefix=$TargetDir=cargo-target")
     $env:CARGO_ENCODED_RUSTFLAGS = ($flags -join [string][char]0x1F)
     $rustflags = $flags -join ' '
     $envName = 'CARGO_ENCODED_RUSTFLAGS'
@@ -646,11 +672,19 @@ build tools (Latest)") to that instance. (The check reads this instance's filesy
 
     $reproducible = 'not checked (run with -CheckReproducible)'
     if ($CheckReproducible) {
-        Write-Host '  --- reproducibility: a second build into a fresh target folder ---'
-        $secondTarget = Join-Path $BuildRoot 'target-2'
-        if (Test-Path -LiteralPath $secondTarget) { Remove-Item -LiteralPath $secondTarget -Recurse -Force }
-        $second = Invoke-CargoBuild -ScratchDir $scratchDir -TargetDir $secondTarget -Triple $Triple -Pins $pins -LogPath (Join-Path $BuildRoot 'build-2.log')
-        if ((Get-Sha256 $second) -eq (Get-Sha256 $builtDll)) { Add-GatePass 'second build is byte-identical'; $reproducible = 'yes - a second build gave identical DLL bytes' }
+        Write-Host '  --- reproducibility: a second build into a fresh target folder at the SAME path ---'
+        # SECOND-RUN FIX (2026-10-17): the second build used to go into target-2\. The target path
+        # was embedded in the DLL (see Invoke-CargoBuild), so target\ versus target-2\ alone made the
+        # two builds differ - 147,132 bytes on win-x64 (the longer string shifted everything behind
+        # it, then the PDB GUID and the /Brepro content hash followed), 168 on win-arm64 - and the
+        # check could never pass. The first build's folder is set aside as target-1\ and the second
+        # build goes into a fresh target\, so both builds see exactly the same paths and flags (the
+        # target path is remapped out of the binary now anyway). Compared against the STAGED file.
+        $firstTarget = Join-Path $BuildRoot 'target-1'
+        if (Test-Path -LiteralPath $firstTarget) { Remove-Item -LiteralPath $firstTarget -Recurse -Force }
+        Rename-Item -LiteralPath $targetDir -NewName 'target-1'
+        $second = Invoke-CargoBuild -ScratchDir $scratchDir -TargetDir $targetDir -Triple $Triple -Pins $pins -LogPath (Join-Path $BuildRoot 'build-2.log')
+        if ((Get-Sha256 $second) -eq (Get-Sha256 $dllPath)) { Add-GatePass 'second build is byte-identical'; $reproducible = 'yes - a second build into a fresh target folder (same path) gave identical DLL bytes' }
         else { Add-GateFail 'second build differs - record the differing bytes (fc /b) in ..\BUILD-PROVENANCE.txt'; $reproducible = 'NO - see the gate output' }
     }
 

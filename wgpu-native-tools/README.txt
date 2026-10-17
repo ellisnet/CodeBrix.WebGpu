@@ -90,9 +90,10 @@ WHAT BUILDS WHERE
   linux-riscv64  linux/build.sh riscv64          ditto: CROSS (x86_64 image) built here
   android-arm64  android/build.sh arm64          Linux/macOS + NDK 30          built here
   android-x64    android/build.sh x64            Linux/macOS + NDK 30          built here
-  win-x64        windows/build-win-x64.ps1       x64 Windows + VS C++ + Rust   built (Jeremy's x64 box)
-  win-arm64      windows/build-win-arm64.ps1     ARM64 Windows, or x64 cross   cross-built there;
-                                                 (smoke test then UNRUN)       smoke test UNRUN
+  win-x64        windows/build-win-x64.ps1       x64 Windows + VS C++ + Rust   built (Jeremy's x64 box,
+                                                                               2026-10-17, reproducible)
+  win-arm64      windows/build-win-arm64.ps1     ARM64 Windows, or x64 cross   cross-built there 2026-10-17
+                                                 (smoke test then UNRUN)       (reproducible); smoke UNRUN
   osx-arm64      macos/build-osx-arm64.sh        Apple Silicon Mac             built (Jeremy's Apple Silicon Mac)
   osx-x64        macos/build-osx-x64.sh          Intel Mac, or Apple Silicon   built there (cross, verified
                                                  + Rosetta 2                   under Rosetta 2)
@@ -110,8 +111,18 @@ twins (a full-debug wgpu PDB is 67 MB per RID, so the Windows PDBs are NOT
 committed - they stay in output/<rid>/ on the build machine). win-arm64 was
 cross-built with -AdoptCrossBuild, so its smoke test is still UNRUN - finish it
 on an ARM64 Windows device (Surface Pro X) as build-win-arm64.ps1's header
-describes. The macOS scripts first ran on 2026-10-11 UTC on Jeremy's Apple
-Silicon Mac (macOS 27.0.1, Xcode 27.0, rustup toolchain 1.93 installed for it,
+describes. The second Windows round (2026-10-17, contract v2 + patches
+0003-0009, the same machine, the recommended run below) was the first with
+-CheckReproducible, and it failed: the cargo target folder's path was embedded
+in the DLL (one string, glutin_wgl_sys's OUT_DIR-generated bindings file named
+in a panic location), so the second build into target-2/ could never match -
+and the 2026-10-10 DLLs had been shipping that %TEMP% path. Two fixes in
+build-common.ps1, recorded in BUILD-PROVENANCE.txt: the target folder is
+remapped to "cargo-target" like the scratch and cargo-home folders, and the
+second build goes into a fresh folder at the same path. Both RIDs were then
+rebuilt, byte-identical twice, and adopted. The macOS scripts first ran on
+2026-10-11 UTC on Jeremy's Apple Silicon Mac (macOS 27.0.1, Xcode 27.0,
+rustup toolchain 1.93 installed for it,
 the Command Line Tools' libclang, Rosetta 2): two first-run fixes, recorded in
 BUILD-PROVENANCE.txt - codebrix-wgpu/build.rs now sets the dylib's @rpath
 install name (rustc sets none for a cdylib), and cargo links through
@@ -134,8 +145,14 @@ PREREQUISITES PER MACHINE
            build tools for win-arm64); rustup (winget install Rustlang.Rustup):
                rustup toolchain install 1.93
                rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc --toolchain 1.93
-           LLVM for libclang (winget install LLVM.LLVM, or choco install llvm;
-           else LIBCLANG_PATH); Git for Windows.
+           libclang for bindgen - THE RECOMMENDED PATH (Jeremy's ruling of
+           2026-10-17; what both Windows rounds used): Visual Studio's own
+           LLVM, handed to the scripts through LIBCLANG_PATH, nothing installed:
+               $env:LIBCLANG_PATH = "<VS install>\VC\Tools\Llvm\x64\bin"
+           (the x64 libclang.dll serves BOTH RIDs - bindgen runs on the host).
+           The alternative is LLVM's installer (winget install LLVM.LLVM, or
+           choco install llvm), whose C:\Program Files\LLVM\bin the scripts
+           find by themselves. Git for Windows.
   macOS    Xcode Command Line Tools (xcode-select --install - its
            /Library/Developer/CommandLineTools/usr/lib/libclang.dylib serves
            bindgen; or brew install llvm; or LIBCLANG_PATH); rustup:
@@ -157,8 +174,50 @@ HOW TO REBUILD
   cd wgpu-native-tools/linux   && ./build.sh            # all three Linux RIDs
   cd wgpu-native-tools/android && DEVICE_ARM64=<serial> DEVICE_X64=<serial> ./build.sh
   cd wgpu-native-tools\windows ; .\build-win-x64.ps1 ; .\build-win-arm64.ps1
+                                 (the switches, libclang and the managed proof:
+                                 WINDOWS: THE RECOMMENDED RUN, below)
   cd wgpu-native-tools/macos   && ./build-osx-arm64.sh && ./build-osx-x64.sh
   cd wgpu-native-tools         && ./build-host.sh       # dev-box .so for the tests
+
+WINDOWS: THE RECOMMENDED RUN (Jeremy's rulings of 2026-10-17, the second round)
+--------------------------------------------------------------------------------
+From a PowerShell 7 prompt on the x64 Windows machine, both RIDs (the two
+scripts may run at the same time in two prompts - separate scratch folders):
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    $vs = & $vswhere -latest -products * -property installationPath
+    $env:LIBCLANG_PATH = "$vs\VC\Tools\Llvm\x64\bin"
+    cd wgpu-native-tools\windows
+    pwsh -NoProfile -ExecutionPolicy Bypass -File .\build-win-x64.ps1 -CheckReproducible
+    pwsh -NoProfile -ExecutionPolicy Bypass -File .\build-win-arm64.ps1 -AdoptCrossBuild -CheckReproducible
+    cd ..\.. ; dotnet test --solution CodeBrix.WebGpu.slnx -p:UseLocalNativeProject=true
+  * libclang: Visual Studio's own LLVM through LIBCLANG_PATH, as above - no LLVM
+    installer on the build machine (PREREQUISITES PER MACHINE).
+  * -CheckReproducible on BOTH RIDs: a second build into a fresh target folder
+    at the same path must give identical DLL bytes (both RIDs did on
+    2026-10-17). Linux and Android prove this on every run; on Windows it is
+    "on request", and the request is standing.
+  * win-arm64: the cross route from the x64 machine with -AdoptCrossBuild. The
+    static gate (machine type both ways, exact exports, dependents, licence,
+    reproducibility) must pass; the DLL is then adopted with its smoke test
+    UNRUN (BUILD-INFO.txt: INCOMPLETE). That is the plan for every Windows
+    round until an ARM64 Windows device (Jeremy's Surface Pro X) is at hand;
+    finishing the gate there is described in build-win-arm64.ps1's header, and
+    its result goes into the win-arm64 block of BUILD-PROVENANCE.txt.
+  * The managed proof: once win-x64 is adopted, `dotnet test --solution
+    CodeBrix.WebGpu.slnx -p:UseLocalNativeProject=true` from the repository
+    root - Debug, the default configuration, as both Windows rounds ran it -
+    so the binding, every struct layout, the export list, the fix-set test and
+    the GPU round trips run against the adopted DLL. The counts go into the
+    win-x64 block's "Managed proof" line of BUILD-PROVENANCE.txt. When a
+    work-in-progress project keeps the solution from building (2026-10-17: the
+    Skia project), run the two projects that do not depend on it - exactly
+    what the first round recorded as its proof:
+        dotnet test --project tests\CodeBrix.WebGpu.Native.Tests\CodeBrix.WebGpu.Native.Tests.csproj
+        dotnet test --project tests\CodeBrix.WebGpu.BindingGenerator.Tests\CodeBrix.WebGpu.BindingGenerator.Tests.csproj
+    and say so in the "Managed proof" line.
+Then update the two Windows blocks of BUILD-PROVENANCE.txt from
+output\<rid>\BUILD-INFO.txt and the two win-* lines of output/SHA256SUMS (the
+Windows PDBs are not committed, so unstripped/SHA256SUMS has no Windows lines).
 
 Every script: copies wgpu-native/ + codebrix-wgpu/ to scratch (patches applied
 there), builds the release cdylib (fat LTO; WGPU_NATIVE_VERSION from

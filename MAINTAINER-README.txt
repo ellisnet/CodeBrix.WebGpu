@@ -578,7 +578,13 @@ Xcode CLT); they never install anything. Run them as:
     cd wgpu-native-tools\windows ; .\build-win-x64.ps1 ; .\build-win-arm64.ps1
     cd wgpu-native-tools/macos   && ./build-osx-arm64.sh && ./build-osx-x64.sh
 (Linux and Android: wgpu-native-tools/linux/build.sh, android/build.sh; all
-commands and the per-RID gate in wgpu-native-tools/README.txt.) Publish only when all nine are
+commands and the per-RID gate in wgpu-native-tools/README.txt.) The Windows
+round has a recommended run, settled by Jeremy on 2026-10-17 and written up in
+wgpu-native-tools/README.txt, "WINDOWS: THE RECOMMENDED RUN": Visual Studio's
+own libclang through LIBCLANG_PATH, -CheckReproducible on both RIDs, win-arm64
+cross-built from the x64 machine with -AdoptCrossBuild (smoke test unrun until
+the ARM64 device is at hand), then the managed proof (dotnet test --solution in
+local-native mode, Debug). Publish only when all nine are
 committed under src/CodeBrix.WebGpu.Native/runtimes/.
 
 wgpuGetVersion reads WGPU_NATIVE_VERSION at COMPILE time; every build must set

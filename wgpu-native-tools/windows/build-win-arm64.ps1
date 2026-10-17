@@ -43,6 +43,11 @@
 #
 # Prerequisites: as build-win-x64.ps1, plus the "MSVC Build Tools for ARM64/ARM64EC" component and
 #     rustup target add aarch64-pc-windows-msvc --toolchain 1.93
+# THE RECOMMENDED RUN (Jeremy's rulings of 2026-10-17): from the x64 machine, LIBCLANG_PATH set to
+#     Visual Studio's own LLVM (build-common.ps1's header), then
+#     pwsh -NoProfile -ExecutionPolicy Bypass -File .\build-win-arm64.ps1 -AdoptCrossBuild -CheckReproducible
+#     - the cross route, adopted with the smoke test UNRUN, is the plan for every Windows round
+#     until the ARM64 device is at hand (..\README.txt "WINDOWS: THE RECOMMENDED RUN").
 # Output: ..\output\win-arm64\
 # =============================================================================================
 

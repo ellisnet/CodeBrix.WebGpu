@@ -62,8 +62,9 @@ Common to every entry below
                     (stripped) file, loaded by path - see README.txt "THE SMOKE TEST".
                     77 checks with a Vulkan adapter (69 on GL only); without one
                     (most containers) the GPU part prints SKIPPED and 31 checks run.
-                    (The win-* / osx-* blocks below predate contract v2: their
-                    binaries ran the 47 / 22-check smoke test of API version 1.)
+                    (The osx-* blocks below predate contract v2: their binaries
+                    ran the 45-check smoke test of API version 1. The win-*
+                    blocks are current: rebuilt 2026-10-17.)
 
 Linux (the three linux-* entries)
 --------------------------------------------------------------------------------
@@ -248,22 +249,36 @@ Windows (the two win-* entries)
   Scripts         : written on Linux 2026-10-11 from the FlacWriter / Av1 scripts
                     (which ran on Jeremy's x64 Windows 11 machine).
   Build host      : Jeremy's x64 desktop - Windows 11 Pro 10.0.26300 (AMD64),
-                    Visual Studio Professional 2026 18.10.3 [18.10.12224.181],
+                    Visual Studio Professional 2026 18.11.0 [18.11.12306.390]
+                    (18.10.3 at the first run; the MSVC toolset is the same),
                     MSVC toolset 14.51.36231 (cl / link 19.51.36260), Windows SDK
-                    10.0.26100.0, PowerShell 7.6.6. Scripts run as
-                    pwsh -NoProfile -ExecutionPolicy Bypass -File <script>.
-  Rust            : rustup 1.28.2; toolchain "1.93" = rustc 1.93.1 (01f6ddf75
-                    2026-02-11) / cargo 1.93.1, installed by Jeremy for this build
-                    on 2026-10-10 (rustup toolchain install 1.93; rustup target add
-                    x86_64-pc-windows-msvc aarch64-pc-windows-msvc --toolchain
-                    1.93). crates.io crates fetched once per Cargo.lock (--locked).
+                    10.0.26100.0, PowerShell 7.6.7 (7.6.6 at the first run).
+                    Scripts run as pwsh -NoProfile -ExecutionPolicy Bypass -File
+                    <script>.
+  Rust            : rustup 1.29.1 (1.28.2 at the first run); toolchain "1.93" =
+                    rustc 1.93.1 (01f6ddf75 2026-02-11) / cargo 1.93.1, installed
+                    by Jeremy for the first run on 2026-10-10 (rustup toolchain
+                    install 1.93; rustup target add x86_64-pc-windows-msvc
+                    aarch64-pc-windows-msvc --toolchain 1.93). crates.io crates
+                    fetched once per Cargo.lock (--locked).
   libclang        : NOT LLVM's installer: Visual Studio 2026's own LLVM,
                     C:\Program Files\Microsoft Visual Studio\18\Professional\
                     VC\Tools\Llvm\x64\bin\libclang.dll, handed to the build
                     process through LIBCLANG_PATH (the script's own fallback is
                     C:\Program Files\LLVM\bin, which does not exist on this
                     machine; nothing was installed). bindgen ran with it on both
-                    RIDs.
+                    RIDs, both rounds. THE RECOMMENDED PATH since 2026-10-17
+                    (Jeremy's ruling): README.txt "WINDOWS: THE RECOMMENDED RUN".
+  Rulings         : 2026-10-17, Jeremy, for every Windows round from now on (all
+                    four written into README.txt "WINDOWS: THE RECOMMENDED RUN"
+                    and the scripts' headers):
+                    1. libclang = Visual Studio's own LLVM through LIBCLANG_PATH.
+                    2. win-arm64 is cross-built from the x64 machine and adopted
+                       with -AdoptCrossBuild (smoke test UNRUN) until an ARM64
+                       Windows device is at hand.
+                    3. -CheckReproducible on BOTH RIDs, every round.
+                    4. The managed proof is what the first round ran: dotnet test
+                       --solution in local-native mode, Debug (the default).
   First run       : 2026-10-10 (03:59 UTC on the 11th; the rebuilds 04:03 UTC),
                     both RIDs, concurrently.
                     THREE first-run changes, none in the shipped library:
@@ -286,6 +301,39 @@ Windows (the two win-* entries)
                     3. build-common.ps1, the adopt step: a PDB over 50 MB (GitHub's
                        per-file warning threshold) is no longer copied into
                        unstripped\<rid>\ - see "PDB twins" below.
+  Second run      : 2026-10-17 (22:29 UTC the first attempt, 22:38 UTC the adopted
+                    rebuilds), both RIDs concurrently, contract v2 + patches
+                    0003-0009, run by the agent on Jeremy's machine with the
+                    rulings above - the first time -CheckReproducible ran on
+                    Windows. Both RIDs built, passed every static check (win-x64
+                    the 77-check smoke test too) and then FAILED the reproducibility
+                    check: 147,132 differing bytes on win-x64, 168 on win-arm64.
+                    Cause: the second build went into target-2\ and the TARGET
+                    PATH IS EMBEDDED IN THE DLL - one string, the panic location
+                    of glutin_wgl_sys's OUT_DIR-generated wgl_extra_bindings.rs
+                    (%TEMP%\codebrix-wgpu-build-<rid>\target\<triple>\release\
+                    build\glutin_wgl_sys-<hash>\out/wgl_extra_bindings.rs); the two
+                    extra characters shifted everything behind the string, and
+                    the PDB GUID and the /Brepro content hash followed. The same
+                    string, with the real %TEMP% path, is in the 2026-10-10 DLLs
+                    (sha256 699c06e3... and c579e75d...): a path leak the
+                    --remap-path-prefix flags were meant to prevent (they covered
+                    the scratch and cargo-home folders, not the target folder).
+                    TWO fixes in build-common.ps1, then both RIDs rebuilt from
+                    scratch (the records below are from those rebuilds):
+                    1. Invoke-CargoBuild adds --remap-path-prefix=<target dir>=
+                       cargo-target. The shipped DLLs now read
+                       "cargo-target\<triple>\release\build\glutin_wgl_sys-<hash>\
+                       out/wgl_extra_bindings.rs" there and carry no path of the
+                       build machine (checked with strings: 0 hits for the build
+                       root or the user name).
+                    2. The -CheckReproducible build goes into a fresh folder at
+                       the SAME path (the first build's target\ is set aside as
+                       target-1\), so both builds see identical paths and flags;
+                       the comparison is against the staged file.
+                    Also this round, comment / message-only edits recording the
+                    rulings: build-common.ps1's header, the libclang error text,
+                    the two architecture scripts' headers, README.txt.
   PDB twins       : NOT COMMITTED for win-x64 / win-arm64. A full-debug-info PDB of
                     the whole wgpu stack (profile.release debug = true) is 67 MB
                     per RID; Jeremy ruled on 2026-10-10 that files that large are
@@ -308,100 +356,141 @@ Windows (the two win-* entries)
                     DYNAMIC_BASE, NX_COMPAT), /GS on every object, a "repro"
                     debug-directory entry (/Brepro: the PE timestamp is a content
                     hash, not a clock), the pdb referenced by bare file name, not
-                    Authenticode-signed. Reproducibility was not re-checked
-                    (-CheckReproducible not used); the second builds produced the
-                    same sizes as the first.
+                    Authenticode-signed. Reproducibility: CHECKED on both RIDs
+                    since the second run (a second build into a fresh target
+                    folder at the same path is byte-identical). The first run had
+                    not checked it (its second builds only matched in size).
   Gate            : PE machine (header + dumpbin), exact exports (dumpbin /exports vs
                     specs\expected-exports.txt), dependents Windows system DLLs only
                     and no VC runtime, licence file, LoadLibrary smoke test by full path;
-                    -CheckReproducible builds twice.
+                    -CheckReproducible builds twice (same path) and compares bytes.
 
 ================================================================================
 win-x64                                                           BUILT + PASSED
 ================================================================================
-REBUILD REQUIRED: contract v2 + patches 0003-0009 (2026-10-17) - this block describes the 1.0.287.301 binary
-Built            : 2026-10-11 04:03:35 UTC (137 s; cargo "Finished release in 2m 12s")
-Built by         : windows\build-win-x64.ps1 (route: native, x64 host; vcvarsall x64)
+Built            : 2026-10-17 22:38:21 UTC (275 s including the reproducibility rebuild)
+Built by         : windows\build-win-x64.ps1 -CheckReproducible (route: native, x64
+                   host; vcvarsall x64) - the second run; replaces the 2026-10-11
+                   build (sha256 699c06e3..., API version 1, 243 exports, patches
+                   0001-0002 only, shipped in 1.0.287.301)
+Contract / fixes : API version 2; patches 0001-0009; 251 exports (== specs/expected-exports.txt)
 Toolchain        : rustc 1.93.1 / cargo 1.93.1 (toolchain 1.93), MSVC link 14.51,
                    libclang = Visual Studio 2026's (see above); 0 cargo warnings
 cargo            : cargo +1.93 build --release --locked --target x86_64-pc-windows-msvc
                    RUSTFLAGS -C target-feature=+crt-static -C link-arg=/Brepro
                    --remap-path-prefix (scratch -> wgpu-native-tools, cargo home ->
-                   cargo-home); WGPU_NATIVE_VERSION=v29.0.1.1
+                   cargo-home, target -> cargo-target); WGPU_NATIVE_VERSION=v29.0.1.1
 File             : codebrix_wgpu.dll - PE32+ x64 (machine 0x8664), linker 14.51,
-                   OS/subsystem version 6.00, /Brepro timestamp 0x5C39E0EF
-Size             : 6494208 bytes
-SHA256           : 699c06e3e849974290aa6ddf79d79f2ab7a0f386315711af8c75144ffa86ba9b
-PDB              : codebrix_wgpu.pdb, 70471680 bytes (67.2 MB) - NOT committed (over the
+                   OS/subsystem version 6.00, /Brepro timestamp 0x74B020A7
+Size             : 6525952 bytes
+SHA256           : 61c6f4d8d529240ab531e17f9aab7845b9dda04a45848674c1af463f346b6afa
+PDB              : codebrix_wgpu.pdb, 70889472 bytes (67.6 MB) - NOT committed (over the
                    50 MB adopt limit); output\win-x64\ on the build machine only
-                   sha256 d22b5838f94a91452cdef32257566337f8a15a43d1743593c35f6381dca4c648
-                   RSDS GUID {3B2613AE-96E2-8E6F-E7A8-2057DC58E51C} age 1
-Exports          : 243 == specs\expected-exports.txt
+                   sha256 dabaf42c1d3049902cd063ab5ff2f61b77c43d7c5120e581ce096f11db3ce8c1
+                   RSDS GUID {40C1676E-E45B-978D-8A9A-DD9BEA9EBAFF} age 1
+Exports          : 251 == specs\expected-exports.txt
 Dependents       : see "Dependents" above (static CRT; no redistributable)
-Smoke test       : PASSED on the build host - 47 checks, 0 failed, exit 0
-                   (output\win-x64\smoke-test.exe, sha256 1430f9ad5b932106...50efd137).
+Reproducible     : YES - a second build into a fresh target folder at the same path
+                   gave identical DLL bytes (the first Windows build so proven)
+Smoke test       : PASSED on the build host - 77 checks, 0 failed, exit 0
+                   (output\win-x64\smoke-test.exe, sha256 7273556035ef6418...a10295380).
                    wgpuInstanceEnumerateAdapters saw 4 adapters: Intel UHD Graphics
                    770 on Vulkan (6), Intel UHD Graphics + Microsoft Basic Render
                    Driver on D3D12 (4), Intel UHD Graphics 770 on GL (7). The
-                   default adapter was the VULKAN one (api 0x00404139, 5 device
-                   extensions incl. VK_KHR_external_memory_win32), so the run
-                   covered: compute + render + readback, transitions, GetVulkanInfo,
-                   TextureGetVulkanInfo (VK_FORMAT 37), CreateTextureFromVulkanImage
-                   round trip, AdoptVulkanDevice + a compute pass on the adopted
-                   device, AdoptD3d12Device -> Error (by design), the D3D12 / Metal
-                   getters' ERROR paths on a non-D3D12 device, 0 live objects.
-                   KNOWN GAP: the D3D12 SUCCESS paths (GetD3d12Info,
-                   TextureGetD3d12Info, CreateTextureFromD3d12Resource) compiled for
-                   the first time here but were NOT exercised - the smoke test
-                   takes whatever adapter wgpu picks and has no backend switch.
-Managed proof    : dotnet test (xUnit v3; CodeBrix.WebGpu.Native.Tests +
-                   BindingGenerator.Tests): 137 tests, 130 passed, 0 failed, 7
-                   skipped - all seven are the Linux-only cases by design
-                   ("Linux builds enable Vulkan" / "The Vulkan extras are
-                   exercised on Linux"); the binding, every struct layout, the
-                   export list and the GPU round trips ran against this exact
-                   file, loaded through the library's own resolver from
-                   runtimes/win-x64/native/, on the build host, 2026-10-11 04:06 UTC
+                   default adapter was the VULKAN one (instance api 0x00403000,
+                   device api 0x00404143, 5 device extensions incl.
+                   VK_KHR_external_memory_win32), so the run covered: the proc
+                   status table (WaitAny AbortsUnimplemented, DeviceCreateBuffer
+                   Implemented, the D3D12 getter Implemented - Direct3D 12 is
+                   compiled in - past the end Unknown), API version 2, build info
+                   with the nine-patch fix set, 19 struct layouts, compute + render
+                   + readback, the 0006 WHOLE_MAP_SIZE map at offset 8, the 0007
+                   foreign-index wgpuDevicePoll -> false in a Validation scope,
+                   downlevel capabilities + RGBA8Unorm format features, the bounded
+                   poll (QueueEmpty / WaitSucceeded / InvalidSubmissionIndex / NULL
+                   -> Error), fault listeners on a second device, transitions,
+                   GetVulkanInfo + VulkanGetAdoptRequirements (5 extensions, all
+                   enabled on wgpu's own device), TextureGetVulkanInfo (VK_FORMAT
+                   37), CreateTextureFromVulkanImage round trip, AdoptVulkanDevice
+                   + a compute pass on the adopted device, AdoptD3d12Device ->
+                   Error (by design), the D3D12 / Metal getters' ERROR paths on a
+                   non-D3D12 device, 0 live objects.
+                   KNOWN GAP (unchanged): the D3D12 SUCCESS paths (GetD3d12Info,
+                   TextureGetD3d12Info, CreateTextureFromD3d12Resource) are compiled
+                   but NOT exercised - the smoke test takes whatever adapter wgpu
+                   picks and has no backend switch.
+Managed proof    : the solution-wide run (dotnet test --solution CodeBrix.WebGpu.slnx
+                   -p:UseLocalNativeProject=true) could NOT build on 2026-10-17: the
+                   work-in-progress Skia project fails to compile at HEAD
+                   (WebGpuSkiaTarget.cs: ReleaseReadbackSlots does not exist), which
+                   also blocks the Graphics tests. So the proof is what the first
+                   round recorded - the two projects that do not depend on Skia,
+                   Debug (the default), 2026-10-17 22:55 UTC on the build host:
+                   CodeBrix.WebGpu.Native.Tests: 131 tests, 112 passed, 0 failed,
+                   19 skipped - every skip by design and Linux-only ("The Vulkan
+                   extras are exercised on Linux" x16, "Linux builds enable Vulkan",
+                   "The Linux natives compile Vulkan and GL, not Direct3D 12 or
+                   Metal", "Needs Linux with an X display"); the binding, every
+                   struct layout (wgpuCodebrixGetStructLayout), the export list,
+                   the generated-files drift guard, the nine-patch fix set
+                   (BuildInfo_patches_are_the_patches_folder_in_apply_order), the
+                   PackageContent identity checks and the GPU round trips on the
+                   host's Vulkan adapter - including the fences of patches 0003
+                   (ErrorScopeTests), 0004 (PipelineLayoutTests), 0005
+                   (WorkgroupMemoryTests), 0006 (BufferMapTests), 0007
+                   (DevicePollTests), 0008 (SurfaceCapabilitiesTests) and the fault
+                   listeners - ran against this exact file, loaded through the
+                   library's own resolver from runtimes/win-x64/native/.
+                   CodeBrix.WebGpu.BindingGenerator.Tests: 96 tests, 96 passed, 0
+                   failed, 0 skipped.
 
 ================================================================================
 win-arm64                       BUILT (cross) - STATIC GATE PASSED, SMOKE UNRUN
 ================================================================================
-REBUILD REQUIRED: contract v2 + patches 0003-0009 (2026-10-17) - this block describes the 1.0.287.301 binary
-Built            : 2026-10-11 04:03:38 UTC (143 s)
-Built by         : windows\build-win-arm64.ps1 -AdoptCrossBuild
+Built            : 2026-10-17 22:38:26 UTC (285 s including the reproducibility rebuild)
+Built by         : windows\build-win-arm64.ps1 -AdoptCrossBuild -CheckReproducible
                    (route: CrossFromX64 - x64 host, vcvarsall x64_arm64,
-                   --target aarch64-pc-windows-msvc)
+                   --target aarch64-pc-windows-msvc) - the second run; replaces the
+                   2026-10-11 build (sha256 c579e75d..., API version 1, 243
+                   exports, patches 0001-0002 only, shipped in 1.0.287.301)
+Contract / fixes : API version 2; patches 0001-0009; 251 exports (== specs/expected-exports.txt)
 Toolchain        : rustc 1.93.1 / cargo 1.93.1 (toolchain 1.93, target
                    aarch64-pc-windows-msvc), MSVC ARM64 link 14.51, libclang =
                    Visual Studio 2026's; 0 cargo warnings
 cargo            : as win-x64 with --target aarch64-pc-windows-msvc
 File             : codebrix_wgpu.dll - PE32+ ARM64 (machine 0xAA64), linker 14.51,
-                   OS/subsystem version 6.02, /Brepro timestamp 0x9B8B6C2F
-Size             : 5573120 bytes
-SHA256           : c579e75dbb541a5cb0167656bbdae480989a0da55e4d47e5717f18b18ba9e8fe
-PDB              : codebrix_wgpu.pdb, 70070272 bytes (66.8 MB) - NOT committed (over the
+                   OS/subsystem version 6.02, /Brepro timestamp 0xC38B9278
+Size             : 5600256 bytes
+SHA256           : 5c93319aaefae2d531922f98283f0d3eda6336b8380d245c11aad63263bcf531
+PDB              : codebrix_wgpu.pdb, 70488064 bytes (67.2 MB) - NOT committed (over the
                    50 MB adopt limit); output\win-arm64\ on the build machine only
-                   sha256 4f390274d394fca8fc877c2550afccaf14c78a90a53318d58c275292c6017026
-                   RSDS GUID {85858EBD-F3B9-7F9E-534F-44057E763CFC} age 1
-Exports          : 243 == specs\expected-exports.txt
+                   sha256 bf9f43116664b7d5a4b342c899e9bb07c4bad7897a6b6dbe8b4778dfa20bd6b7
+                   RSDS GUID {7600A1C4-35EE-D284-6740-F51E0BF6EDD5} age 1
+Exports          : 251 == specs\expected-exports.txt
 Dependents       : see "Dependents" above (static CRT; no redistributable)
+Reproducible     : YES - a second build into a fresh target folder at the same path
+                   gave identical DLL bytes
 Smoke test       : NOT RUN - an x64 Windows host cannot execute ARM64 code. The
                    static checks (machine type both ways, exact exports, dependents,
-                   licence) all passed; adopted with -AdoptCrossBuild on purpose,
-                   because the binary is needed before the device is. Gate status
-                   in BUILD-INFO.txt: INCOMPLETE.
+                   licence, reproducibility) all passed; adopted with
+                   -AdoptCrossBuild on purpose - Jeremy's standing plan of
+                   2026-10-17 for every Windows round until an ARM64 device is at
+                   hand (see Rulings above). Gate status in BUILD-INFO.txt:
+                   INCOMPLETE. (The 2026-10-11 ARM64 build's smoke test was never
+                   run either; that binary is superseded.)
 To finish the gate: on an ARM64 Windows device (Jeremy's Surface Pro X), copy
                    output\win-arm64\codebrix_wgpu.dll (sha256 above),
                    output\win-arm64\smoke-test.exe (the ARM64 build of
-                   ..\smoke-test.c, sha256 b1e56775bd3a7b5a...4d78f0ff) and
+                   ..\smoke-test.c, sha256 629b688f4720a8e4...b924671889) and
                    specs\expected-exports.txt into one folder and run
                        smoke-test.exe <full path>\codebrix_wgpu.dll <full path>\expected-exports.txt
-                   Expect "47 checks, 0 failed" + "SMOKE TEST PASSED", exit 0 (22
-                   checks + "SKIPPED: no adapter" if the device offers no usable
-                   adapter; a Surface Pro X normally offers D3D12 - which would also
-                   be the first exercise of the D3D12 SUCCESS paths, see the win-x64
-                   known gap). Then replace this line with the device, date and
-                   result.
+                   Expect "SMOKE TEST PASSED", exit 0: 77 checks on a Vulkan
+                   adapter, 69 on GL; the count on a D3D12 adapter (what a Surface
+                   Pro X normally offers) is not yet recorded anywhere - it would
+                   be the first exercise of the D3D12 SUCCESS paths, see the
+                   win-x64 known gap; 31 checks + "SKIPPED: no adapter" without a
+                   usable adapter. Then replace this line with the device, date
+                   and result.
 
 macOS (the two osx-* entries)
 --------------------------------------------------------------------------------

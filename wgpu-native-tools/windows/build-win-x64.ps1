@@ -26,7 +26,12 @@
 # Prerequisites (see build-common.ps1's header): Visual Studio 2022+ with "Desktop development
 # with C++"; rustup with the pinned toolchain + x86_64-pc-windows-msvc
 # (rustup toolchain install 1.93; rustup target add x86_64-pc-windows-msvc --toolchain 1.93);
-# LLVM for libclang (winget install LLVM.LLVM, or set LIBCLANG_PATH); Git for Windows.
+# libclang - the recommended path is Visual Studio's own LLVM through LIBCLANG_PATH (see
+# build-common.ps1's header; the alternative: winget install LLVM.LLVM); Git for Windows.
+# THE RECOMMENDED RUN (Jeremy's rulings of 2026-10-17): LIBCLANG_PATH set as above, then
+#     pwsh -NoProfile -ExecutionPolicy Bypass -File .\build-win-x64.ps1 -CheckReproducible
+# and, once adopted, the managed proof (dotnet test --solution ..\..\CodeBrix.WebGpu.slnx
+# -p:UseLocalNativeProject=true) - the whole sequence: ..\README.txt "WINDOWS: THE RECOMMENDED RUN".
 # =============================================================================================
 
 [CmdletBinding()]
