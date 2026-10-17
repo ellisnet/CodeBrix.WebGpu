@@ -35,6 +35,22 @@
 #   passed the complete gate. If something breaks on another machine, fix it IN THE SCRIPT and
 #   record it there.
 #
+#   SECOND RUN 2026-10-17 (contract v2 + patches 0003-0009; the first REPRODUCIBLE=1 run), same Mac.
+#   Three script fixes, no change to what is built:
+#     1. REPRODUCIBLE=1 built its twin into a SECOND target folder (target-2). ld records the path of
+#        every object it links in an N_OSO stab of the unstripped dylib - our own cgu.0.rcgu.o sits
+#        under the target folder - and derives LC_UUID from the content, so the twins differed in
+#        exactly those bytes (UUID + one string) and could never match. The twin is now built into
+#        the SAME target folder, emptied first (the first result is kept in <root>/first-build/), as
+#        the Linux twin keeps the same /work paths.
+#     2. A differing twin ENDED THE SCRIPT silently: `cmp a b | first_line` inside the result string
+#        exits 1 under set -e / pipefail, and the ERR trap does not fire for a failed substitution in
+#        an assignment. Nothing was collected, gated or adopted. Now recorded either way, as on Linux.
+#     3. --remap-path-prefix missed wgpu-native's sources: /tmp is a symlink to /private/tmp and
+#        cargo canonicalises a path dependency's manifest dir, so rustc saw /private/tmp/... and five
+#        of wgpu-native's file paths were in BOTH shipped dylibs (Oct 10). The physical scratch path
+#        is remapped as well.
+#
 # Everything it builds is in this repository: ../wgpu-native (unmodified release tree), ../codebrix-wgpu
 # (our crate), ../patches (applied to a scratch copy), ../linux/pins.env (the shared pins). cargo
 # downloads the crates.io crates ../codebrix-wgpu/Cargo.lock pins (exact versions + checksums,
@@ -181,7 +197,13 @@ cargo_build() {
     export WGPU_NATIVE_VERSION="$WGPU_NATIVE_TAG"
     export CARGO_TARGET_DIR="$target_dir"
     export CARGO_TERM_COLOR=never
-    export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$scratch=wgpu-native-tools"$'\x1f'"--remap-path-prefix=$cargo_home=cargo-home"
+    # Both spellings of the scratch path: cargo canonicalises a path dependency's manifest dir, so
+    # wgpu-native's sources reach rustc as /private/tmp/... while /tmp/... is what this script holds
+    # (2026-10-17: five wgpu-native file paths were in the shipped dylibs because only /tmp/... was mapped).
+    local scratch_real; scratch_real="$(cd "$scratch" && pwd -P)"
+    local flags="--remap-path-prefix=$scratch=wgpu-native-tools"
+    [ "$scratch_real" = "$scratch" ] || flags="$flags"$'\x1f'"--remap-path-prefix=$scratch_real=wgpu-native-tools"
+    export CARGO_ENCODED_RUSTFLAGS="$flags"$'\x1f'"--remap-path-prefix=$cargo_home=cargo-home"
     # The export list for ld: specs/expected-exports.txt with Mach-O's leading underscore. cc-exports.sh
     # (the linker cargo is told to use for this target) swaps it in for the list rustc generates.
     EXPORTS_LIST="$target_dir.exported-symbols.txt"
@@ -336,8 +358,9 @@ verify_dylib() {
 # ----------------------------------------------------------------------------------------------
 # THE WHOLE BUILD, for one RID.
 #   $1 RID   $2 arch (arm64 | x86_64)   $3 Rust triple   $4 can run (yes | no)   $5 route   $6 script
-# Options: ADOPT=0 (do not copy into src/), REPRODUCIBLE=1 (a second build must be byte-identical
-# before stripping/signing; see BUILD-PROVENANCE for the known LC_UUID / N_OSO caveat).
+# Options: ADOPT=0 (do not copy into src/), REPRODUCIBLE=1 (a second build into the same, emptied
+# target folder is compared byte for byte before stripping/signing; the result is RECORDED in
+# BUILD-INFO.txt either way, as on Linux - see the header's SECOND RUN note for why the paths matter).
 # Exit code: 0 = every check ran and passed (and, unless ADOPT=0, the result was adopted);
 #            1 = a check failed OR could not run (nothing adopted).
 # ----------------------------------------------------------------------------------------------
@@ -385,14 +408,29 @@ run_macos_build() {
     echo
 
     echo "--- building ---"
-    rm -rf "$target" "$target-2"
+    local first="$root/first-build"
+    rm -rf "$target" "$target-2" "$first"
     cargo_build "$scratch" "$target" "$triple"
     local built="$target/$triple/release/$LIB_NAME"
     REPRODUCIBLE_RESULT="not checked (REPRODUCIBLE=1 to check)"
     if [ "${REPRODUCIBLE:-0}" = "1" ]; then
-        cargo_build "$scratch" "$target-2" "$triple"
-        if cmp -s "$built" "$target-2/$triple/release/$LIB_NAME"; then REPRODUCIBLE_RESULT="yes - a second build gave identical unstripped bytes"
-        else REPRODUCIBLE_RESULT="NO - $(cmp "$built" "$target-2/$triple/release/$LIB_NAME" | first_line)"; fi
+        # The twin is built into the SAME target folder, emptied first; the first result and its cargo log
+        # move to $first. ld writes the path of every linked object into an N_OSO stab of the unstripped
+        # dylib (our cgu.0.rcgu.o lives under the target folder) and derives LC_UUID from the content, so a
+        # twin built into a second folder differs in exactly those bytes and can never match (the first
+        # REPRODUCIBLE=1 run, 2026-10-17 - see the header). Same paths, as the Linux twin's /work.
+        mkdir -p "$first"
+        cp "$built" "$first/$LIB_NAME"
+        cp "$target.build.log" "$first/build.log"
+        rm -rf "$target"
+        cargo_build "$scratch" "$target" "$triple"
+        if cmp -s "$built" "$first/$LIB_NAME"; then
+            REPRODUCIBLE_RESULT="yes - two builds into the same paths gave identical unstripped bytes"
+        else
+            # `|| true`: cmp exits 1 on a difference, and under set -e / pipefail that ended the script
+            # silently from inside this assignment (2026-10-17). Recorded either way, as the Linux build does.
+            REPRODUCIBLE_RESULT="NO - $(cmp "$built" "$first/$LIB_NAME" 2>&1 | first_line || true); sizes $(stat -f %z "$built") / $(stat -f %z "$first/$LIB_NAME")"
+        fi
         echo "  reproducible: $REPRODUCIBLE_RESULT"
     fi
     echo

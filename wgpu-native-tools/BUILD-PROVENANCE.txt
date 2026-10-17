@@ -60,11 +60,18 @@ Common to every entry below
                     that link into the library on any RID; byte-identical on every RID.
   Smoke test      : smoke-test.c, built for the TARGET, run against the STAGED
                     (stripped) file, loaded by path - see README.txt "THE SMOKE TEST".
+
+TODO: combine these two versions of the paragraph into a single coherent paragraph:
                     77 checks with a Vulkan adapter (69 on GL only); without one
                     (most containers) the GPU part prints SKIPPED and 31 checks run.
                     (The osx-* blocks below predate contract v2: their binaries
                     ran the 45-check smoke test of API version 1. The win-*
                     blocks are current: rebuilt 2026-10-17.)
+                    77 checks with a Vulkan adapter (69 on GL only, 73 on Metal:
+                    the Metal wrap + adopt in place of the Vulkan-object checks);
+                    without one (most containers) the GPU part prints SKIPPED and
+                    31 checks run. (The win-* blocks below predate contract v2:
+                    their binaries ran the 47-check smoke test of API version 1.)
 
 Linux (the three linux-* entries)
 --------------------------------------------------------------------------------
@@ -553,14 +560,73 @@ macOS (the two osx-* entries)
                        only when the "-o" output is libcodebrix_wgpu.dylib.
                     0 cargo warnings on either RID; every other gate check passed as
                     written; no other script change was needed.
-  Reproducibility : YES, byte for byte - observed, not from REPRODUCIBLE=1: the osx-x64
-                    build of 05:24 UTC (before the wrapper's pass-through fix, which
-                    does not change the cdylib link) and the adopted one of 05:28 UTC
-                    have the same sha256 and LC_UUID. Unlike the C builds of Vorbis /
-                    FlacWriter / Av1, rustc links with the N_OSO stab timestamps ZEROED
-                    (nm -ap shows 0 for all 3 OSO entries), so ld's content-derived UUID
-                    is stable across builds.
-  Managed tests   : dotnet test --solution on the build host. The first run gave 137
+  Second run      : 2026-10-17 22:34-22:40 UTC (15:34 local), both RIDs concurrently, for
+                    contract v2 + patches 0003-0009: the first compile of the v2 crate
+                    with the Metal cfg (codebrix.rs's Metal paths had changed only in
+                    GetProcStatus's backend code) and the first REPRODUCIBLE=1 run.
+                    cargo built with 0 warnings and the 73-check Metal smoke test
+                    passed first time on both RIDs; the REPRODUCIBLE=1 option itself
+                    needed THREE fixes, all in macos/build-common.sh, none in what is
+                    built:
+                    1. The twin was built into a SECOND target folder (target-2). ld
+                       records the path of every object file it links in an N_OSO
+                       stab of the unstripped dylib - our own codebrix_wgpu.*cgu.0.
+                       rcgu.o lives under the target folder - and derives LC_UUID
+                       from the content, so the twins of both RIDs differed in
+                       exactly LC_UUID and that one string (1105 bytes, equal sizes)
+                       and could never have matched. The twin is now built into the
+                       SAME, emptied target folder (the first result and its cargo
+                       log are kept in <root>/first-build/), the way the Linux twin
+                       keeps /work. (The Oct 10 "observed" match was two builds into
+                       the same folder, which is why it held.)
+                    2. A differing twin ENDED THE SCRIPT silently right after the
+                       second build, exit 1, nothing collected, gated or adopted:
+                       `cmp a b | first_line` inside the result string exits 1 under
+                       set -e / pipefail, and bash 3.2's ERR trap does not fire for a
+                       failed substitution in an assignment. The result is now
+                       recorded either way, as the Linux build records it.
+                    3. --remap-path-prefix mapped /tmp/codebrix-wgpu-build-<rid>/src,
+                       but cargo canonicalises a path dependency's manifest dir and
+                       /tmp is a symlink to /private/tmp, so wgpu-native's sources
+                       reached rustc as /private/tmp/... and FIVE of its file paths
+                       (lib.rs, conv.rs, logging.rs, unimplemented.rs, utils.rs) sat
+                       in both Oct 10 dylibs, shipped and unstripped (`strings -a`).
+                       The physical path is remapped as well; the new dylibs carry
+                       no /tmp, /private/tmp or /Users string - those names now read
+                       wgpu-native-tools/wgpu-native/src/....
+                    The first REPRODUCIBLE=1 attempt (22:29 UTC) hit 1 and 2 and
+                    adopted nothing; the records below are from the rerun with the
+                    fixed script. Both RIDs then passed the complete gate.
+  Reproducibility : YES, from REPRODUCIBLE=1 on both RIDs (2026-10-17): two builds into
+                    the same paths gave byte-identical unstripped dylibs (same sha256,
+                    same LC_UUID). rustc links with the N_OSO stab timestamps ZEROED
+                    (nm -ap shows 0 for all 3 OSO entries) and ld's UUID is content-
+                    derived, so only the object PATHS had to be held equal (Second run,
+                    1). The Oct 10 match (two osx-x64 builds of 05:24 and 05:28 UTC with
+                    the same sha256 and LC_UUID) was observed, not from REPRODUCIBLE=1.
+  Managed tests   : 2026-10-17 (Second run), Release, -p:UseLocalNativeProject=true, one
+                    `dotnet test --project` per test project because the solution now
+                    holds the Android sample (net10.0-android) and this Mac has no
+                    Android workload: BindingGenerator.Tests 96 passed;
+                    Native.Tests 131 tests, 110 passed, 0 failed, 21 skipped - every
+                    skip a platform rule, none for a missing adapter: 16 "The Vulkan
+                    extras are exercised on Linux" (CodebrixExtrasTests, Vulkan-
+                    AdoptRequirementsTests, PollDevice), 2 "No OpenGL adapter for the
+                    internal-error tests" (ErrorScopeTests provoke the internal error
+                    on GL, which the macOS native does not compile), GetProcStatus_
+                    resolves_the_backends_of_this_build and BuildInfo_lists_vulkan_on_
+                    linux (Linux expectations), the X11 surface-capabilities test. The
+                    GPU round trips, fault listeners, bounded poll, WHOLE_MAP_SIZE map,
+                    pipeline-layout absent slots, workgroup zero-init, the Metal adopt,
+                    every struct layout, BuildInfo_patches (0001-0009), GeneratedFiles-
+                    Drift and PackageContent (both osx RIDs' @rpath install name) ran
+                    against the adopted osx-arm64 file.
+                    Skia.Tests and Graphics.Tests did NOT run: the Skia package does not
+                    compile at HEAD 7edd925 ("Work in progress on WebGpu update") -
+                    src/CodeBrix.WebGpu.Skia/Targets/WebGpuSkiaTarget.cs:543 calls
+                    ReleaseReadbackSlots(), which no file defines (CS0103). A managed
+                    work-in-progress matter, unrelated to the natives; left for Jeremy.
+                    First run (2026-10-11): dotnet test --solution on the build host gave 137
                     tests, 121 passed, 16 SKIPPED - every GPU test, because the fixture
                     (GpuSession.CreateVulkan / GpuFixture) requested InstanceBackend.
                     Vulkan only and the macOS natives compile Metal only ("metal not
@@ -588,76 +654,92 @@ macOS (the two osx-* entries)
 ================================================================================
 osx-arm64                                                         BUILT + PASSED
 ================================================================================
-REBUILD REQUIRED: contract v2 + patches 0003-0009 (2026-10-17) - this block describes the 1.0.287.301 binary
-Built            : 2026-10-11 05:27:28 UTC (74 s)
+Built            : 2026-10-17 22:36:57 UTC (157 s for two builds, REPRODUCIBLE=1)
+Contract / fixes : API version 2; patches 0001-0009; 251 exports (== specs/expected-exports.txt)
 Built by         : macos/build-osx-arm64.sh (route: native, Apple Silicon)
-Build host       : the Apple Silicon Mac above (macOS 27.0.1, arm64)
-Toolchain        : rustc 1.93.1 (01f6ddf75 2026-02-11) / cargo 1.93.1, target
-                   aarch64-apple-darwin; Apple clang 21.0.0 as the linker driver (through
-                   macos/cc-exports.sh), macOS 27.0 SDK; libclang: Command Line Tools
+Build host       : the Apple Silicon Mac above (macOS 27.0.1, arm64; Xcode 27.0, Apple
+                   clang 21.0.0 clang-2100.3.34.2, macOS 27.0 SDK)
+Toolchain        : rustc 1.93.1 (01f6ddf75 2026-02-11) / cargo 1.93.1 (083ac5135), target
+                   aarch64-apple-darwin; Apple clang as the linker driver (through
+                   macos/cc-exports.sh); libclang: Command Line Tools
 cargo            : MACOSX_DEPLOYMENT_TARGET=11.0 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=
                    macos/cc-exports.sh cargo +1.93 build --release --locked --target
-                   aarch64-apple-darwin (rustflags: --remap-path-prefix <scratch>, <cargo
-                   home>; ld -exported_symbols_list = specs/expected-exports.txt)
+                   aarch64-apple-darwin (rustflags: --remap-path-prefix <scratch> (both
+                   /tmp and /private/tmp spellings), <cargo home>; ld -exported_symbols_list
+                   = specs/expected-exports.txt)
 Profile          : release - opt-level 3, lto fat, codegen-units 1, panic abort, debug true
 File             : libcodebrix_wgpu.dylib - Mach-O 64-bit arm64, thin (lipo: non-fat);
                    install name @rpath/libcodebrix_wgpu.dylib; no LC_RPATH
 Minimum macOS    : 11.0 (checked: LC_BUILD_VERSION minos 11.0; 0 weak imports)
-Size (signed)    : 4253232 bytes (strip -x, then codesign --sign -; signature valid)
-SHA256           : af235b4868b615768f83e0a604b89ed77f82f041ee1737b40fda6c35590bba0c
-LC_UUID          : E5BA16B2-4DF6-325E-8E99-68A9D44D9A31 (equal in the stripped and the
+Size (signed)    : 4270464 bytes (strip -x, then codesign --sign -; signature valid)
+SHA256           : 44197dcf1d0f5fc07c040af0b8e149c91514efb28fe413f5230418b1ad06c54d
+LC_UUID          : 07C11DCA-A60C-3881-91BD-2AD2C6D263F5 (equal in the stripped and the
                    unstripped file)
-Unstripped       : 5020680 bytes -> unstripped/osx-arm64/libcodebrix_wgpu.dylib (committed:
+Unstripped       : 5043288 bytes -> unstripped/osx-arm64/libcodebrix_wgpu.dylib (committed:
                    well under the 50 MB rule that kept the Windows PDBs out)
-                   sha256 8288659afcb46f8436d97912c5d0e15fc525084c5cc7c6afbfb48f58a0c10211
-Exports          : exactly the 243 functions of specs/expected-exports.txt
+                   sha256 99b8ed1e9e4e8b4f891ea650b9531b860b96d995c8d0356790546a557c804cad
+Exports          : exactly the 251 functions of specs/expected-exports.txt
 Dependencies     : /usr/lib/libSystem.B.dylib, /usr/lib/libobjc.A.dylib,
                    /usr/lib/libiconv.2.dylib, and the frameworks QuartzCore, Metal,
                    Foundation, CoreFoundation - nothing from Homebrew, no Vulkan / MoltenVK
-Build warnings   : 0 (cargo log)
-Smoke test       : PASSED on the build host (45 checks, 0 failed, SMOKE TEST PASSED, exit 0;
-                   Metal backend, Apple M2 Pro: compute + render round trips, transitions,
-                   wgpu.h Metal getters, AdoptMetalDevice, 0 live objects)
-Managed proof    : dotnet test on the build host against this exact file (the copy in the
-                   test output: sha256 above): 130 passed, 0 failed, 7 skipped (the
-                   Linux-only Vulkan tests - see the macOS header); the GPU round trips ran
-                   on Metal; struct layouts and PackageContent passed. 2026-10-11 UTC
+Embedded paths   : none from this machine (no /tmp, /private/tmp or /Users string; the
+                   wgpu-native source names read wgpu-native-tools/wgpu-native/src/...)
+Build warnings   : 0 (cargo log, both builds)
+Reproducible     : YES (REPRODUCIBLE=1) - two builds into the same paths gave identical
+                   unstripped bytes (see the macOS header, Second run)
+Smoke test       : PASSED on the build host (73 checks, 0 failed, SMOKE TEST PASSED, exit 0;
+                   Metal backend, Apple M2 Pro): proc status by ordinal, build info with
+                   the 0001-0009 fix set, 19 struct layouts, compute + render round trips,
+                   WHOLE_MAP_SIZE map at offset 8 (0006), foreign-index wgpuDevicePoll ->
+                   false + Validation scope (0007), downlevel + RGBA8 format capabilities,
+                   bounded poll, fault listeners, transitions, wgpu.h Metal getters,
+                   CreateTextureFromMetalTexture round trip, AdoptMetalDevice + compute,
+                   Vulkan / D3D12 functions -> Error, 0 live objects
+Managed proof    : 2026-10-17, Release, -p:UseLocalNativeProject=true, against this exact
+                   file (the copy in the test output has the sha256 above):
+                   Native.Tests 131 tests, 110 passed, 0 failed, 21 skipped (all platform
+                   rules, no "no adapter" skip - see the macOS header); BindingGenerator.Tests
+                   96 passed. Skia.Tests / Graphics.Tests NOT RUN: the Skia package does not
+                   compile at HEAD 7edd925 (see the header).
 
 ================================================================================
 osx-x64                                                           BUILT + PASSED
 ================================================================================
-REBUILD REQUIRED: contract v2 + patches 0003-0009 (2026-10-17) - this block describes the 1.0.287.301 binary
-Built            : 2026-10-11 05:28:42 UTC (74 s)
+Built            : 2026-10-17 22:36:57 UTC (159 s for two builds, REPRODUCIBLE=1)
+Contract / fixes : API version 2; patches 0001-0009; 251 exports (== specs/expected-exports.txt)
 Built by         : macos/build-osx-x64.sh (route: cross-compiled on arm64 via --target
                    x86_64-apple-darwin, verified under Rosetta 2)
-Build host       : the Apple Silicon Mac above (macOS 27.0.1, arm64)
-Toolchain        : rustc 1.93.1 (01f6ddf75 2026-02-11) / cargo 1.93.1, target
-                   x86_64-apple-darwin; Apple clang 21.0.0 as the linker driver (through
-                   macos/cc-exports.sh), macOS 27.0 SDK; libclang: Command Line Tools
+Build host       : the Apple Silicon Mac above (macOS 27.0.1, arm64; Xcode 27.0, Apple
+                   clang 21.0.0 clang-2100.3.34.2, macOS 27.0 SDK)
+Toolchain        : rustc 1.93.1 (01f6ddf75 2026-02-11) / cargo 1.93.1 (083ac5135), target
+                   x86_64-apple-darwin; Apple clang as the linker driver (through
+                   macos/cc-exports.sh); libclang: Command Line Tools
 cargo            : MACOSX_DEPLOYMENT_TARGET=11.0 CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER=
                    macos/cc-exports.sh cargo +1.93 build --release --locked --target
-                   x86_64-apple-darwin (rustflags: --remap-path-prefix <scratch>, <cargo
-                   home>; ld -exported_symbols_list = specs/expected-exports.txt)
+                   x86_64-apple-darwin (rustflags: --remap-path-prefix <scratch> (both
+                   /tmp and /private/tmp spellings), <cargo home>; ld -exported_symbols_list
+                   = specs/expected-exports.txt)
 Profile          : release - opt-level 3, lto fat, codegen-units 1, panic abort, debug true
 File             : libcodebrix_wgpu.dylib - Mach-O 64-bit x86_64, thin (lipo: non-fat);
                    install name @rpath/libcodebrix_wgpu.dylib; no LC_RPATH
 Minimum macOS    : 11.0 (checked: LC_BUILD_VERSION minos 11.0; 0 weak imports)
-Size (signed)    : 4849808 bytes (strip -x, then codesign --sign -; signature valid)
-SHA256           : 99c4c4635447c93eeaf5b624872907b3319d88c82b088a415ff8d28a32f87f20
-LC_UUID          : 2F19E006-5B6A-3E4C-AE84-B5D269478D4C (equal in the stripped and the
+Size (signed)    : 4879664 bytes (strip -x, then codesign --sign -; signature valid)
+SHA256           : 3a3abcf9e67ff9a6d6c5c0ebea4e504ead7d21167858de631d4dc835f793c483
+LC_UUID          : CF12442A-06C8-3582-AFAD-EE9A766235DC (equal in the stripped and the
                    unstripped file)
-Unstripped       : 5604168 bytes -> unstripped/osx-x64/libcodebrix_wgpu.dylib (committed)
-                   sha256 a4095b7654570677bcf7cdf82f10749be7227f8ec8fe07bf9b89a78cda282dad
-Exports          : exactly the 243 functions of specs/expected-exports.txt
+Unstripped       : 5639192 bytes -> unstripped/osx-x64/libcodebrix_wgpu.dylib (committed)
+                   sha256 a2284a326a2347cbdd43a728ac5c77fad2f5e924b00cae6f9d9145e0a0cb8061
+Exports          : exactly the 251 functions of specs/expected-exports.txt
 Dependencies     : as osx-arm64 (libSystem, libobjc, libiconv, QuartzCore, Metal,
                    Foundation, CoreFoundation)
-Build warnings   : 0 (cargo log)
-Reproducible     : the build of 05:24 UTC (same source; the earlier cc-exports.sh version
-                   produced the same cdylib link) gave this same sha256 and LC_UUID -
-                   byte-identical
-Smoke test       : PASSED on the build host under Rosetta 2 (45 checks, 0 failed, SMOKE TEST
+Embedded paths   : none from this machine (as osx-arm64)
+Build warnings   : 0 (cargo log, both builds)
+Reproducible     : YES (REPRODUCIBLE=1) - two builds into the same paths gave identical
+                   unstripped bytes
+Smoke test       : PASSED on the build host under Rosetta 2 (73 checks, 0 failed, SMOKE TEST
                    PASSED, exit 0): the x86_64 program and dylib ran translated and drove
-                   the host's Metal device (Apple M2 Pro)
+                   the host's Metal device (Apple M2 Pro) through the same checks as
+                   osx-arm64
 Managed proof    : NOT RUN - this Mac has only the arm64 .NET SDK, which cannot load an
                    x86_64 dylib. An x64 .NET 10 SDK under Rosetta 2, or an Intel Mac, would
                    give the equivalent of the osx-arm64 line.
