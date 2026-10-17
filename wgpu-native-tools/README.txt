@@ -119,8 +119,16 @@ macos/cc-exports.sh, which replaces rustc's -exported_symbols_list with
 specs/expected-exports.txt (objc2's define_class! statics for raw-window-metal's
 RawWindowMetalLayer were being exported beside the C API, and ld refuses an
 -unexported_symbols_list next to rustc's list). Both RIDs then passed the
-complete gate and were adopted; all nine RIDs are built. If a script breaks,
-fix it in the script and record it in BUILD-PROVENANCE.txt.
+complete gate and were adopted. They were rebuilt there on 2026-10-17 for
+contract v2 + patches 0003-0009 (the first REPRODUCIBLE=1 run, 73 smoke-test
+checks on Metal each): three fixes to macos/build-common.sh only, recorded in
+BUILD-PROVENANCE.txt - the reproducibility twin now builds into the same,
+emptied target folder (ld writes the linked objects' paths into N_OSO stabs
+and LC_UUID, so a twin in a target-2 folder could never match), a differing
+twin is recorded instead of silently ending the script under set -e, and the
+physical /private/tmp scratch path is remapped as well (five wgpu-native
+source paths had been in both shipped dylibs). All nine RIDs are built. If a
+script breaks, fix it in the script and record it in BUILD-PROVENANCE.txt.
 
 PREREQUISITES PER MACHINE
 --------------------------------------------------------------------------------
