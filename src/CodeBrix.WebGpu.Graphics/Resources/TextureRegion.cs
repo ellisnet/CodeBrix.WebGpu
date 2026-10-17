@@ -156,9 +156,16 @@ public static class TextureCopyLayout
     /// <param name="rows">The number of rows.</param>
     /// <param name="tight">The destination (at least <paramref name="tightBytesPerRow" /> x <paramref name="rows" /> bytes).</param>
     /// <param name="tightBytesPerRow">The tight row size.</param>
-    public static void UnpackRows(ReadOnlySpan<byte> aligned, int alignedBytesPerRow, int rows, Span<byte> tight, int tightBytesPerRow)
+    /// <exception cref="ArgumentException">The destination or the source holds fewer than <paramref name="rows" /> rows.</exception>
+    public static unsafe void UnpackRows(ReadOnlySpan<byte> aligned, int alignedBytesPerRow, int rows, Span<byte> tight, int tightBytesPerRow)
     {
         if (tight.Length < tightBytesPerRow * rows) throw new ArgumentException("The destination holds fewer than " + rows + " rows.", nameof(tight));
-        for (int row = 0; row < rows; row++) aligned.Slice(row * alignedBytesPerRow, tightBytesPerRow).CopyTo(tight.Slice(row * tightBytesPerRow, tightBytesPerRow));
+        if (rows <= 0 || tightBytesPerRow <= 0) return;
+        if (alignedBytesPerRow < tightBytesPerRow || aligned.Length < (alignedBytesPerRow * (rows - 1)) + tightBytesPerRow) throw new ArgumentException("The source holds fewer than " + rows + " rows of " + alignedBytesPerRow + " bytes.", nameof(aligned));
+        fixed (byte* from = aligned)
+        fixed (byte* to = tight)
+        {
+            Native.Interop.FastMemory.CopyRows(from, (nuint)alignedBytesPerRow, to, (nuint)tightBytesPerRow, (nuint)tightBytesPerRow, (nuint)rows);
+        }
     }
 }

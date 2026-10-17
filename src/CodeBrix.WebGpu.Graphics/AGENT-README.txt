@@ -193,7 +193,10 @@ GpuTexture
   WriteRgba(ReadOnlySpan<byte>) RGBA input, swapped to BGRA when needed
   WriteMipLevel(level, bytes)
   ReadPixels(Span<byte>, mipLevel = 0) / ReadPixels() / ReadRgba()
-                                needs CopySrc; colour formats and Depth32Float
+                                needs CopySrc; colour formats and Depth32Float;
+                                the rows are copied out of the mapped staging
+                                buffer with the C runtime's memcpy (see
+                                "Read-back copies" in ADVANCED API REFERENCE)
   static FullMipChainLength(w, h)
   (images, layer views and saving: see IMAGES AND TEXTURES below)
 
@@ -667,7 +670,9 @@ GraphicsContext
         Image<HalfVector4> = linear floats; other pixel types = sRGB. GOTCHA:
         Image.Load<RgbaVector>("x.jxl") keeps the file's own transfer curve
         (Imaging writes float JPEG XL on the sRGB curve), so pass .jxl files
-        by path or stream instead - those decode to linear light
+        by path or stream instead - those decode to linear light - or decode
+        them yourself with new JxlDecoder { TargetColor =
+        JxlTargetColor.LinearSrgb }
   CreateProceduralSky(ProceduralSkyOptions sky = null, EnvironmentOptions options = null)
   DefaultEnvironment   procedural sky (ProceduralSkyOptions defaults, cube
         256), built on first use, owned by the context - do not dispose
@@ -747,7 +752,9 @@ glTF support (loading)
   TANGENT (generated for normal-mapped primitives without them: per-triangle
   UV derivatives averaged per vertex, Gram-Schmidt, MikkTSpace-style
   handedness - not bit-identical to MikkTSpace), TEXCOORD_0/1, COLOR_0
-  (float or normalised), JOINTS_0/WEIGHTS_0; sparse accessors; morph targets
+  (float or normalised), JOINTS_0/WEIGHTS_0; sparse accessors (vertex
+  attributes, indices, morph targets and animation keys - translation,
+  rotation quaternions, scale and morph weights); morph targets
   (position/normal/tangent deltas, default weights); skins; node animation
   (translation/rotation/scale/weights; step, linear, cubic spline);
   metallic-roughness materials with every texture slot; KHR_texture_transform
@@ -858,17 +865,37 @@ GpuBuffer
   GetMappedRange(byteOffset, byteCount = -1) -> Span<byte> (native memory)
   GetMappedSpan<T>() / GetMappedSpan<T>(byteOffset, count = -1) -> Span<T>
   ReadMapped<T>(Span<T>, byteOffset), WriteMapped<T>(ReadOnlySpan<T>, byteOffset)
+               ReadMapped (and Read<T>) copy with the C runtime's memcpy
   Unmap()      spans become invalid
   Destroy()    frees GPU memory now and disposes the wrapper
   IsWrapped
   Write/Read throw InvalidOperationException while the buffer is mapped.
+
+Read-back copies
+----------------
+Every copy out of mapped GPU memory in this package - GpuTexture.ReadPixels /
+ReadRgba / ReadRegion / ToImage, HeadlessRenderTarget reads, GpuBuffer.Read<T>
+and ReadMapped<T>, GpuTimer results, TextureCopyLayout.UnpackRows - goes
+through CodeBrix.WebGpu.Native.Interop.FastMemory (Copy(void*, void*, nuint),
+CopyRows(source, sourceStride, destination, destinationStride, rowBytes,
+rowCount)), which calls the C runtime's memcpy (Android libc.so, Linux
+libc.so.6, macOS libSystem.B.dylib, Windows ucrtbase.dll / msvcrt.dll,
+resolved once) and falls back to Buffer.MemoryCopy when none is found.
+Copies under 128 bytes and overlapping ranges use the managed copy.
+  Why: on some mobile GPUs (Adreno 640 measured) the host-visible read-back
+  memory reads like uncached memory, and the .NET copies (Span.CopyTo,
+  Buffer.MemoryCopy, Unsafe.CopyBlock, NativeMemory.Copy) run about 15 times
+  slower from it than memcpy. Desktop GPUs show no difference.
+  Your own code that copies out of GetMappedRange / GetMappedSpan should use
+  ReadMapped<T> or FastMemory.Copy rather than a span copy or a loop.
 
 Textures: regions, copies, clears, uploads
 ------------------------------------------
 TextureRegion(x, y, width, height, mipLevel = 0, arrayLayer = 0, layers = 1,
   aspect = All); TextureRegion.Whole(texture, mipLevel)
 TextureCopyLayout: RowAlignment (256), TightBytesPerRow, AlignedBytesPerRow,
-  BufferSize, PackRows, UnpackRows
+  BufferSize, PackRows, UnpackRows (UnpackRows copies through FastMemory, so it
+  is the fast way to unpack a mapped read-back range of your own)
 GpuTexture
   Dimension, DepthOrArrayLayers, SampleCount (read from the native texture)
   WriteRegion(region, tightTexels)   queue write
@@ -1517,6 +1544,7 @@ WORKING EXAMPLES ON GITHUB
     SPIR-V, GLSL, trusted WGSL    GpuShaderTests.cs
     Adoption, wrapping handles    GraphicsContextTests.cs
     Regions, layouts, structs     TextureRegionTests.cs
+    Decoding configuration        ImageUploadTests.cs
     Image files, GPU mipmaps,
       readback, saving, arrays    ImageTextureTests.cs
     Animated GIF / JPEG XL,
@@ -1524,6 +1552,7 @@ WORKING EXAMPLES ON GITHUB
     JPEG XL test files (in-test)  TestJxl.cs
     glTF models, instances,
       model renderer              ModelLoadingTests.cs
+    Sparse animation keys         GltfModelLoaderTests.cs
     PBR shading, skinning,
       morph targets               ModelPbrTests.cs, ModelSkinningTests.cs,
                                   ModelMorphTests.cs

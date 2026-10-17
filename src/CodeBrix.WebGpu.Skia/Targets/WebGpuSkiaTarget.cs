@@ -24,7 +24,7 @@ namespace CodeBrix.WebGpu.Skia;
 /// </list>
 /// Rules: in the <see cref="WebGpuSkiaTier.ZeroCopy" /> tier, between passes only DRAW into <see cref="Surface" />
 /// (do not ReadPixels / Snapshot it, which moves the texture to a layout WebGPU cannot be told about - read it with
-/// <see cref="ReadPixels" />, <see cref="ReadImage" /> or <see cref="ReadBitmap" /> instead, or after the last frame);
+/// <see cref="ReadPixels(Span{byte})" />, <see cref="ReadImage" /> or <see cref="ReadBitmap" /> instead, or after the last frame);
 /// use one thread; dispose targets before their device.
 /// The target is an <see cref="IWebGpuTextureTarget" /> (this frame protocol is that interface's pass protocol), so
 /// any library built on CodeBrix.WebGpu.Native that accepts one can render straight into it.
@@ -115,7 +115,7 @@ public sealed unsafe partial class WebGpuSkiaTarget : IDisposable, IWebGpuTextur
 
     /// <summary>
     /// How many GPU-to-CPU transfers this target has performed: one per frame in the
-    /// <see cref="WebGpuSkiaTier.Readback" /> tier, one per <see cref="ReadPixels" />, <see cref="ReadImage" /> and
+    /// <see cref="WebGpuSkiaTier.Readback" /> tier, one per <see cref="ReadPixels(Span{byte})" />, <see cref="ReadImage" /> and
     /// <see cref="ReadBitmap" /> call, and one per frame when <see cref="WebGpuSkiaTargetOptions.PreserveSurfaceContent" />
     /// reads a GPU surface. Zero across any number of frames in the <see cref="WebGpuSkiaTier.ZeroCopy" /> and
     /// <see cref="WebGpuSkiaTier.GpuCopy" /> tiers.
@@ -283,7 +283,7 @@ public sealed unsafe partial class WebGpuSkiaTarget : IDisposable, IWebGpuTextur
 
     /// <summary>
     /// Creates a target with no Skia surface: WebGPU renders into the target's texture, and
-    /// <see cref="ReadImage" />, <see cref="ReadBitmap" /> or <see cref="ReadPixels" /> read it back (for tests,
+    /// <see cref="ReadImage" />, <see cref="ReadBitmap" /> or <see cref="ReadPixels(Span{byte})" /> read it back (for tests,
     /// servers and screenshots).
     /// </summary>
     /// <param name="device">The device.</param>
@@ -465,7 +465,7 @@ public sealed unsafe partial class WebGpuSkiaTarget : IDisposable, IWebGpuTextur
         return true;
     }
 
-    /// <summary>Reads the WebGPU texture (see <see cref="ReadPixels" />) into a new raster image. Counts one readback.</summary>
+    /// <summary>Reads the WebGPU texture (see <see cref="ReadPixels(Span{byte})" />) into a new raster image. Counts one readback.</summary>
     /// <returns>The image, or null when the read failed.</returns>
     /// <exception cref="ObjectDisposedException">The target has been disposed.</exception>
     /// <exception cref="InvalidOperationException">A pass is open.</exception>
@@ -475,7 +475,7 @@ public sealed unsafe partial class WebGpuSkiaTarget : IDisposable, IWebGpuTextur
         return bitmap == null ? null : SKImage.FromBitmap(bitmap);
     }
 
-    /// <summary>Reads the WebGPU texture (see <see cref="ReadPixels" />) into a new bitmap. Counts one readback.</summary>
+    /// <summary>Reads the WebGPU texture (see <see cref="ReadPixels(Span{byte})" />) into a new bitmap. Counts one readback.</summary>
     /// <returns>The bitmap, or null when the read failed.</returns>
     /// <exception cref="ObjectDisposedException">The target has been disposed.</exception>
     /// <exception cref="InvalidOperationException">A pass is open.</exception>

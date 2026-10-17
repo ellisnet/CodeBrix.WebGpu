@@ -31,7 +31,11 @@ CodeBrix.WebGpu.Skia depends on SkiaSharp and on CodeBrix.WebGpu.Native (`CodeBr
 * Adopting the application's device: an application that already has a Vulkan or Metal `GRContext` hands its backend context to the library, which wraps that native device for WebGPU - surfaces on the application's own context then reach the zero-copy and GPU-copy tiers
 * Zero copy for surfaces the application created over its own GPU texture, when it tells the library which native texture backs the surface
 * A small, explicit frame protocol - `BeginWebGpuPass` / `EndWebGpuPass` - that orders WebGPU and SkiaSharp work on the GPU and moves the texture between the two in both directions
-* Headless rendering with no surface at all, read back as an `SKImage`, an `SKBitmap` or raw bytes - for tests, servers and screenshots
+* Headless rendering with no surface at all, read back as an `SKImage`, an `SKBitmap` or raw bytes (tight rows or rows of your own stride) - for tests, servers and screenshots
+* Asynchronous, double-buffered read-back: `BeginReadPixels` issues a frame's copy and returns at once, `EndReadPixels` copies the pixels out later, so the next frame renders while the previous one is mapped; the number of staging buffers is configurable
+* Fast copies out of mapped GPU memory, including on mobile GPUs whose read-back memory the CPU reads uncached
+* Required device features, native engine features and limits for the owned device; a requirement the adapter cannot meet is never dropped - device creation reports each unmet feature or limit by name, with the adapter's value, so the caller can fall back
+* The adapter's available features and limits next to the device's enabled ones, for owned and adopted devices, and device-loss reporting
 * A readback counter, so an application (or a test) can prove a render loop never touches CPU memory
 * Optional preservation of the surface's content in the copy tiers, so a WebGPU pass that loads instead of clearing sees what SkiaSharp drew
 * Sharing through CodeBrix.WebGpu.Native's contracts: `WebGpuSkiaDevice` is an `IWebGpuDeviceSource` and `WebGpuSkiaTarget` an `IWebGpuTextureTarget`, so any library built on CodeBrix.WebGpu.Native that accepts them - for example CodeBrix.WebGpu.Graphics - shares the device and renders into the target in one call each, without either package referencing the other
@@ -96,6 +100,44 @@ CommandEncoder encoder = target.BeginWebGpuPass();
 // ... render into target.TextureView ...
 target.EndWebGpuPass();
 using SKImage image = target.ReadImage();
+```
+
+### Required features and limits
+
+```csharp
+WebGpuSkiaDeviceOptions options = new WebGpuSkiaDeviceOptions();
+options.RequiredFeatures.Add(FeatureName.TimestampQuery);
+Limits limits = WebGpuSkiaLimits.Undefined();
+limits.MaxTextureDimension2D = 16384;
+options.RequiredLimits = limits;
+
+using WebGpuSkiaDevice gpu = WebGpuSkiaDevice.Create(options);
+if (!gpu.IsAvailable)
+{
+    foreach (WebGpuSkiaUnmetRequirement unmet in gpu.UnmetRequirements) Console.WriteLine(unmet.Message);
+}
+else
+{
+    Console.WriteLine(string.Join(", ", gpu.Features) + " enabled of " + string.Join(", ", gpu.AdapterFeatures));
+}
+```
+
+### Asynchronous read-back
+
+```csharp
+byte[] pixels = new byte[target.Width * target.Height * 4];
+WebGpuSkiaReadback previous = default;
+for (int frame = 0; frame < frames; frame++)
+{
+    CommandEncoder encoder = target.BeginWebGpuPass();
+    // ... render frame ...
+    target.EndWebGpuPass();
+    WebGpuSkiaReadback current = target.BeginReadPixels();        // returns at once
+    if (previous.IsValid && target.EndReadPixels(previous, pixels)) Show(pixels);
+    previous = current;
+}
+
+if (previous.IsValid) target.EndReadPixels(previous, pixels);
 ```
 
 ### Another WebGPU library on the same device and target

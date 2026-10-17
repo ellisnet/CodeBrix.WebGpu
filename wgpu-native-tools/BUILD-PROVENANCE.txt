@@ -61,21 +61,20 @@ Common to every entry below
   Smoke test      : smoke-test.c, built for the TARGET, run against the STAGED
                     (stripped) file, loaded by path - see README.txt "THE SMOKE TEST".
 
-TODO: combine these two versions of the paragraph into a single coherent paragraph:
-                    77 checks with a Vulkan adapter (69 on GL only); without one
-                    (most containers) the GPU part prints SKIPPED and 31 checks run.
-                    (The osx-* blocks below predate contract v2: their binaries
-                    ran the 45-check smoke test of API version 1. The win-*
-                    blocks are current: rebuilt 2026-10-17.)
                     77 checks with a Vulkan adapter (69 on GL only, 73 on Metal:
-                    the Metal wrap + adopt in place of the Vulkan-object checks);
-                    without one (most containers) the GPU part prints SKIPPED and
-                    31 checks run. (The win-* blocks below predate contract v2:
-                    their binaries ran the 47-check smoke test of API version 1.)
+                    the Metal wrap + adopt in place of the Vulkan-object checks;
+                    the count on a D3D12 adapter is not yet recorded - see the
+                    win-x64 known gap); without one (most containers) the GPU
+                    part prints SKIPPED and 31 checks run. All nine blocks below
+                    are current (contract v2, patches 0001-0009, 2026-10-17): the
+                    five Linux / Android RIDs built here, the four win-* / osx-*
+                    RIDs rebuilt the same day on Jeremy's machines; their API
+                    version 1 predecessors (45-check smoke test on macOS, 47 on
+                    Windows) shipped in 1.0.287.301 and are superseded.
 
 Linux (the three linux-* entries)
 --------------------------------------------------------------------------------
-  Route           : linux/build.sh -> (1) CodeBrix.RustTools.Docker 1.0.283.434 via
+  Route           : linux/build.sh -> (1) CodeBrix.RustTools.Docker 1.0.284.266 via
                     driver/ (linux-build): engine check, image, labelled container,
                     source copy, `cargo fetch` (network; fills the cargo cache volume
                     codebrix-wgpu-cargo-cache), licence audit in the container
@@ -179,7 +178,7 @@ Smoke test       : PASSED in manylinux_2_39_riscv64 under qemu-riscv64 - 69 chec
 
 Android (the two android-* entries)
 --------------------------------------------------------------------------------
-  Route           : android/build.sh -> CodeBrix.RustTools 1.0.283.434 via driver/
+  Route           : android/build.sh -> CodeBrix.RustTools 1.0.284.266 via driver/
                     (android-build): RustWorkbench.BuildAndroidAsync with
                     AndroidLinkProfile.ForNdk(NDK 30.0.16248370, API 33) - the NDK's
                     <triple>33-clang as linker and C compiler, llvm-ar; plus
@@ -604,6 +603,12 @@ macOS (the two osx-* entries)
                     derived, so only the object PATHS had to be held equal (Second run,
                     1). The Oct 10 match (two osx-x64 builds of 05:24 and 05:28 UTC with
                     the same sha256 and LC_UUID) was observed, not from REPRODUCIBLE=1.
+                    Note (checked on Linux 2026-10-17 after the adopt): the committed
+                    UNSTRIPPED osx twins keep their N_OSO stabs, so they do carry the
+                    build machine's object paths (/tmp/codebrix-wgpu-build-<rid>/
+                    target/... for our cgu.0.rcgu.o, /Users/<name>/.rustup/... for
+                    compiler_builtins) - 2-3 strings per RID, debugger material only;
+                    the SHIPPED dylibs carry none (strings -a: 0 hits).
   Managed tests   : 2026-10-17 (Second run), Release, -p:UseLocalNativeProject=true, one
                     `dotnet test --project` per test project because the solution now
                     holds the Android sample (net10.0-android) and this Mac has no

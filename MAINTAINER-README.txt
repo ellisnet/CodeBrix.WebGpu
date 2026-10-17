@@ -696,8 +696,8 @@ they can be published in either order after Native.
   Skia nuspec: dependencies CodeBrix.WebGpu.Native.MitLicenseForever V and
   SkiaSharp 4.153.1, nothing else. Graphics nuspec: exactly three
   dependencies - CodeBrix.WebGpu.Native.MitLicenseForever V,
-  CodeBrix.Imaging.ApacheLicenseForever 1.0.287.220 and
-  CodeBrix.Graphics3D.Gltf2.MitLicenseForever 1.0.261.293.
+  CodeBrix.Imaging.ApacheLicenseForever 1.0.290.858 and
+  CodeBrix.Graphics3D.Gltf2.MitLicenseForever 1.0.290.996.
   Verified 2026-10-14 with a scratch copy of the repository whose pin named a
   Native packed into a scratch folder feed (passed with --source on the
   command line, packages restored into a scratch NUGET_PACKAGES): Skia and
@@ -738,8 +738,8 @@ THE PUBLISH SEQUENCE (all three packages, from the repository root)
      = src/CodeBrix.WebGpu.Skia/README.md); no runtimes/. Publish.
   5. dotnet pack src/CodeBrix.WebGpu.Graphics -c Release -o <folder>
      Check: dependencies = CodeBrix.WebGpu.Native.MitLicenseForever V,
-     CodeBrix.Imaging.ApacheLicenseForever 1.0.287.220 and
-     CodeBrix.Graphics3D.Gltf2.MitLicenseForever 1.0.261.293 only; lib dll +
+     CodeBrix.Imaging.ApacheLicenseForever 1.0.290.858 and
+     CodeBrix.Graphics3D.Gltf2.MitLicenseForever 1.0.290.996 only; lib dll +
      xml and the five documents (README.md =
      src/CodeBrix.WebGpu.Graphics/README.md); no runtimes/. Publish.
      (4 and 5 are independent of each other.) Tag the commit as usual.
@@ -776,12 +776,20 @@ VERSIONS AND DEPENDENCY PINS
   PQ/HLG tone mapped for a 255-nit display), reads JPEG XL frame durations
   in AnimatedTexture.ReadDurations (ticks at the file's ticks-per-second),
   and decodes .jxl environments to linear light with the HDR range kept
-  (ImageUpload.JxlHdrDecoder + the extended inverse sRGB curve). Every JXL
+  (ImageUpload.JxlHdrDecoder: TargetColor LinearSrgb). Every JXL
   test file is made in-test with Imaging's encoder (tests/.../TestJxl.cs).
   Still not animated by Imaging: animated WebP (refused by its decoder) and
   APNG (the PNG decoder reads the default image only). Releasing this = the
   usual gate, then republish Graphics only (against the already published
   Native).
+  DEPENDENCY BUMP (release 2): Imaging 1.0.287.220 -> 1.0.290.858 and Gltf2
+  1.0.261.293 -> 1.0.290.996 (the samples' Gltf2 pins too). Graphics relies on:
+  Configuration.Clone() being an independent copy (ImageUpload.Decoding owns
+  its format manager - ImageUploadTests), JxlTargetColor.LinearSrgb for .jxl
+  environments (the managed extended inverse sRGB curve is gone; TestJxl
+  builds its linear fixture with JxlEncoder.ColorEncoding = LinearSrgb), and
+  Gltf2's sparse quaternion / multi-dimension accessors (sparse rotation keys
+  - GltfModelLoaderTests; the older Gltf2 threw NotImplementedException).
 
 
 CODING CONVENTIONS

@@ -79,6 +79,24 @@ public class TextureRegionTests
     }
 
     [Fact]
+    public void Unpack_rows_refuses_a_source_shorter_than_the_rows()
+    {
+        //Arrange - two rows of 3 with a stride of 8 need at least 11 source bytes
+        byte[] aligned = new byte[10];
+        byte[] back = new byte[6];
+
+        //Act
+        Action shortSource = () => TextureCopyLayout.UnpackRows(aligned, 8, 2, back, 3);
+        Action strideBelowRow = () => TextureCopyLayout.UnpackRows(new byte[16], 2, 2, back, 3);
+        Action nothing = () => TextureCopyLayout.UnpackRows(aligned, 8, 0, back, 3);
+
+        //Assert
+        shortSource.Should().Throw<ArgumentException>();
+        strideBelowRow.Should().Throw<ArgumentException>();
+        nothing.Should().NotThrow();
+    }
+
+    [Fact]
     public void Indirect_argument_structs_have_the_gpu_layout()
     {
         //Arrange / Act / Assert

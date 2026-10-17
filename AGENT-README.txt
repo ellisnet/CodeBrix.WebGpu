@@ -833,6 +833,13 @@ PERFORMANCE TIPS
     of the whole queue.
   * Map buffers with AllowProcessEvents and poll with wait = 0 from your frame
     loop rather than blocking with wait = 1.
+  * Copy OUT of a mapped read-back buffer with
+    CodeBrix.WebGpu.Native.Interop.FastMemory.Copy / CopyRows, never with a
+    row loop, Span.CopyTo or Buffer.MemoryCopy. On some mobile GPUs the mapped
+    memory is served uncached to the CPU and the runtime's copies run an order
+    of magnitude slower than the C runtime memcpy FastMemory resolves (with a
+    managed fallback when it cannot). CodeBrix.WebGpu.Skia and .Graphics
+    already read back through it.
 
 
 LIMITS

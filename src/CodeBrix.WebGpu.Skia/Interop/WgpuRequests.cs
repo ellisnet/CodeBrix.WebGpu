@@ -46,6 +46,15 @@ internal static unsafe class WgpuRequests
         return result.Status == (uint)RequestAdapterStatus.Success ? new Adapter(result.Handle) : Adapter.Null;
     }
 
+    /// <summary>Requests a device with default limits and no optional features (see the overload that takes them).</summary>
+    /// <param name="instance">The instance that owns the adapter.</param>
+    /// <param name="adapter">The adapter.</param>
+    /// <param name="errorSink">A <see cref="GCHandle" /> (as a pointer) to the <see cref="WebGpuSkiaDevice" /> that collects uncaptured errors, or zero.</param>
+    /// <param name="message">The callback's message (empty when none).</param>
+    /// <returns>The device, or null.</returns>
+    public static Device RequestDevice(Instance instance, Adapter adapter, IntPtr errorSink, out string message) =>
+        RequestDevice(instance, adapter, errorSink, null, 0, null, out message);
+
     /// <summary>Requests a device with the uncaptured-error and device-lost callbacks pointed at a device object.</summary>
     /// <param name="instance">The instance that owns the adapter.</param>
     /// <param name="adapter">The adapter.</param>

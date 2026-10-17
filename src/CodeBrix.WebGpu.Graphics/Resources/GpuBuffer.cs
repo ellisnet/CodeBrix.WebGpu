@@ -124,7 +124,11 @@ public sealed unsafe partial class GpuBuffer : GraphicsResource
             Native.WebGpu.CommandEncoderRelease(encoder);
             if (!GpuRequests.MapRead(Context.Device, staging, (nuint)padded, out string message)) throw new GraphicsException("The readback buffer could not be mapped: " + message);
             byte* mapped = (byte*)Native.WebGpu.BufferGetConstMappedRange(staging, 0, (nuint)padded);
-            new ReadOnlySpan<byte>(mapped, bytes.Length).CopyTo(bytes);
+            fixed (byte* target = bytes)
+            {
+                Native.Interop.FastMemory.Copy(mapped, target, (nuint)bytes.Length);
+            }
+
             Native.WebGpu.BufferUnmap(staging);
         }
         finally

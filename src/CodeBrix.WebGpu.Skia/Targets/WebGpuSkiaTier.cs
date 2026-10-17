@@ -13,7 +13,7 @@ public enum WebGpuSkiaTier
     /// <summary>
     /// No Skia surface at all: WebGPU renders into its own texture, read back on request with
     /// <see cref="WebGpuSkiaTarget.ReadImage" />, <see cref="WebGpuSkiaTarget.ReadBitmap" /> or
-    /// <see cref="WebGpuSkiaTarget.ReadPixels" />.
+    /// <see cref="WebGpuSkiaTarget.ReadPixels(System.Span{byte})" />.
     /// </summary>
     Headless = 1,
 

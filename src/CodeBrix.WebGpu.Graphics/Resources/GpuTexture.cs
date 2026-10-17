@@ -186,9 +186,9 @@ public sealed unsafe partial class GpuTexture : GraphicsResource
             Native.WebGpu.CommandEncoderRelease(encoder);
             if (!GpuRequests.MapRead(Context.Device, staging, (nuint)size, out string message)) throw new GraphicsException("The readback buffer could not be mapped: " + message);
             byte* mapped = (byte*)Native.WebGpu.BufferGetConstMappedRange(staging, 0, (nuint)size);
-            for (int row = 0; row < height; row++)
+            fixed (byte* pixels = destination)
             {
-                new ReadOnlySpan<byte>(mapped + ((nuint)row * paddedRow), tightRow).CopyTo(destination.Slice(row * tightRow, tightRow));
+                Native.Interop.FastMemory.CopyRows(mapped, paddedRow, pixels, (nuint)tightRow, (nuint)tightRow, (nuint)height);
             }
 
             Native.WebGpu.BufferUnmap(staging);

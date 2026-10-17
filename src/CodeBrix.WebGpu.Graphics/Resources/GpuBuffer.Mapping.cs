@@ -124,7 +124,12 @@ public sealed unsafe partial class GpuBuffer
         where T : unmanaged
     {
         Span<byte> target = MemoryMarshal.AsBytes(destination);
-        GetMappedRange(byteOffset, target.Length).CopyTo(target);
+        Span<byte> mapped = GetMappedRange(byteOffset, target.Length);
+        fixed (byte* from = mapped)
+        fixed (byte* to = target)
+        {
+            Native.Interop.FastMemory.Copy(from, to, (nuint)target.Length);
+        }
     }
 
     /// <summary>Copies <paramref name="data" /> into the mapped range (the managed counterpart of writing a mapped range).</summary>

@@ -68,6 +68,27 @@ public unsafe class AdoptedDeviceTests
         gpuCopy.ReadbackCount.Should().Be(0);
     }
 
+    // The adopted device reports what the native adoption enabled next to what its adapter offers.
+    private static void AssertEnabledIsSubsetOfAvailable(WebGpuSkiaDevice adopted)
+    {
+        HashSet<FeatureName> available = new HashSet<FeatureName>(adopted.AdapterFeatures);
+        HashSet<NativeFeature> availableNative = new HashSet<NativeFeature>(adopted.AdapterNativeFeatures);
+        available.Count.Should().BeGreaterThan(0);
+        foreach (FeatureName feature in adopted.Features)
+        {
+            available.Contains(feature).Should().BeTrue(feature + " is enabled but not offered by the adapter");
+            Native.WebGpu.DeviceHasFeature(adopted.Device, feature).Should().NotBe(0u);
+        }
+
+        foreach (NativeFeature feature in adopted.NativeFeatures) availableNative.Contains(feature).Should().BeTrue(feature + " is enabled but not offered by the adapter");
+        Limits limits = default;
+        Native.WebGpu.DeviceGetLimits(adopted.Device, &limits).Should().Be(Status.Success);
+        adopted.Limits.MaxTextureDimension2D.Should().Be(limits.MaxTextureDimension2D);
+        adopted.Limits.MaxTextureDimension2D.Should().BeGreaterThan(0u);
+        adopted.AdapterLimits.MaxTextureDimension2D.Should().BeGreaterThanOrEqualTo(adopted.Limits.MaxTextureDimension2D);
+        adopted.IsLost.Should().BeFalse();
+    }
+
     // An adopted device has no uncaptured-error handler, so an unchecked validation error would end the process: a
     // texture the device rejects and a pass with an invalid command must both be caught by the target.
     private static void RejectInvalidWorkWithoutEndingTheProcess(WebGpuSkiaDevice adopted, GRContext appContext)
@@ -134,6 +155,7 @@ public unsafe class AdoptedDeviceTests
         adopted.GrContext.Should().BeSameAs(appContext);
         adopted.CreateGrContext().Should().BeSameAs(appContext);
         adopted.SharesDeviceWith(appContext).Should().BeTrue();
+        AssertEnabledIsSubsetOfAvailable(adopted);
         RunZeroCopyAndGpuCopyFrames(adopted, appContext);
         RejectInvalidWorkWithoutEndingTheProcess(adopted, appContext);
 

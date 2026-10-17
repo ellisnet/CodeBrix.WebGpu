@@ -85,6 +85,35 @@ class WebGpuSkiaDeviceOptions
   AllowFallbackBackend  bool = true         try the platform's other backends
   PowerPreference       PowerPreference     passed to the adapter request
   ForceFallbackAdapter  bool                software adapter
+  RequiredFeatures      IList<FeatureName>  standard WebGPU features the device
+                                            MUST have. Empty = none (the device
+                                            then has no optional features)
+  RequiredNativeFeatures IList<NativeFeature>  engine features it MUST have
+                                            (Immediates, ClearTexture,
+                                            TimestampQueryInsidePasses, ...)
+  RequiredLimits        Limits?             null = WebGPU defaults. Start from
+                                            WebGpuSkiaLimits.Undefined() and set
+                                            only the fields you need (a field
+                                            left at 0 asks for 0)
+
+static class WebGpuSkiaLimits
+  static Limits Undefined()    every field "undefined" (LimitU32Undefined /
+                               LimitU64Undefined): the defaults
+
+enum WebGpuSkiaRequirementKind   Feature, NativeFeature, Limit, DeviceRequest
+
+class WebGpuSkiaUnmetRequirement   one requirement an adapter cannot satisfy
+  WebGpuSkiaBackend Backend; string AdapterName
+  WebGpuSkiaRequirementKind Kind
+  string Name                  enum name ("ShaderF16", "Immediates") or limit
+                               field name ("MaxTextureDimension2D")
+  ulong RequestedValue         the limit asked for (feature: its numeric value)
+  ulong AdapterValue           the adapter's best value of that limit (its
+                               maximum; for an alignment its minimum); 0 for a
+                               feature
+  string Message; ToString()   "The required limit MaxTextureDimension2D =
+                               16385 exceeds the adapter's maximum of 16384 on
+                               the Vulkan adapter '...'."
 
 class WebGpuSkiaDevice : IDisposable, IWebGpuDeviceSource
   static Create()                                    owned route, platform backend
@@ -115,6 +144,25 @@ class WebGpuSkiaDevice : IDisposable, IWebGpuDeviceSource
   string GrContextReason
   bool SharesDeviceWith(GRRecordingContext context)
   string[] TakeUncapturedErrors()   WebGPU validation errors (owned route)
+  IReadOnlyList<WebGpuSkiaUnmetRequirement> UnmetRequirements
+                               why Create(options) gave no device: every
+                               required feature / limit no tried adapter
+                               could satisfy. Empty otherwise
+  IReadOnlyList<FeatureName> Features;  IReadOnlyList<NativeFeature> NativeFeatures
+  Limits Limits                ENABLED on the device (DeviceGetFeatures /
+                               DeviceGetLimits), read once at creation; owned
+                               AND adopted devices
+  IReadOnlyList<FeatureName> AdapterFeatures;  ...NativeFeatures AdapterNativeFeatures
+  Limits AdapterLimits         AVAILABLE on its adapter (AdapterGetFeatures /
+                               AdapterGetLimits). Enabled is a subset of
+                               available: in Adapter* but not in Features =
+                               "available, not enabled" (create an owned device
+                               that requires it)
+  bool HasFeature(FeatureName) / HasFeature(NativeFeature)   enabled?
+  bool IsLost; string LostReason   the device was reported lost (owned: its
+                               device-lost callback; adopted: a fault listener;
+                               both: a read-back poll that saw it). Dispose
+                               targets + device and create a new one
   void Dispose()               disposes the owned GRContext, then the WebGPU
                                objects; every handle (Instance included) is
                                null afterwards. Dispose targets FIRST.
@@ -134,6 +182,9 @@ class WebGpuSkiaTargetOptions
                                pass sees SkiaSharp's pixels (ZeroCopy has this
                                for free). Default false.
   GRSurfaceOrigin Origin       TopLeft (WebGPU's own)
+  int ReadbackSlots            staging buffers BeginReadPixels rotates through
+                               = read-backs that can be pending at once.
+                               Default 2 (double buffering), 1..16
 
 class WebGpuSkiaSurfaceBacking     the native texture behind an APP-created
                                    GPU surface (SkiaSharp cannot report it)
@@ -172,10 +223,31 @@ class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
                                drawn, the pass is closed, the target stays
                                usable (Skia may draw, the next pass works) and
                                WebGpuSkiaValidationException is thrown
-  bool ReadPixels(Span<byte> destination)   tight rows, Format byte order
-  SKImage ReadImage();  SKBitmap ReadBitmap()
+  bool ReadPixels(Span<byte> destination)   tight rows, Format byte order;
+                               blocks until the GPU is done
+  bool ReadPixels(Span<byte> destination, int destinationRowBytes)
+                               the same into rows of your stride (>= Width*4);
+                               the bytes between rows are left untouched
+  SKImage ReadImage();  SKBitmap ReadBitmap()   (ReadBitmap honours the
+                               bitmap's own RowBytes)
+  WebGpuSkiaReadback BeginReadPixels()   ASYNCHRONOUS read-back: issues the
+                               copy into the next free slot, requests the map,
+                               returns at once (see ASYNCHRONOUS READ-BACK)
+  bool IsReadbackReady(WebGpuSkiaReadback r)    non-blocking poll
+  bool EndReadPixels(WebGpuSkiaReadback r, Span<byte> destination)
+  bool EndReadPixels(WebGpuSkiaReadback r, Span<byte> destination,
+                     int destinationRowBytes, TimeSpan timeout)
+                               waits (bounded, never fatal), copies out, frees
+                               the slot. timeout <= 0 = no limit
+  void CancelReadPixels(WebGpuSkiaReadback r)   drop it, free the slot
+  int PendingReadbackCount;  const int MaxReadbackSlots = 16
   string ToString()            e.g. "ZeroCopy 512x512 RGBA8Unorm on Vulkan"
   void Dispose()
+
+readonly struct WebGpuSkiaReadback   a pending read-back (no allocation)
+  WebGpuSkiaTarget Target; int Slot; long Sequence (1, 2, 3, ... per target)
+  bool IsValid                 false for default (= BeginReadPixels issued
+                               nothing; see target.LastError)
 
 class WebGpuSkiaValidationException : Exception
   string WebGpuMessage         WebGPU's own validation message (Message
@@ -255,9 +327,14 @@ What the library does on the GPU (for reviewers):
             transition to shader-read; submit; SkiaSharp draws a cached
             SKImage of the texture (told it is in shader-read) onto the
             surface.
-  Readback  End: copy texture -> buffer in the same submit; map; draw onto
-            the canvas straight from mapped memory (GPU surfaces are flushed
-            before unmapping; surface-less canvases get a copy).
+  Readback  End: copy texture -> buffer in the same submit; map; ONE bulk
+            copy out of the mapped memory into the target's own pixel array;
+            unmap; draw onto the canvas from that array (GPU surfaces are
+            flushed; surface-less canvases get a copy).
+  Every copy out of a mapped read-back buffer (ReadPixels, ReadImage,
+  ReadBitmap, EndReadPixels, the Readback tier) goes through
+  CodeBrix.WebGpu.Native.Interop.FastMemory: on some mobile GPUs the CPU reads
+  mapped read-back memory uncached, where narrow copies are many times slower.
   Not sharing a queue (adopted Metal): Skia submits synchronously and WebGPU
   submits are followed by a device wait.
 
@@ -364,6 +441,90 @@ COMPLETE EXAMPLES
   long before = target.ReadbackCount;
   for (int i = 0; i < 100; i++) { Frame(); }
   Debug.Assert(target.ReadbackCount == before);   // ZeroCopy / GpuCopy
+
+
+REQUIRED FEATURES AND LIMITS
+============================
+
+  var options = new WebGpuSkiaDeviceOptions();
+  options.RequiredFeatures.Add(FeatureName.TimestampQuery);
+  options.RequiredNativeFeatures.Add(NativeFeature.Immediates);
+  Limits limits = WebGpuSkiaLimits.Undefined();
+  limits.MaxTextureDimension2D = 16384;
+  limits.MaxImmediateSize = 64;
+  options.RequiredLimits = limits;
+
+  using WebGpuSkiaDevice gpu = WebGpuSkiaDevice.Create(options);
+  if (!gpu.IsAvailable)
+  {
+      foreach (WebGpuSkiaUnmetRequirement r in gpu.UnmetRequirements)
+          Console.WriteLine(r.Kind + " " + r.Name + ": asked " + r.RequestedValue
+                            + ", adapter " + r.AdapterValue);
+      // fall back: create again with fewer requirements (or Create())
+  }
+
+  * The requirements are checked against each tried adapter BEFORE the
+    device request: a missing feature, a limit above the adapter's maximum,
+    an alignment below its minimum or not a power of two, and the
+    experimental native features the engine never enables (RayQuery,
+    CooperativeMatrix) are each reported by name. NOTHING is silently dropped
+    or clamped - an unsatisfiable requirement means no device (IsAvailable
+    false, Reason lists them, UnmetRequirements has the structured form).
+    Create never throws for this; check IsAvailable as always.
+  * With AllowFallbackBackend the next backend is tried (Windows: D3D12 then
+    Vulkan); UnmetRequirements then holds the entries of every backend tried.
+  * If the adapter still refuses the device, UnmetRequirements has one
+    DeviceRequest entry with the engine's message.
+  * Features cannot be added to a device after creation, and the adopted
+    routes take no options: their enabled set is what the native adoption
+    enabled (compare Features with AdapterFeatures). Need more? Create an
+    owned device with the requirements.
+  * The SkiaSharp GRContext is created on the device as usual (CreateGrContext).
+
+
+ASYNCHRONOUS READ-BACK
+======================
+
+ReadPixels blocks until the GPU has finished the copy AND the CPU has copied
+the pixels out. BeginReadPixels / EndReadPixels split that: the copy is
+submitted into one of ReadbackSlots staging buffers (default 2), the map is
+requested, and the call returns; the application renders the next frame and
+ends the earlier read-back later.
+
+  using WebGpuSkiaTarget t = WebGpuSkiaTarget.CreateHeadless(gpu, w, h);
+  byte[] pixels = new byte[w * h * 4];
+  WebGpuSkiaReadback previous = default;
+  while (running)
+  {
+      RenderFrame(t);                                  // Begin/EndWebGpuPass
+      WebGpuSkiaReadback current = t.BeginReadPixels();    // does not wait
+      if (previous.IsValid && t.EndReadPixels(previous, pixels))
+          Show(pixels);                                // frame N-1, while N is in flight
+      previous = current;
+  }
+  if (previous.IsValid) t.CancelReadPixels(previous);  // or End it
+
+  Ownership: the pixels are only handed out as a COPY into your memory at
+  EndReadPixels; the staging buffer stays the target's and is reused by a
+  later BeginReadPixels once its slot is free. Nothing to keep alive, nothing
+  to release.
+  Rules:
+  * Every read-back must be ended or cancelled. When all slots are pending,
+    BeginReadPixels throws InvalidOperationException (end the oldest first or
+    raise ReadbackSlots).
+  * Read-backs may be ended in any order; each is ended once (a second End,
+    another target's read-back or the default value -> ArgumentException).
+  * IsReadbackReady polls once without blocking; true = End will not wait.
+  * EndReadPixels waits for exactly that read-back's submission with the
+    bounded, non-fatal native poll (wgpuCodebrixDevicePoll). With a timeout:
+    false + LastError when it passes, and the read-back stays pending (End it
+    again or cancel it). A lost device or failed map -> false + LastError,
+    the slot is freed (IsLost tells a device loss).
+  * Dispose cancels pending read-backs safely (a map still in flight is
+    aborted before its buffer is released).
+  * ReadbackCount counts each read-back ended with its pixels copied out.
+  * Works in every tier (ZeroCopy: includes what SkiaSharp drew, like
+    ReadPixels). Not inside a WebGPU pass. One thread, as everything here.
 
 
 SHARING WITH OTHER WEBGPU LIBRARIES
@@ -528,6 +689,10 @@ WORKING EXAMPLES ON GITHUB
     https://github.com/ellisnet/CodeBrix.WebGpu/blob/main/tests/CodeBrix.WebGpu.Skia.Tests/HeadlessTests.cs
   Devices, backends, reasons, uncaptured errors:
     https://github.com/ellisnet/CodeBrix.WebGpu/blob/main/tests/CodeBrix.WebGpu.Skia.Tests/WebGpuSkiaDeviceTests.cs
+  Required features and limits, unmet requirements, enabled vs available:
+    https://github.com/ellisnet/CodeBrix.WebGpu/blob/main/tests/CodeBrix.WebGpu.Skia.Tests/DeviceRequirementsTests.cs
+  Asynchronous double-buffered read-back, row strides:
+    https://github.com/ellisnet/CodeBrix.WebGpu/blob/main/tests/CodeBrix.WebGpu.Skia.Tests/AsyncReadbackTests.cs
   Frames per second per tier:
     https://github.com/ellisnet/CodeBrix.WebGpu/blob/main/tests/CodeBrix.WebGpu.Skia.Tests/TimingTests.cs
   A scissored solid-colour WGSL pipeline recorded into a target's encoder:
@@ -538,6 +703,10 @@ QUICK REFERENCE CARD
 ====================
 
   Device        var gpu = WebGpuSkiaDevice.Create();  gpu.IsAvailable / gpu.Reason
+  Requirements  options.RequiredFeatures / RequiredNativeFeatures / RequiredLimits
+                -> gpu.UnmetRequirements when unsatisfiable
+  Capabilities  gpu.Features / NativeFeatures / Limits (enabled) vs
+                gpu.AdapterFeatures / AdapterNativeFeatures / AdapterLimits
   Skia context  GRContext gr = gpu.CreateGrContext();   (owned by gpu)
   Adopt         WebGpuSkiaDevice.AdoptVulkan(gr, vkCtx, instExt, devExt)
                 WebGpuSkiaDevice.AdoptMetal(gr, mtlCtx)
@@ -549,6 +718,7 @@ QUICK REFERENCE CARD
   Frame         var e = target.BeginWebGpuPass(); ...record into e...; target.EndWebGpuPass();
   Render into   target.TextureView (format target.Format)
   Read          target.ReadPixels(span) / ReadImage() / ReadBitmap()
+  Async read    var r = target.BeginReadPixels(); ... target.EndReadPixels(r, span)
   Count         target.ReadbackCount, target.FrameCount
   Errors        gpu.TakeUncapturedErrors(); EndWebGpuPass throws
                 WebGpuSkiaValidationException (nothing submitted)
