@@ -4,8 +4,8 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   dcf6270f6e6f2ddb8a33a0ac108d58cf046f561eaed4679c9fab1fd350cb0c9b  wgpu-native-tools/specs/codebrix.yml
-//   9cdbd3d22f3ae770d1f0243f83eb2d9a7bc869976d3c337cc40043a958ad2426  wgpu-native-tools/specs/proc-table-notes.txt
+//   e0a21af4d2a3eeafde38d13a7f0943e3acd2bcd95f736c24b86544b8c4c9fb65  wgpu-native-tools/specs/codebrix.yml
+//   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 using System;
 
@@ -76,6 +76,209 @@ public enum BufferUsage : ulong
     /// The buffer can store the result of a timestamp or occlusion query.
     /// </summary>
     QueryResolve = 0x0000000000000200,
+}
+
+/// <summary>
+/// Capabilities an adapter may lack compared with the WebGPU baseline (wgpu-types <c>DownlevelFlags</c>,
+/// the same bit values). A WebGPU-compliant adapter (Vulkan, Metal, Direct3D 12 on capable hardware)
+/// has all of them; GL ES adapters miss several. Part of <see cref="CodebrixDownlevelCapabilities" />.
+/// </summary>
+[Flags]
+public enum CodebrixDownlevelFlags : ulong
+{
+    /// <summary>
+    /// No flags.
+    /// </summary>
+    None = 0x0000000000000000,
+
+    /// <summary>
+    /// Compute shaders can be compiled and dispatched.
+    /// </summary>
+    ComputeShaders = 0x0000000000000001,
+
+    /// <summary>
+    /// Storage buffers and textures can be written from fragment shaders.
+    /// </summary>
+    FragmentWritableStorage = 0x0000000000000002,
+
+    /// <summary>
+    /// Indirect draws and dispatches.
+    /// </summary>
+    IndirectExecution = 0x0000000000000004,
+
+    /// <summary>
+    /// A non-zero <c>baseVertex</c> in direct indexed draws.
+    /// </summary>
+    BaseVertex = 0x0000000000000008,
+
+    /// <summary>
+    /// Sampling a depth/stencil texture while it is a read-only depth/stencil attachment.
+    /// </summary>
+    ReadOnlyDepthStencil = 0x0000000000000010,
+
+    /// <summary>
+    /// Mipmapped textures whose size is not a power of two.
+    /// </summary>
+    NonPowerOfTwoMipmappedTextures = 0x0000000000000020,
+
+    /// <summary>
+    /// Cube-array textures.
+    /// </summary>
+    CubeArrayTextures = 0x0000000000000040,
+
+    /// <summary>
+    /// Comparison samplers.
+    /// </summary>
+    ComparisonSamplers = 0x0000000000000080,
+
+    /// <summary>
+    /// A different blend state per colour attachment.
+    /// </summary>
+    IndependentBlend = 0x0000000000000100,
+
+    /// <summary>
+    /// Storage buffers in vertex shaders.
+    /// </summary>
+    VertexStorage = 0x0000000000000200,
+
+    /// <summary>
+    /// Anisotropic sampler filtering.
+    /// </summary>
+    AnisotropicFiltering = 0x0000000000000400,
+
+    /// <summary>
+    /// Storage buffers in fragment shaders.
+    /// </summary>
+    FragmentStorage = 0x0000000000000800,
+
+    /// <summary>
+    /// Sample-rate shading.
+    /// </summary>
+    MultisampledShading = 0x0000000000001000,
+
+    /// <summary>
+    /// Copies between depth textures and buffers.
+    /// </summary>
+    DepthTextureAndBufferCopies = 0x0000000000002000,
+
+    /// <summary>
+    /// Every texture usage WebGPU describes for every format; without it, ask
+    /// <see cref="WebGpu.CodebrixAdapterGetTextureFormatFeatures" /> per format.
+    /// </summary>
+    WebgpuTextureFormatSupport = 0x0000000000004000,
+
+    /// <summary>
+    /// Buffer bindings whose size is not a multiple of 16.
+    /// </summary>
+    BufferBindingsNot16ByteAligned = 0x0000000000008000,
+
+    /// <summary>
+    /// Index buffers combined with usages other than copies.
+    /// </summary>
+    UnrestrictedIndexBuffer = 0x0000000000010000,
+
+    /// <summary>
+    /// The full 32-bit index range (otherwise 2^24-1).
+    /// </summary>
+    FullDrawIndexUint32 = 0x0000000000020000,
+
+    /// <summary>
+    /// Depth bias clamping.
+    /// </summary>
+    DepthBiasClamp = 0x0000000000040000,
+
+    /// <summary>
+    /// <c>viewFormats</c> on texture creation.
+    /// </summary>
+    ViewFormats = 0x0000000000080000,
+
+    /// <summary>
+    /// Unrestricted external-image copies.
+    /// </summary>
+    UnrestrictedExternalTextureCopies = 0x0000000000100000,
+
+    /// <summary>
+    /// <c>viewFormats</c> on surface textures.
+    /// </summary>
+    SurfaceViewFormats = 0x0000000000200000,
+
+    /// <summary>
+    /// Query resolves run on the queue timeline (otherwise they block the device timeline).
+    /// </summary>
+    NonblockingQueryResolve = 0x0000000000400000,
+
+    /// <summary>
+    /// <c>quantizeToF16</c>, <c>pack2x16float</c> and <c>unpack2x16float</c> in shaders.
+    /// </summary>
+    ShaderF16InF32 = 0x0000000000800000,
+}
+
+/// <summary>
+/// Per-format capabilities of an adapter beyond its allowed usages (wgpu-types
+/// <c>TextureFormatFeatureFlags</c>, the same bit values). Part of <see cref="CodebrixTextureFormatFeatures" />.
+/// </summary>
+[Flags]
+public enum CodebrixTextureFormatFeatureFlags : ulong
+{
+    /// <summary>
+    /// No flags.
+    /// </summary>
+    None = 0x0000000000000000,
+
+    /// <summary>
+    /// Can be sampled with a filtering sampler.
+    /// </summary>
+    Filterable = 0x0000000000000001,
+
+    /// <summary>
+    /// <c>sampleCount</c> 2.
+    /// </summary>
+    MultisampleX2 = 0x0000000000000002,
+
+    /// <summary>
+    /// <c>sampleCount</c> 4.
+    /// </summary>
+    MultisampleX4 = 0x0000000000000004,
+
+    /// <summary>
+    /// <c>sampleCount</c> 8.
+    /// </summary>
+    MultisampleX8 = 0x0000000000000008,
+
+    /// <summary>
+    /// <c>sampleCount</c> 16.
+    /// </summary>
+    MultisampleX16 = 0x0000000000000010,
+
+    /// <summary>
+    /// Can be the resolve target of a multisampled render pass.
+    /// </summary>
+    MultisampleResolve = 0x0000000000000020,
+
+    /// <summary>
+    /// Can be bound as a read-only storage texture.
+    /// </summary>
+    StorageReadOnly = 0x0000000000000040,
+
+    /// <summary>
+    /// Can be bound as a write-only storage texture.
+    /// </summary>
+    StorageWriteOnly = 0x0000000000000080,
+
+    /// <summary>
+    /// Can be bound as a read-write storage texture.
+    /// </summary>
+    StorageReadWrite = 0x0000000000000100,
+
+    /// <summary>
+    /// Can be bound as a storage texture with atomic access.
+    /// </summary>
+    StorageAtomic = 0x0000000000000200,
+
+    /// <summary>
+    /// Can be blended into as a render target.
+    /// </summary>
+    Blendable = 0x0000000000000400,
 }
 
 /// <summary>

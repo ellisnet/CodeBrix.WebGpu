@@ -5,6 +5,15 @@
 #
 # Format: <C symbol or pattern> <whitespace> <note>. '*' matches any run of characters. Every entry must match
 # at least one exported function (the generator refuses the file otherwise).
+#
+# The note's first word is its STATUS (rendered into the static status table and wgpuCodebrixGetProcStatus; a
+# function matched by several entries takes the most severe; the generator refuses any other start):
+#   ABORTS:        not implemented by the engine - calling it ends the process      (AbortsUnimplemented)
+#   ABORTS <text>  implemented, but ends the process on the inputs/states named     (AbortsOnError)
+#   UNSUPPORTED:   safe to call, always fails (WGPUStatus_Error / NULL)             (Unsupported)
+#   NOTE:          implemented, with a caveat                                       (Implemented)
+# Functions with no entry are Implemented. The backend a function needs comes from its name (Vulkan / D3d12 /
+# Metal), not from this file.
 
 wgpuGetProcAddress                          ABORTS: not implemented by the engine (use this table instead).
 wgpuInstanceWaitAny                         ABORTS: not implemented by the engine (pump wgpuInstanceProcessEvents / wgpuDevicePoll).
@@ -32,14 +41,14 @@ wgpuRenderBundleEncoderFinish               ABORTS when the bundle's commands fa
 wgpuDeviceCreateRenderBundleEncoder         ABORTS on impossible colour/depth formats or sample counts.
 wgpuBufferGetMappedRange                    ABORTS when the buffer is not mapped (for this mode) or the offset/size is misaligned (8/4) or out of range.
 wgpuBufferGetConstMappedRange               ABORTS when the buffer is not mapped (for this mode) or the offset/size is misaligned (8/4) or out of range.
-wgpuDevicePoll                              ABORTS when the wait fails (a foreign submission index, a lost device).
-wgpuInstanceProcessEvents                   ABORTS when polling fails.
+wgpuDevicePoll                              NOTE: returns false when the wait fails (a foreign submission index, a lost device); the failure goes to the device's error scopes / uncaptured-error callback.
+wgpuInstanceProcessEvents                   NOTE: a polling failure is only logged (no device's error path is reachable from the instance); use wgpuCodebrixDevicePoll for a structured result.
 wgpuInstanceCreateSurface                   ABORTS on window/display handles that do not belong together.
 wgpuSurfaceConfigure                        ABORTS on a configuration the surface's capabilities do not allow.
 wgpuSurfaceGetCurrentTexture                ABORTS on an unconfigured surface.
 wgpuQuerySetDestroy                         ABORTS together with the later wgpuQuerySetRelease (dropped twice): never call it, release the set.
-wgpuAdapterRequestDevice                    Without DeviceDescriptor.uncapturedErrorCallbackInfo.callback the default handler ENDS THE PROCESS on the first uncaptured error.
-wgpuCodebrixInstanceAdoptVulkanDevice       The adopted device has the default uncaptured-error handler: uncaptured errors END THE PROCESS (use error scopes).
-wgpuCodebrixInstanceAdoptMetalDevice        The adopted device has the default uncaptured-error handler: uncaptured errors END THE PROCESS (use error scopes).
-wgpuCodebrixInstanceAdoptD3d12Device        Always returns WGPUStatus_Error with this engine.
-wgpuQueueGetNativeMetalCommandQueue         Always returns NULL with this engine.
+wgpuAdapterRequestDevice                    ABORTS on the first uncaptured error when DeviceDescriptor.uncapturedErrorCallbackInfo.callback is not set (the default handler ends the process).
+wgpuCodebrixInstanceAdoptVulkanDevice       ABORTS on the first uncaptured error: the adopted device has the default uncaptured-error handler (use error scopes).
+wgpuCodebrixInstanceAdoptMetalDevice        ABORTS on the first uncaptured error: the adopted device has the default uncaptured-error handler (use error scopes).
+wgpuCodebrixInstanceAdoptD3d12Device        UNSUPPORTED: always returns WGPUStatus_Error with this engine.
+wgpuQueueGetNativeMetalCommandQueue         UNSUPPORTED: always returns NULL with this engine.

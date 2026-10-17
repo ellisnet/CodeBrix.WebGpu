@@ -27,7 +27,7 @@ public class CodeBrixWebGpuNativeTests
         uint version = CodeBrixWebGpuNative.ApiVersion;
 
         //Assert
-        version.Should().Be(1u);
+        version.Should().Be(2u);
         version.Should().Be(CodeBrixWebGpuNative.ExpectedApiVersion);
     }
 
@@ -53,12 +53,13 @@ public class CodeBrixWebGpuNativeTests
         WgpuBuildInfo info = CodeBrixWebGpuNative.BuildInfo;
 
         //Assert
-        info.ApiVersion.Should().Be(1u);
+        info.ApiVersion.Should().Be(2u);
         info.WgpuNativeVersion.Should().StartWith("29.0.1");
         info.WgpuCoreVersion.Should().StartWith("29.");
         info.Backends.Should().NotBeNullOrEmpty();
         info.TargetTriple.Should().NotBeNullOrEmpty();
         info.Profile.Should().NotBeNullOrEmpty();
+        info.Patches.Should().StartWith("0001-");
     }
 
     [Fact]
@@ -134,5 +135,85 @@ public class CodeBrixWebGpuNativeTests
 
         //Assert
         status.Should().Be(Status.Error);
+    }
+
+    [Fact]
+    public void BuildInfo_patches_are_the_patches_folder_in_apply_order()
+    {
+        //Arrange
+        string root = BindingGenerator.BindingGenerator.FindRepositoryRoot(AppContext.BaseDirectory);
+        List<string> expected = BindingGenerator.Rendering.PatchListRenderer.PatchNames(root);
+
+        //Act
+        string patches = CodeBrixWebGpuNative.BuildInfo.Patches;
+
+        //Assert
+        expected.Should().NotBeEmpty();
+        patches.Split(',').Should().Equal(expected, "the loaded native must be rebuilt after a patch is added (build-host.sh / the RID scripts)");
+    }
+
+    [Fact]
+    public void ProcOrdinal_is_the_index_in_the_function_table()
+    {
+        //Act
+        int ordinal = CodeBrixWebGpuNative.ProcOrdinal("wgpuDeviceCreateBuffer");
+
+        //Assert
+        ordinal.Should().BeGreaterThanOrEqualTo(0);
+        CodebrixProcTable.Symbols[ordinal].Should().Be("wgpuDeviceCreateBuffer");
+        CodeBrixWebGpuNative.ProcOrdinal("wgpuNoSuchFunction").Should().Be(-1);
+        CodeBrixWebGpuNative.ProcOrdinal(CodebrixProcTable.Symbols[0]).Should().Be(0);
+        CodeBrixWebGpuNative.ProcOrdinal(CodebrixProcTable.Symbols[^1]).Should().Be(CodebrixProcTable.Symbols.Count - 1);
+    }
+
+    [Fact]
+    public void GetProcStatus_reports_what_the_loaded_library_knows()
+    {
+        //Assert
+        CodeBrixWebGpuNative.GetProcStatus("wgpuInstanceWaitAny").Should().Be(CodebrixProcStatus.AbortsUnimplemented);
+        CodeBrixWebGpuNative.GetProcStatus("wgpuBufferSetLabel").Should().Be(CodebrixProcStatus.AbortsUnimplemented);
+        CodeBrixWebGpuNative.GetProcStatus("wgpuQueueSubmit").Should().Be(CodebrixProcStatus.AbortsOnError);
+        CodeBrixWebGpuNative.GetProcStatus("wgpuDeviceCreateBuffer").Should().Be(CodebrixProcStatus.Implemented);
+        CodeBrixWebGpuNative.GetProcStatus("wgpuCodebrixDevicePoll").Should().Be(CodebrixProcStatus.Implemented);
+        CodeBrixWebGpuNative.GetProcStatus("wgpuDevicePoll").Should().Be(CodebrixProcStatus.Implemented);              // patches/0007
+        CodeBrixWebGpuNative.GetProcStatus("wgpuInstanceProcessEvents").Should().Be(CodebrixProcStatus.Implemented);   // patches/0007
+        CodeBrixWebGpuNative.GetProcStatus("wgpuNoSuchFunction").Should().Be(CodebrixProcStatus.Unknown);
+        WebGpu.CodebrixGetProcStatus((uint)CodebrixProcTable.EntryCount).Should().Be(CodebrixProcStatus.Unknown);
+        WebGpu.CodebrixGetProcStatus(uint.MaxValue).Should().Be(CodebrixProcStatus.Unknown);
+    }
+
+    [Fact]
+    public void GetProcStatus_resolves_the_backends_of_this_build()
+    {
+        //Arrange
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "The Linux natives compile Vulkan and GL, not Direct3D 12 or Metal.");
+
+        //Assert
+        CodeBrixWebGpuNative.GetProcStatus("wgpuCodebrixDeviceGetVulkanInfo").Should().Be(CodebrixProcStatus.Implemented);
+        CodeBrixWebGpuNative.GetProcStatus("wgpuCodebrixDeviceGetD3d12Info").Should().Be(CodebrixProcStatus.NotAvailableOnBackend);
+        CodeBrixWebGpuNative.GetProcStatus("wgpuCodebrixInstanceAdoptD3d12Device").Should().Be(CodebrixProcStatus.NotAvailableOnBackend);
+        CodeBrixWebGpuNative.GetProcStatus("wgpuDeviceGetNativeMetalDevice").Should().Be(CodebrixProcStatus.NotAvailableOnBackend);
+    }
+
+    [Fact]
+    public void GetProcStatus_matches_the_static_table_for_every_entry()
+    {
+        //Arrange
+        CodeBrixWebGpuNative.EnsureLoaded();
+        List<string> problems = new List<string>();
+
+        //Act
+        for (int ordinal = 0; ordinal < CodebrixProcTable.Symbols.Count; ordinal++)
+        {
+            CodebrixProcStatus loaded = WebGpu.CodebrixGetProcStatus((uint)ordinal);
+            CodebrixProcStatus header = CodebrixProcTable.Statuses[ordinal];
+            bool backendMissing = loaded == CodebrixProcStatus.NotAvailableOnBackend && CodebrixProcTable.RequiredBackends[ordinal] != BackendType.Undefined;
+            if (loaded != header && !backendMissing) problems.Add(CodebrixProcTable.Symbols[ordinal] + ": library " + loaded + ", table " + header);
+        }
+
+        //Assert
+        CodebrixProcTable.Statuses.Count.Should().Be((int)CodebrixProcTable.EntryCount);
+        CodebrixProcTable.RequiredBackends.Count.Should().Be((int)CodebrixProcTable.EntryCount);
+        problems.Should().BeEmpty();
     }
 }

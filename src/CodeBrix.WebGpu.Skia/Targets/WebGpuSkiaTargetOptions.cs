@@ -35,4 +35,12 @@ public sealed class WebGpuSkiaTargetOptions
 
     /// <summary>The origin Skia uses for surfaces and images over the WebGPU texture. Default top-left (WebGPU's own).</summary>
     public GRSurfaceOrigin Origin { get; set; } = GRSurfaceOrigin.TopLeft;
+
+    /// <summary>
+    /// How many staging buffers <see cref="WebGpuSkiaTarget.BeginReadPixels" /> rotates through: the number of
+    /// asynchronous read-backs that can be pending at once (frame N's copy is issued while frame N-1 is still being
+    /// mapped). Default 2 (double buffering); 1 to 16. Each slot costs one buffer of the target's size, created on
+    /// first use.
+    /// </summary>
+    public int ReadbackSlots { get; set; } = 2;
 }

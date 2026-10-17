@@ -4,8 +4,8 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   dcf6270f6e6f2ddb8a33a0ac108d58cf046f561eaed4679c9fab1fd350cb0c9b  wgpu-native-tools/specs/codebrix.yml
-//   9cdbd3d22f3ae770d1f0243f83eb2d9a7bc869976d3c337cc40043a958ad2426  wgpu-native-tools/specs/proc-table-notes.txt
+//   e0a21af4d2a3eeafde38d13a7f0943e3acd2bcd95f736c24b86544b8c4c9fb65  wgpu-native-tools/specs/codebrix.yml
+//   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 using System.Runtime.InteropServices;
 
@@ -291,6 +291,27 @@ public static unsafe partial class WebGpu
     public static partial Status BufferWriteMappedRange(Buffer buffer, nuint offset, void* data, nuint size);
 
     /// <summary>
+    /// Fills <see cref="CodebrixDownlevelCapabilities" /> for an adapter.
+    /// </summary>
+    /// <param name="adapter">The adapter.</param>
+    /// <param name="capabilities">Receives the capabilities.</param>
+    /// <returns><c>WGPUStatus_Success</c>, or <c>WGPUStatus_Error</c> for a null adapter or output.</returns>
+    [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixAdapterGetDownlevelCapabilities")]
+    public static partial Status CodebrixAdapterGetDownlevelCapabilities(Adapter adapter, CodebrixDownlevelCapabilities* capabilities);
+
+    /// <summary>
+    /// Fills <see cref="CodebrixTextureFormatFeatures" /> for one format on an adapter. Works for every format
+    /// the library knows, including ones whose feature (e.g. a compressed family) the adapter lacks - then
+    /// the usages are empty.
+    /// </summary>
+    /// <param name="adapter">The adapter.</param>
+    /// <param name="format">The format.</param>
+    /// <param name="features">Receives the format's capabilities.</param>
+    /// <returns><c>WGPUStatus_Success</c>, or <c>WGPUStatus_Error</c> for a null adapter or output or an unknown format.</returns>
+    [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixAdapterGetTextureFormatFeatures")]
+    public static partial Status CodebrixAdapterGetTextureFormatFeatures(Adapter adapter, TextureFormat format, CodebrixTextureFormatFeatures* features);
+
+    /// <summary>
     /// Records an explicit transition of the whole texture into <c>state</c> (wgpu-core
     /// <c>command_encoder_transition_resources</c>). Use it before handing a wgpu texture to a foreign owner
     /// (a SkiaSharp GRContext expects <c>ColorTarget</c> for a render target it draws into) and after taking
@@ -303,6 +324,24 @@ public static unsafe partial class WebGpu
     /// <returns><c>WGPUStatus_Success</c>, or <c>WGPUStatus_Error</c> when the texture's usage does not permit <c>state</c>.</returns>
     [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixCommandEncoderTransitionTexture")]
     public static partial Status CodebrixCommandEncoderTransitionTexture(CommandEncoder commandEncoder, Texture texture, CodebrixTextureState state);
+
+    /// <summary>
+    /// Adds a fault listener to a device (the native half of a host-owned fault dispatcher): its
+    /// callbacks run AFTER the device's own uncaptured-error / device-lost callbacks, which keep working
+    /// unchanged - a listener never replaces or silences them. When the device has wgpu's DEFAULT
+    /// uncaptured-error handler (no <c>uncapturedErrorCallbackInfo.callback</c> at creation, or an adopted
+    /// device), that handler ends the process, so listeners run just BEFORE it instead (they see the fault,
+    /// the process still ends). The listener lives until removed or until the device's last handle and
+    /// every object created from it are released.
+    /// </summary>
+    /// <param name="device">The device.</param>
+    /// <param name="callbacks">The callbacks and their userdata (copied).</param>
+    /// <returns>
+    /// The listener id (never 0), or 0 on failure (null device, both callbacks NULL, or called from
+    /// inside a fault callback).
+    /// </returns>
+    [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixDeviceAddFaultListener")]
+    public static partial ulong CodebrixDeviceAddFaultListener(Device device, CodebrixFaultCallbacks* callbacks);
 
     /// <summary>
     /// Wraps an application-owned <c>ID3D12Resource</c> as a wgpu texture. Same rules as
@@ -377,6 +416,45 @@ public static unsafe partial class WebGpu
     public static partial Status CodebrixDeviceGetVulkanInfo(Device device, CodebrixVulkanDeviceInfo* info);
 
     /// <summary>
+    /// Polls or waits for the device's queue WITHOUT ever ending the process (wgpu-core <c>device_poll</c>
+    /// with <c>PollType::Wait { submission_index, timeout }</c> or <c>PollType::Poll</c>). Callbacks of finished
+    /// work (buffer maps, submitted-work-done) run during the call, whatever the result. Every failure
+    /// comes back as a <see cref="CodebrixPollResult" />; nothing is reported through the device's error
+    /// callbacks (a fault listener's device-lost callback runs once when the device is first seen lost).
+    /// </summary>
+    /// <param name="device">The device.</param>
+    /// <param name="wait">
+    /// True to block until the submission (or, without <c>submissionIndex</c>, the most recent one)
+    /// finished or the timeout passed; false for one non-blocking poll.
+    /// </param>
+    /// <param name="timeoutNs">The longest wait in nanoseconds; 0 waits without limit. Ignored when <c>wait</c> is false.</param>
+    /// <param name="submissionIndex">
+    /// The submission to wait for (from <see cref="WebGpu.QueueSubmitForIndex" /> on this device), or NULL for the
+    /// most recent one. Ignored when <c>wait</c> is false. (A <c>WGPUSubmissionIndex</c> of wgpu.h, spelled
+    /// <c>uint64_t</c> so that this header needs only webgpu.h.)
+    /// </param>
+    /// <param name="result">Receives the outcome (may be NULL when only the status matters).</param>
+    /// <returns>
+    /// <c>WGPUStatus_Success</c> when <c>result</c> is <c>QueueEmpty</c>, <c>WaitSucceeded</c> or <c>Poll</c>; <c>WGPUStatus_Error</c>
+    /// otherwise (also for a null device, with <c>result</c> = <c>Error</c>).
+    /// </returns>
+    [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixDevicePoll")]
+    public static partial Status CodebrixDevicePoll(Device device, uint wait, ulong timeoutNs, ulong* submissionIndex, CodebrixPollResult* result);
+
+    /// <summary>
+    /// Removes a fault listener. When it returns, the listener's callbacks are not running and will not
+    /// be called again.
+    /// </summary>
+    /// <param name="device">The device the listener was added to.</param>
+    /// <param name="listenerId">The id <see cref="WebGpu.CodebrixDeviceAddFaultListener" /> returned.</param>
+    /// <returns>
+    /// <c>WGPUStatus_Success</c>, or <c>WGPUStatus_Error</c> when the device has no listener with that id (or when
+    /// called from inside a fault callback).
+    /// </returns>
+    [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixDeviceRemoveFaultListener")]
+    public static partial Status CodebrixDeviceRemoveFaultListener(Device device, ulong listenerId);
+
+    /// <summary>
     /// Returns the <c>api_version</c> constant this library was built from. Call it before anything else and
     /// refuse the library if it is not the value this binding was generated from.
     /// </summary>
@@ -390,6 +468,18 @@ public static unsafe partial class WebGpu
     /// <param name="info">Receives the build information.</param>
     [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixGetBuildInfo")]
     public static partial void CodebrixGetBuildInfo(CodebrixBuildInfo* info);
+
+    /// <summary>
+    /// What this library knows about one exported function: the function at <c>ordinal</c> in the function
+    /// table (<c>WGPUCodebrixProcTable</c>; the ordinal is the entry's index, valid for the
+    /// <c>WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH</c> of this library). Answered by the LOADED library from a
+    /// table generated with it, so a module asks the binary it runs on, not the header it was built with.
+    /// The same table is in include/codebrix_wgpu_procs.h / .rs (without the backend resolution).
+    /// </summary>
+    /// <param name="ordinal">The function-table index.</param>
+    /// <returns>The status; <c>WGPUCodebrixProcStatus_Unknown</c> for an ordinal outside the table.</returns>
+    [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixGetProcStatus")]
+    public static partial CodebrixProcStatus CodebrixGetProcStatus(uint ordinal);
 
     /// <summary>
     /// Reports the native <c>sizeof</c> and <c>alignof</c> of a struct declared in webgpu.yml, wgpu.yml or this
@@ -458,6 +548,31 @@ public static unsafe partial class WebGpu
     /// <returns><c>WGPUStatus_Success</c> or <c>WGPUStatus_Error</c>.</returns>
     [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixTextureGetVulkanInfo")]
     public static partial Status CodebrixTextureGetVulkanInfo(Texture texture, CodebrixVulkanTextureInfo* info);
+
+    /// <summary>
+    /// Frees members which were allocated by the API.
+    /// </summary>
+    /// <param name="codebrixVulkanAdoptRequirements">The struct whose API-allocated members are freed.</param>
+    [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixVulkanAdoptRequirementsFreeMembers")]
+    public static partial void CodebrixVulkanAdoptRequirementsFreeMembers(CodebrixVulkanAdoptRequirements codebrixVulkanAdoptRequirements);
+
+    /// <summary>
+    /// Tells an application what to create its <c>VkDevice</c> with BEFORE calling
+    /// <c>wgpuCodebrixInstanceAdoptVulkanDevice:</c> fill the same
+    /// <see cref="CodebrixVulkanAdoptDescriptor" /> you will adopt with - <c>instance</c>, <c>physicalDevice</c>,
+    /// <c>instanceApiVersion</c>, <c>getInstanceProcAddr</c>, <c>enabledInstanceExtensions</c> and <c>requiredFeatures</c>
+    /// (wgpu and native feature names); <c>device</c>, the queue indices and <c>enabledDeviceExtensions</c> are
+    /// ignored here. wgpu-hal inspects the physical device exactly as the adopt call will. Vulkan only.
+    /// </summary>
+    /// <param name="descriptor">The Vulkan instance, physical device and requested features.</param>
+    /// <param name="requirements">Receives the requirements; release with <see cref="WebGpu.CodebrixVulkanAdoptRequirementsFreeMembers" />.</param>
+    /// <returns>
+    /// <c>WGPUStatus_Success</c>, or <c>WGPUStatus_Error</c> (no Vulkan backend in this library, a missing handle,
+    /// an unknown feature, a physical device wgpu cannot use, or a required feature it lacks; reason
+    /// through the log callback). On error <c>requirements</c> is zeroed.
+    /// </returns>
+    [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixVulkanGetAdoptRequirements")]
+    public static partial Status CodebrixVulkanGetAdoptRequirements(CodebrixVulkanAdoptDescriptor* descriptor, CodebrixVulkanAdoptRequirements* requirements);
 
     /// <summary>
     /// Adds one reference to the <see cref="CommandBuffer" /> (<c>wgpuCommandBufferAddRef</c>).

@@ -2,6 +2,7 @@ using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using CodeBrix.WebGpu.Native;
+using CodeBrix.WebGpu.Native.Interop;
 using CodeBrix.WebGpu.Skia.Backends;
 using CodeBrix.WebGpu.Skia.Interop;
 using SkiaSharp;
@@ -28,7 +29,7 @@ namespace CodeBrix.WebGpu.Skia;
 /// The target is an <see cref="IWebGpuTextureTarget" /> (this frame protocol is that interface's pass protocol), so
 /// any library built on CodeBrix.WebGpu.Native that accepts one can render straight into it.
 /// </summary>
-public sealed unsafe class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
+public sealed unsafe partial class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
 {
     private const TextureUsage BaseUsage = TextureUsage.RenderAttachment | TextureUsage.TextureBinding | TextureUsage.CopySrc | TextureUsage.CopyDst;
 
@@ -46,6 +47,7 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
     private SKSurface preserveSurface;
     private Buffer readbackBuffer;
     private byte[] uploadPixels;
+    private byte[] drawPixels;
     private uint rowBytes;
     private CommandEncoder encoder;
     private bool disposed;
@@ -404,20 +406,33 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
     /// <summary>
     /// Reads the WebGPU texture into <paramref name="destination" /> as tightly packed rows (<see cref="Width" /> x 4
     /// bytes, in <see cref="Format" />'s byte order). In the <see cref="WebGpuSkiaTier.ZeroCopy" /> tier that is the
-    /// surface, Skia's drawing included. Counts one readback.
+    /// surface, Skia's drawing included. Counts one readback. Blocks until the GPU has finished; see
+    /// <see cref="BeginReadPixels" /> for a read-back that does not.
     /// </summary>
     /// <param name="destination">At least <see cref="Width" /> x <see cref="Height" /> x 4 bytes.</param>
     /// <returns>True when the pixels were read; false when the target is unavailable or the map failed (<see cref="LastError" />).</returns>
     /// <exception cref="ObjectDisposedException">The target has been disposed.</exception>
     /// <exception cref="InvalidOperationException">A pass is open.</exception>
     /// <exception cref="ArgumentException"><paramref name="destination" /> is too small.</exception>
-    public bool ReadPixels(Span<byte> destination)
+    public bool ReadPixels(Span<byte> destination) => ReadPixels(destination, Width * PixelFormats.BytesPerPixel);
+
+    /// <summary>
+    /// Reads the WebGPU texture into <paramref name="destination" /> with a row stride of the caller's choice (for
+    /// example a bitmap's <c>RowBytes</c>); the bytes between rows are left untouched. Otherwise as
+    /// <see cref="ReadPixels(Span{byte})" />.
+    /// </summary>
+    /// <param name="destination">At least <paramref name="destinationRowBytes" /> x (<see cref="Height" /> - 1) + <see cref="Width" /> x 4 bytes.</param>
+    /// <param name="destinationRowBytes">The byte distance between destination rows; at least <see cref="Width" /> x 4.</param>
+    /// <returns>True when the pixels were read; false when the target is unavailable or the map failed (<see cref="LastError" />).</returns>
+    /// <exception cref="ObjectDisposedException">The target has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">A pass is open.</exception>
+    /// <exception cref="ArgumentException"><paramref name="destination" /> is too small, or the stride is shorter than a row.</exception>
+    public bool ReadPixels(Span<byte> destination, int destinationRowBytes)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         if (IsInWebGpuPass) throw new InvalidOperationException("ReadPixels cannot run inside a WebGPU pass.");
         if (Tier == WebGpuSkiaTier.Unavailable || !Device.IsAvailable) return false;
-        int tightRow = Width * PixelFormats.BytesPerPixel;
-        if (destination.Length < tightRow * Height) throw new ArgumentException("The destination needs " + (tightRow * Height) + " bytes.", nameof(destination));
+        CheckDestination(destination, destinationRowBytes);
 
         string bufferError = EnsureReadbackBuffer();
         if (bufferError != null)
@@ -428,9 +443,7 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
 
         if (Tier == WebGpuSkiaTier.ZeroCopy || Tier == WebGpuSkiaTier.GpuCopy) Device.FlushSkia();
         CommandEncoder copy = Native.WebGpu.DeviceCreateCommandEncoder(Device.Device, null);
-        EncodeCopyToReadbackBuffer(copy);
-        if (Tier == WebGpuSkiaTier.ZeroCopy) Native.WebGpu.CodebrixCommandEncoderTransitionTexture(copy, Texture, CodebrixTextureState.ColorTarget);
-        else if (Tier == WebGpuSkiaTier.GpuCopy) Native.WebGpu.CodebrixCommandEncoderTransitionTexture(copy, Texture, CodebrixTextureState.ShaderResource);
+        EncodeReadbackCopy(copy, readbackBuffer);
         string copyError = Finish(copy);
         if (copyError != null)
         {
@@ -447,11 +460,7 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
 
         ReadbackCount++;
         byte* source = (byte*)Native.WebGpu.BufferGetConstMappedRange(readbackBuffer, 0, size);
-        for (int row = 0; row < Height; row++)
-        {
-            new ReadOnlySpan<byte>(source + ((nuint)row * rowBytes), tightRow).CopyTo(destination.Slice(row * tightRow, tightRow));
-        }
-
+        CopyOutOfMappedRange(source, destination, destinationRowBytes);
         Native.WebGpu.BufferUnmap(readbackBuffer);
         return true;
     }
@@ -475,8 +484,8 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
         ObjectDisposedException.ThrowIf(disposed, this);
         if (Tier == WebGpuSkiaTier.Unavailable) return null;
         SKBitmap bitmap = new SKBitmap(new SKImageInfo(Width, Height, ColorType, SKAlphaType.Premul));
-        Span<byte> pixels = new Span<byte>((void*)bitmap.GetPixels(), Width * Height * PixelFormats.BytesPerPixel);
-        if (bitmap.RowBytes != Width * PixelFormats.BytesPerPixel || !ReadPixels(pixels))
+        Span<byte> pixels = new Span<byte>((void*)bitmap.GetPixels(), bitmap.ByteCount);
+        if (bitmap.GetPixels() == IntPtr.Zero || !ReadPixels(pixels, bitmap.RowBytes))
         {
             bitmap.Dispose();
             return null;
@@ -531,6 +540,7 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
         preserveTexture?.Dispose();
         surfaceTexture?.Dispose();
         replacePaint.Dispose();
+        ReleaseReadbackSlots();
         if (!readbackBuffer.IsNull) Native.WebGpu.BufferRelease(readbackBuffer);
         if (!TextureView.IsNull) Native.WebGpu.TextureViewRelease(TextureView);
         if (!Texture.IsNull && ownsTexture) Native.WebGpu.TextureRelease(Texture);
@@ -799,8 +809,12 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
     // engine ends the process on an invalid submission). Returns null, or WebGPU's message (nothing submitted).
     // Recording errors surface at finish, so one scope around the finish catches every command in the encoder; the
     // scope's pop is the only extra work per frame.
-    private string Finish(CommandEncoder current)
+    private string Finish(CommandEncoder current) => Finish(current, false, out _);
+
+    // As Finish; with wantIndex the submission's index comes back (0 when nothing was submitted).
+    private string Finish(CommandEncoder current, bool wantIndex, out ulong submissionIndex)
     {
+        submissionIndex = 0;
         WgpuRequests.PushValidationScope(Device.Device);
         CommandBuffer commands = Native.WebGpu.CommandEncoderFinish(current, null);
         string error = WgpuRequests.PopErrorScope(Device.Instance, Device.Device);
@@ -811,7 +825,8 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
             return error;
         }
 
-        Device.Submit(commands);
+        if (wantIndex) submissionIndex = Device.SubmitForIndex(commands);
+        else Device.Submit(commands);
         return null;
     }
 
@@ -845,37 +860,77 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
     private string EnsureReadbackBuffer()
     {
         if (!readbackBuffer.IsNull) return null;
+        string error = CreateReadbackBuffer(out Buffer buffer);
+        readbackBuffer = buffer;
+        return error;
+    }
+
+    // One MAP_READ | COPY_DST buffer of the target's padded size (rows aligned to 256 bytes).
+    private string CreateReadbackBuffer(out Buffer buffer)
+    {
         rowBytes = PixelFormats.AlignedRowBytes(Width);
         BufferDescriptor descriptor = new BufferDescriptor { Usage = BufferUsage.CopyDst | BufferUsage.MapRead, Size = (ulong)rowBytes * (ulong)Height };
         WgpuRequests.PushValidationScope(Device.Device);
-        Buffer buffer = Native.WebGpu.DeviceCreateBuffer(Device.Device, &descriptor);
+        buffer = Native.WebGpu.DeviceCreateBuffer(Device.Device, &descriptor);
         string error = WgpuRequests.PopErrorScope(Device.Instance, Device.Device);
         if (buffer.IsNull || error != null)
         {
             if (!buffer.IsNull) Native.WebGpu.BufferRelease(buffer);
+            buffer = Buffer.Null;
             return "WebGPU refused the " + descriptor.Size + "-byte readback buffer: " + (error ?? "wgpuDeviceCreateBuffer returned null");
         }
 
-        readbackBuffer = buffer;
         return null;
     }
 
     // The readback buffer exists here: the Readback tier creates it with the target, ReadPixels before encoding.
-    private void EncodeCopyToReadbackBuffer(CommandEncoder current)
+    private void EncodeCopyToReadbackBuffer(CommandEncoder current) => EncodeCopyToBuffer(current, readbackBuffer);
+
+    // A read-back copy outside a pass: the copy, then the texture back in the state its tier keeps it in between
+    // passes (the copy moved it to the copy-source state).
+    private void EncodeReadbackCopy(CommandEncoder current, Buffer buffer)
+    {
+        EncodeCopyToBuffer(current, buffer);
+        if (Tier == WebGpuSkiaTier.ZeroCopy) Native.WebGpu.CodebrixCommandEncoderTransitionTexture(current, Texture, CodebrixTextureState.ColorTarget);
+        else if (Tier == WebGpuSkiaTier.GpuCopy) Native.WebGpu.CodebrixCommandEncoderTransitionTexture(current, Texture, CodebrixTextureState.ShaderResource);
+    }
+
+    // Copies the padded rows of a mapped read-back range into the caller's rows (FastMemory: the copy that is fast
+    // even on memory the CPU reads uncached).
+    private void CopyOutOfMappedRange(byte* source, Span<byte> destination, int destinationRowBytes)
+    {
+        nuint tightRow = (nuint)(Width * PixelFormats.BytesPerPixel);
+        fixed (byte* target = destination)
+        {
+            FastMemory.CopyRows(source, rowBytes, target, (nuint)destinationRowBytes, tightRow, (nuint)Height);
+        }
+    }
+
+    private void CheckDestination(Span<byte> destination, int destinationRowBytes)
+    {
+        int tightRow = Width * PixelFormats.BytesPerPixel;
+        if (destinationRowBytes < tightRow) throw new ArgumentException("The destination row stride " + destinationRowBytes + " is shorter than a row (" + tightRow + " bytes).", nameof(destinationRowBytes));
+        long needed = (long)destinationRowBytes * (Height - 1) + tightRow;
+        if (destination.Length < needed) throw new ArgumentException("The destination needs " + needed + " bytes.", nameof(destination));
+    }
+
+    private void EncodeCopyToBuffer(CommandEncoder current, Buffer buffer)
     {
         TexelCopyTextureInfo source = new TexelCopyTextureInfo { Texture = Texture, Aspect = TextureAspect.All };
         TexelCopyBufferInfo destination = new TexelCopyBufferInfo
         {
-            Buffer = readbackBuffer,
+            Buffer = buffer,
             Layout = new TexelCopyBufferLayout { BytesPerRow = rowBytes, RowsPerImage = (uint)Height },
         };
         Extent3D extent = new Extent3D { Width = (uint)Width, Height = (uint)Height, DepthOrArrayLayers = 1 };
         Native.WebGpu.CommandEncoderCopyTextureToBuffer(current, &source, &destination, &extent);
     }
 
-    // Readback tier, end of pass: map the buffer the pass copied into and draw it onto the canvas straight from the
-    // mapped memory (a raster canvas draws immediately; a GPU surface is flushed so Skia has taken its own copy
-    // before the buffer is unmapped; a surface-less canvas, which may keep a reference, gets a copy).
+    // Readback tier, end of pass: map the buffer the pass copied into, copy it in one block into the target's own
+    // (cached) pixel array - Skia's own reads straight from mapped memory are slow where the CPU reads it uncached -,
+    // unmap, and draw from that array (a raster canvas draws immediately; a GPU surface is flushed so Skia has taken
+    // its own copy before the next frame overwrites the array; a surface-less canvas, which may keep a reference,
+    // gets a copy).
     private void DrawReadbackOntoCanvas()
     {
         nuint size = (nuint)rowBytes * (nuint)Height;
@@ -886,15 +941,16 @@ public sealed unsafe class WebGpuSkiaTarget : IDisposable, IWebGpuTextureTarget
         }
 
         ReadbackCount++;
-        IntPtr pixels = (IntPtr)Native.WebGpu.BufferGetConstMappedRange(readbackBuffer, 0, size);
-        SKImageInfo info = new SKImageInfo(Width, Height, ColorType, SKAlphaType.Premul);
-        using (SKImage image = canvasOnly != null ? SKImage.FromPixelCopy(info, pixels, (int)rowBytes) : SKImage.FromPixels(info, pixels, (int)rowBytes))
+        drawPixels ??= GC.AllocateUninitializedArray<byte>((int)size, pinned: true);
+        fixed (byte* pixels = drawPixels)
         {
+            FastMemory.Copy(Native.WebGpu.BufferGetConstMappedRange(readbackBuffer, 0, size), pixels, size);
+            Native.WebGpu.BufferUnmap(readbackBuffer);
+            SKImageInfo info = new SKImageInfo(Width, Height, ColorType, SKAlphaType.Premul);
+            using SKImage image = canvasOnly != null ? SKImage.FromPixelCopy(info, (IntPtr)pixels, (int)rowBytes) : SKImage.FromPixels(info, (IntPtr)pixels, (int)rowBytes);
             DrawOntoCanvas(Canvas, image);
             if (Surface != null && Surface.Context != null) Surface.Flush(true, false);
         }
-
-        Native.WebGpu.BufferUnmap(readbackBuffer);
     }
 
     // GpuCopy + PreserveSurfaceContent: Skia draws the surface into the WebGPU texture on the GPU.

@@ -1,0 +1,35 @@
+CodeBrix patch 0004 - absent bind group slots in pipeline layouts (wgpu-native/src/conv.rs)
+
+WHAT: map_pipeline_layout_descriptor keeps a NULL bindGroupLayouts entry as None (wgpu-core's
+PipelineLayoutDescriptor takes Option<BindGroupLayoutId>) instead of dereferencing every entry
+(`expect("invalid bind group layout ...")` - a panic, i.e. a process abort). Everything else about
+the descriptor is validated by wgpu-core and reported through handle_error (error scopes /
+uncaptured-error callback) as before.
+WHY: WebGPU's GPUPipelineLayoutDescriptor.bindGroupLayouts is a sequence<GPUBindGroupLayout?>; a
+layout such as [null, group1] is legal and used by real applications.
+UPSTREAM: no fix exists in gfx-rs/wgpu-native trunk (589e6caa4e) or open PR #630 (both still
+`Some(layout.as_ref().expect(..).id)`). CodeBrix's own change; candidate for upstreaming.
+
+--- a/wgpu-native/src/conv.rs
++++ b/wgpu-native/src/conv.rs
+@@ -510,16 +510,12 @@ pub(crate) unsafe fn map_device_descriptor<'a>(
+ pub unsafe fn map_pipeline_layout_descriptor<'a>(
+     des: &native::WGPUPipelineLayoutDescriptor,
+ ) -> wgc::binding_model::PipelineLayoutDescriptor<'a> {
++    // CodeBrix (patches/0004): a NULL entry is an absent bind group slot (WebGPU's entries are
++    // GPUBindGroupLayout?) and stays None for wgpu-core, which validates the layout; it was
++    // dereferenced before (a panic, i.e. a process abort at the C boundary).
+     let bind_group_layouts = make_slice(des.bindGroupLayouts, des.bindGroupLayoutCount)
+         .iter()
+-        .map(|layout| {
+-            Some(
+-                layout
+-                    .as_ref()
+-                    .expect("invalid bind group layout for pipeline layout descriptor")
+-                    .id,
+-            )
+-        })
++        .map(|layout| layout.as_ref().map(|layout| layout.id))
+         .collect::<Vec<_>>();
+ 
+     let immediate_size = des.immediateSize;

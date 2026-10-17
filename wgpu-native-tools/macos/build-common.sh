@@ -17,7 +17,7 @@
 #     * wgpu-native's build script runs bindgen, which needs libclang (see LIBCLANG below) and
 #       `xcrun --sdk macosx --show-sdk-path`;
 #     * the smoke test is ../smoke-test.c compiled with cc -arch <arch>;
-#     * the export set is checked against ../specs/expected-exports.txt (243 functions) - and MADE
+#     * the export set is checked against ../specs/expected-exports.txt (251 functions) - and MADE
 #       from it: cargo links through cc-exports.sh (CARGO_TARGET_<TRIPLE>_LINKER), which replaces the
 #       -exported_symbols_list rustc generates (every #[no_mangle] / #[export_name] symbol of the crate
 #       graph - on macOS that includes four objc2 define_class! statics of raw-window-metal) with

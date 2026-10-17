@@ -21,5 +21,6 @@ pub use wgpu_native::*;
 
 pub mod codebrix;
 mod layouts;
+mod proc_status;
 #[cfg(codebrix_vulkan)]
 mod vk_format;

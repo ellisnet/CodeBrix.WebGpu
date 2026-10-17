@@ -1,0 +1,76 @@
+CodeBrix patch 0007 - non-aborting wgpuDevicePoll / wgpuInstanceProcessEvents (wgpu-native/src/lib.rs)
+
+WHAT: a failed wgpuDevicePoll wait (a submission index this device's queue never returned, a device
+error) returns WGPUBool false and reports through the device's own error path (handle_error: error
+scopes / uncaptured-error callback; DeviceError::Lost reaches the device-lost callback) instead of
+handle_error_fatal (a panic = process abort at the C boundary). WaitIdleError::Timeout (unreachable
+today - no timeout is passed) returns false without an error. wgpuInstanceProcessEvents (void, no
+device to report to) logs the failure (log::error!) instead of aborting. The Rust signature now
+uses native::WGPUBool for `wait` and the result, as wgpu.h declares (it used Rust's one-byte bool:
+a C caller reading the WGPUBool result saw garbage in the upper 24 bits - observed 0xFFFFFF01 for
+"true" on x86_64). The C signature (wgpu.h) is unchanged.
+WHY: a C caller - and Rust catch_unwind above it - cannot survive an abort; a bounded poll needs a
+poll that can fail.
+UPSTREAM: no fix exists for the abort. Trunk (589e6caa4e) and open PR #630 both still call
+handle_error_fatal in both functions. PR #630 also moves wgpuDevicePoll to WGPUBool parameters, but
+together with a C signature change (timeout, WGPUNativePollStatus) not taken here. CodeBrix's own
+change.
+
+--- a/wgpu-native/src/lib.rs
++++ b/wgpu-native/src/lib.rs
+@@ -2955,8 +2955,11 @@ pub unsafe extern "C" fn wgpuInstanceProcessEvents(instance: native::WGPUInstanc
+ 
+     match context.poll_all_devices(false) {
+         Ok(_queue_empty) => (),
++        // CodeBrix (patches/0007): logged instead of aborting the process. The instance has no
++        // per-device error sink to route it to; the failing device reports the same failure on
++        // its own path at its next wgpuDevicePoll or use.
+         Err(cause) => {
+-            handle_error_fatal(cause, "wgpuInstanceProcessEvents");
++            log::error!("wgpuInstanceProcessEvents: {}", format_error(&cause));
+         }
+     }
+ }
+@@ -4600,15 +4603,17 @@ pub unsafe extern "C" fn wgpuQueueSubmitForIndex(
+ #[no_mangle]
+ pub unsafe extern "C" fn wgpuDevicePoll(
+     device: native::WGPUDevice,
+-    wait: bool,
++    // CodeBrix (patches/0007): WGPUBool (uint32_t) as wgpu.h declares, not Rust's one-byte bool:
++    // the upper 24 bits of the returned register were garbage to a C caller reading a WGPUBool.
++    wait: native::WGPUBool,
+     submission_index: Option<&native::WGPUSubmissionIndex>,
+-) -> bool {
+-    let (device_id, context) = {
++) -> native::WGPUBool {
++    let (device_id, context, error_sink) = {
+         let device = device.as_ref().expect("invalid device");
+-        (device.id, &device.context)
++        (device.id, &device.context, &device.error_sink)
+     };
+ 
+-    let maintain = match wait {
++    let maintain = match wait != 0 {
+         true => match submission_index {
+             Some(&index) => wgt::PollType::Wait {
+                 submission_index: Some(index),
+@@ -4620,10 +4625,16 @@ pub unsafe extern "C" fn wgpuDevicePoll(
+     };
+ 
+     match context.device_poll(device_id, maintain) {
+-        Ok(wgt::PollStatus::QueueEmpty) => true,
+-        Ok(_) => false,
++        Ok(wgt::PollStatus::QueueEmpty) => true as native::WGPUBool,
++        Ok(_) => false as native::WGPUBool,
++        // CodeBrix (patches/0007): a failed wait returns false instead of aborting the process.
++        // A timeout (unreachable today: no timeout is passed) is not an error; a wrong submission
++        // index or a device error goes through the device's error path (scopes / uncaptured-error
++        // callback; DeviceError::Lost to the device-lost callback).
++        Err(wgc::device::WaitIdleError::Timeout) => false as native::WGPUBool,
+         Err(cause) => {
+-            handle_error_fatal(cause, "wgpuDevicePoll");
++            handle_error(error_sink, cause, None, "wgpuDevicePoll");
++            false as native::WGPUBool
+         }
+     }
+ }

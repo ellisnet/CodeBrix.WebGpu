@@ -64,9 +64,20 @@ NOT MODIFIED - VERIFIED 2026-10-11
     apply; C API delta: none (228 functions, 114 structs, 70 enums).
 
 No file in wgpu-native/ has been modified, renamed, reformatted, added or
-deleted, and none ever should be. The build needs two changes, kept in
-patches/*.patch and applied to a scratch copy by every script (see
-patches/README.txt): 0001 crate-type rlib, 0002 the codebrix_bridge module line.
+deleted, and none ever should be. Every change is kept in patches/*.patch and
+applied to a scratch copy by every script (see patches/README.txt):
+  0001 crate-type rlib (build)
+  0002 the codebrix_bridge module line (build)
+  0003 ErrorFilter.Internal scopes; OutOfMemory classified as such; empty-stack
+       pop reports an error status (CodeBrix)
+  0004 absent (NULL) bind group slots in pipeline layouts (CodeBrix)
+  0005 workgroup memory zero-initialized by default (CodeBrix)
+  0006 WGPU_WHOLE_MAP_SIZE in wgpuBufferMapAsync (backport of upstream PR #602,
+       d84d8acde2848c9af9ac4b9ac7455d0294da0e7e)
+  0007 non-aborting wgpuDevicePoll / wgpuInstanceProcessEvents; WGPUBool ABI of
+       wgpuDevicePoll (CodeBrix)
+  0008 surface capability usages (backport of commit 9b52924948 of open PR #630)
+  0009 WGPUBool ABI of wgpuDeviceStartGraphicsDebuggerCapture (CodeBrix)
 
 COMMITTING wgpu-native/: wgpu-native/.gitignore and
 wgpu-native/ffi/webgpu-headers/.gitignore are part of the archives; a nested

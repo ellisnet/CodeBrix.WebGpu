@@ -93,7 +93,7 @@ public class ModuleInteropTests
     public void the_notes_file_refuses_unknown_symbols_and_lines_without_a_note()
     {
         //Arrange
-        ProcNotes unknown = ProcNotes.Parse("# comment\nwgpuNoSuchFunction note\n", "n");
+        ProcNotes unknown = ProcNotes.Parse("# comment\nwgpuNoSuchFunction NOTE: x\n", "n");
 
         //Act
         Action validate = () => unknown.Validate(Model.Functions.Select(f => f.CName), "n");
@@ -102,7 +102,91 @@ public class ModuleInteropTests
         //Assert
         validate.Should().Throw<SpecException>().WithMessage("*wgpuNoSuchFunction*");
         noNote.Should().Throw<SpecException>();
-        ProcNotes.Parse("wgpuA* one\nwgpuAb two\n", "n").For("wgpuAb").Should().Be("one two");
+        ProcNotes.Parse("wgpuA* NOTE: one\nwgpuAb NOTE: two\n", "n").For("wgpuAb").Should().Be("NOTE: one NOTE: two");
+    }
+
+    [Fact]
+    public void every_note_starts_with_a_status_keyword()
+    {
+        //Act
+        Action plain = () => ProcNotes.Parse("wgpuDeviceCreateBuffer does something\n", "n");
+
+        //Assert
+        plain.Should().Throw<SpecException>().WithMessage("*status keyword*");
+        ProcNotes.Classify("ABORTS: not implemented").Should().Be(ProcStatus.AbortsUnimplemented);
+        ProcNotes.Classify("ABORTS on bad input").Should().Be(ProcStatus.AbortsOnError);
+        ProcNotes.Classify("UNSUPPORTED: always fails").Should().Be(ProcStatus.Unsupported);
+        ProcNotes.Classify("NOTE: a caveat").Should().Be(ProcStatus.Implemented);
+        ProcNotes.Classify("Aborts sometimes").Should().BeNull();
+    }
+
+    [Fact]
+    public void a_function_matched_by_several_notes_takes_the_most_severe_status()
+    {
+        //Arrange
+        ProcNotes notes = ProcNotes.Parse("wgpuA* NOTE: x\nwgpuAb* ABORTS on y\nwgpuAbc UNSUPPORTED: z\nwgpuAbcd ABORTS: w\n", "n");
+
+        //Assert
+        notes.StatusFor("wgpuAx").Should().Be(ProcStatus.Implemented);
+        notes.StatusFor("wgpuAbx").Should().Be(ProcStatus.AbortsOnError);
+        notes.StatusFor("wgpuAbc").Should().Be(ProcStatus.Unsupported);
+        notes.StatusFor("wgpuAbcd").Should().Be(ProcStatus.AbortsUnimplemented);
+        notes.StatusFor("wgpuZ").Should().Be(ProcStatus.Implemented);
+    }
+
+    [Fact]
+    public void the_status_table_follows_the_notes_and_the_symbol_names()
+    {
+        //Assert
+        Interop.Procs.Single(p => p.Function.CName == "wgpuInstanceWaitAny").Status.Should().Be(ProcStatus.AbortsUnimplemented);
+        Interop.Procs.Single(p => p.Function.CName == "wgpuQueueSubmit").Status.Should().Be(ProcStatus.AbortsOnError);
+        Interop.Procs.Single(p => p.Function.CName == "wgpuCodebrixInstanceAdoptD3d12Device").Status.Should().Be(ProcStatus.Unsupported);
+        Interop.Procs.Single(p => p.Function.CName == "wgpuDeviceCreateBuffer").Status.Should().Be(ProcStatus.Implemented);
+        Interop.Procs.Should().NotContain(p => p.Status == ProcStatus.Unknown || p.Status == ProcStatus.NotAvailableOnBackend);
+        ModuleInterop.BackendOf("wgpuCodebrixDeviceGetVulkanInfo").Should().Be(ProcBackend.Vulkan);
+        ModuleInterop.BackendOf("wgpuCodebrixTextureGetD3d12Info").Should().Be(ProcBackend.D3d12);
+        ModuleInterop.BackendOf("wgpuDeviceGetNativeMetalDevice").Should().Be(ProcBackend.Metal);
+        ModuleInterop.BackendOf("wgpuDeviceCreateBuffer").Should().Be(ProcBackend.None);
+    }
+
+    [Fact]
+    public void every_rendering_carries_the_status_table_in_table_order()
+    {
+        //Arrange
+        string csharp = Outputs[ModuleRenderer.CSharpPath];
+        string header = Outputs[ModuleRenderer.CHeaderPath];
+        string rust = Outputs[ModuleRenderer.RustPath];
+        string native = Outputs[ModuleRenderer.NativeStatusPath];
+        string[] nativeRows = native.Split('\n').Where(l => l.StartsWith("    (0x", StringComparison.Ordinal)).ToArray();
+
+        //Assert
+        header.Should().Contain("#define " + ModuleRenderer.StatusTableConstant + " {");
+        header.Should().Contain("#define " + ModuleRenderer.BackendTableConstant + " {");
+        rust.Should().Contain("pub const " + ModuleRenderer.StatusTableConstant + ": [WGPUCodebrixProcStatus; " + Interop.Procs.Count + "]");
+        csharp.Should().Contain("public static IReadOnlyList<CodebrixProcStatus> Statuses => StatusTable;");
+        native.Should().Contain("pub static PROC_STATUS: [(u32, u8); " + Interop.Procs.Count + "]");
+        nativeRows.Length.Should().Be(Interop.Procs.Count);
+        for (int index = 0; index < nativeRows.Length; index++)
+        {
+            nativeRows[index].Should().EndWith("// " + Interop.Procs[index].Function.CName);
+            nativeRows[index].Should().Contain(", " + (int)Interop.Procs[index].Backend + ")");
+        }
+
+        nativeRows[Interop.Procs.FindIndex(p => p.Function.CName == "wgpuInstanceWaitAny")].Should().StartWith("    (0x000C0002,");
+    }
+
+    [Fact]
+    public void the_patch_list_is_the_patches_folder_in_name_order()
+    {
+        //Act
+        string list = Outputs[PatchListRenderer.OutputPath];
+        List<string> names = list.Split('\n').Where(l => l.Length > 0 && !l.StartsWith('#')).ToList();
+
+        //Assert
+        names.Should().Equal(PatchListRenderer.PatchNames(TestPaths.RepositoryRoot));
+        names.Should().Contain("0001-wgpu-native-crate-type-rlib");
+        names.Should().BeInAscendingOrder(StringComparer.Ordinal);
+        PatchListRenderer.Render(new[] { "0001-a", "0002-b" }).Should().EndWith("0001-a\n0002-b\n");
     }
 
     [Fact]

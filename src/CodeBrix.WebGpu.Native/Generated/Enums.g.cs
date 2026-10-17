@@ -4,8 +4,8 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   dcf6270f6e6f2ddb8a33a0ac108d58cf046f561eaed4679c9fab1fd350cb0c9b  wgpu-native-tools/specs/codebrix.yml
-//   9cdbd3d22f3ae770d1f0243f83eb2d9a7bc869976d3c337cc40043a958ad2426  wgpu-native-tools/specs/proc-table-notes.txt
+//   e0a21af4d2a3eeafde38d13a7f0943e3acd2bcd95f736c24b86544b8c4c9fb65  wgpu-native-tools/specs/codebrix.yml
+//   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 namespace CodeBrix.WebGpu.Native;
 
@@ -331,6 +331,113 @@ public enum CallbackMode : uint
     /// </para>
     /// </summary>
     AllowSpontaneous = 0x00000003,
+}
+
+/// <summary>
+/// The outcome of <see cref="WebGpu.CodebrixDevicePoll" />.
+/// </summary>
+public enum CodebrixPollResult : uint
+{
+    /// <summary>
+    /// No submission was in flight when the poll ended (every callback of finished work has run).
+    /// </summary>
+    QueueEmpty = 0x000C0000,
+
+    /// <summary>
+    /// The waited-for submission finished within the timeout; later submissions may still be in flight.
+    /// </summary>
+    WaitSucceeded = 0x000C0001,
+
+    /// <summary>
+    /// A non-blocking poll (<c>wait</c> false) ran; submissions are still in flight.
+    /// </summary>
+    Poll = 0x000C0002,
+
+    /// <summary>
+    /// The wait reached <c>timeoutNs</c> before the submission finished. Nothing is lost; poll again.
+    /// </summary>
+    Timeout = 0x000C0003,
+
+    /// <summary>
+    /// The device is lost (driver or hardware failure). Release the device and create a new one.
+    /// </summary>
+    DeviceLost = 0x000C0004,
+
+    /// <summary>
+    /// <c>submissionIndex</c> is not an index a successful <see cref="WebGpu.QueueSubmitForIndex" /> on THIS device
+    /// returned (a foreign or future index). The device is unaffected.
+    /// </summary>
+    InvalidSubmissionIndex = 0x000C0005,
+
+    /// <summary>
+    /// Any other failure (out of memory, an invalid argument); the message goes to the log callback.
+    /// </summary>
+    Error = 0x000C0006,
+}
+
+/// <summary>
+/// What the loaded library knows about one exported function, by its ordinal in the function table
+/// (<c>WGPUCodebrixProcTable</c>, include/codebrix_wgpu_procs.h). Returned by
+/// <see cref="WebGpu.CodebrixGetProcStatus" />. The static part comes from specs/proc-table-notes.txt (the same
+/// notes the table's comments carry); <c>not_available_on_backend</c> is decided by the library itself
+/// from the backends it was compiled with.
+/// </summary>
+public enum CodebrixProcStatus : uint
+{
+    /// <summary>
+    /// The ordinal is outside the function table.
+    /// </summary>
+    Unknown = 0x000C0000,
+
+    /// <summary>
+    /// Implemented; no recorded abort path. Functions for one backend (their name contains Vulkan,
+    /// D3d12 or Metal) still return <c>WGPUStatus_Error</c> / NULL for a device on another backend.
+    /// </summary>
+    Implemented = 0x000C0001,
+
+    /// <summary>
+    /// Not implemented by the engine: calling it ENDS THE PROCESS. Never call it.
+    /// </summary>
+    AbortsUnimplemented = 0x000C0002,
+
+    /// <summary>
+    /// Implemented, but ENDS THE PROCESS on the inputs or states its note names (see the table's
+    /// comment); guard those inputs.
+    /// </summary>
+    AbortsOnError = 0x000C0003,
+
+    /// <summary>
+    /// Exported and safe to call, but always fails (returns <c>WGPUStatus_Error</c> / NULL) with this engine.
+    /// </summary>
+    Unsupported = 0x000C0004,
+
+    /// <summary>
+    /// Needs a backend this library was not built with (Vulkan, Direct3D 12 or Metal); every call
+    /// returns <c>WGPUStatus_Error</c> / NULL.
+    /// </summary>
+    NotAvailableOnBackend = 0x000C0005,
+}
+
+/// <summary>
+/// Which collection of shader features the adapter supports, in Direct3D shader-model terms
+/// (wgpu-types <c>ShaderModel</c>). Part of <see cref="CodebrixDownlevelCapabilities" />.
+/// </summary>
+public enum CodebrixShaderModel : uint
+{
+    /// <summary>
+    /// Extremely limited shaders, including a total instruction limit.
+    /// </summary>
+    Sm2 = 0x000C0000,
+
+    /// <summary>
+    /// Missing minor features and storage images.
+    /// </summary>
+    Sm4 = 0x000C0001,
+
+    /// <summary>
+    /// Everything WebGPU requires.
+    /// </summary>
+    Sm5 = 0x000C0002,
 }
 
 /// <summary>

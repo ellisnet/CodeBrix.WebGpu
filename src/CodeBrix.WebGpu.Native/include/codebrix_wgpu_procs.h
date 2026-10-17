@@ -4,8 +4,8 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   dcf6270f6e6f2ddb8a33a0ac108d58cf046f561eaed4679c9fab1fd350cb0c9b  wgpu-native-tools/specs/codebrix.yml
-//   9cdbd3d22f3ae770d1f0243f83eb2d9a7bc869976d3c337cc40043a958ad2426  wgpu-native-tools/specs/proc-table-notes.txt
+//   e0a21af4d2a3eeafde38d13a7f0943e3acd2bcd95f736c24b86544b8c4c9fb65  wgpu-native-tools/specs/codebrix.yml
+//   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 /**
  * @file codebrix_wgpu_procs.h
@@ -32,9 +32,9 @@
 #include "codebrix_wgpu.h"
 
 /** The number of function pointers in @ref WGPUCodebrixProcTable. */
-#define WGPU_CODEBRIX_PROC_TABLE_FUNCTION_COUNT (243)
+#define WGPU_CODEBRIX_PROC_TABLE_FUNCTION_COUNT (251)
 /** FNV-1a 64 of every entry's C signature ("return name(type, type)", one per line), in table order. */
-#define WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH (UINT64_C(0x4326A43FF281069B))
+#define WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH (UINT64_C(0x8F18F0987BEF9F9F))
 /** The layout version of @ref WGPUCodebrixDeviceHandoff. */
 #define WGPU_CODEBRIX_DEVICE_HANDOFF_VERSION (1)
 /** Set in flags when the device has an uncaptured-error handler (errors no scope catches are reported, not fatal). */
@@ -72,7 +72,7 @@ typedef struct WGPUCodebrixProcTable {
     void (*adapterInfoFreeMembers)(WGPUAdapterInfo adapterInfo);
     /** wgpuAdapterRelease. */
     void (*adapterRelease)(WGPUAdapter adapter);
-    /** wgpuAdapterRequestDevice. Without DeviceDescriptor.uncapturedErrorCallbackInfo.callback the default handler ENDS THE PROCESS on the first uncaptured error. */
+    /** wgpuAdapterRequestDevice. ABORTS on the first uncaptured error when DeviceDescriptor.uncapturedErrorCallbackInfo.callback is not set (the default handler ends the process). */
     WGPUFuture (*adapterRequestDevice)(WGPUAdapter adapter, WGPUDeviceDescriptor const * descriptor, WGPURequestDeviceCallbackInfo callbackInfo);
     /** wgpuBindGroupAddRef. */
     void (*bindGroupAddRef)(WGPUBindGroup bindGroup);
@@ -112,8 +112,14 @@ typedef struct WGPUCodebrixProcTable {
     void (*bufferUnmap)(WGPUBuffer buffer);
     /** wgpuBufferWriteMappedRange. ABORTS: not implemented by the engine (use wgpuBufferGetMappedRange). */
     WGPUStatus (*bufferWriteMappedRange)(WGPUBuffer buffer, size_t offset, void const * data, size_t size);
+    /** wgpuCodebrixAdapterGetDownlevelCapabilities. */
+    WGPUStatus (*codebrixAdapterGetDownlevelCapabilities)(WGPUAdapter adapter, WGPUCodebrixDownlevelCapabilities * capabilities);
+    /** wgpuCodebrixAdapterGetTextureFormatFeatures. */
+    WGPUStatus (*codebrixAdapterGetTextureFormatFeatures)(WGPUAdapter adapter, WGPUTextureFormat format, WGPUCodebrixTextureFormatFeatures * features);
     /** wgpuCodebrixCommandEncoderTransitionTexture. */
     WGPUStatus (*codebrixCommandEncoderTransitionTexture)(WGPUCommandEncoder commandEncoder, WGPUTexture texture, WGPUCodebrixTextureState state);
+    /** wgpuCodebrixDeviceAddFaultListener. */
+    uint64_t (*codebrixDeviceAddFaultListener)(WGPUDevice device, WGPUCodebrixFaultCallbacks const * callbacks);
     /** wgpuCodebrixDeviceCreateTextureFromD3d12Resource. */
     WGPUTexture (*codebrixDeviceCreateTextureFromD3d12Resource)(WGPUDevice device, void * resource, WGPUTextureDescriptor const * descriptor, WGPUCodebrixTextureState initialState);
     /** wgpuCodebrixDeviceCreateTextureFromMetalTexture. */
@@ -126,22 +132,32 @@ typedef struct WGPUCodebrixProcTable {
     WGPUStatus (*codebrixDeviceGetD3d12Info)(WGPUDevice device, WGPUCodebrixD3d12DeviceInfo * info);
     /** wgpuCodebrixDeviceGetVulkanInfo. */
     WGPUStatus (*codebrixDeviceGetVulkanInfo)(WGPUDevice device, WGPUCodebrixVulkanDeviceInfo * info);
+    /** wgpuCodebrixDevicePoll. */
+    WGPUStatus (*codebrixDevicePoll)(WGPUDevice device, WGPUBool wait, uint64_t timeoutNs, uint64_t const * submissionIndex, WGPUCodebrixPollResult * result);
+    /** wgpuCodebrixDeviceRemoveFaultListener. */
+    WGPUStatus (*codebrixDeviceRemoveFaultListener)(WGPUDevice device, uint64_t listenerId);
     /** wgpuCodebrixGetApiVersion. */
     uint32_t (*codebrixGetApiVersion)(void);
     /** wgpuCodebrixGetBuildInfo. */
     void (*codebrixGetBuildInfo)(WGPUCodebrixBuildInfo * info);
+    /** wgpuCodebrixGetProcStatus. */
+    WGPUCodebrixProcStatus (*codebrixGetProcStatus)(uint32_t ordinal);
     /** wgpuCodebrixGetStructLayout. */
     WGPUStatus (*codebrixGetStructLayout)(WGPUStringView structName, size_t * size, size_t * alignment);
-    /** wgpuCodebrixInstanceAdoptD3d12Device. Always returns WGPUStatus_Error with this engine. */
+    /** wgpuCodebrixInstanceAdoptD3d12Device. UNSUPPORTED: always returns WGPUStatus_Error with this engine. */
     WGPUStatus (*codebrixInstanceAdoptD3d12Device)(WGPUInstance instance, WGPUCodebrixD3d12AdoptDescriptor const * descriptor, WGPUAdapter * adapter, WGPUDevice * device);
-    /** wgpuCodebrixInstanceAdoptMetalDevice. The adopted device has the default uncaptured-error handler: uncaptured errors END THE PROCESS (use error scopes). */
+    /** wgpuCodebrixInstanceAdoptMetalDevice. ABORTS on the first uncaptured error: the adopted device has the default uncaptured-error handler (use error scopes). */
     WGPUStatus (*codebrixInstanceAdoptMetalDevice)(WGPUInstance instance, WGPUCodebrixMetalAdoptDescriptor const * descriptor, WGPUAdapter * adapter, WGPUDevice * device);
-    /** wgpuCodebrixInstanceAdoptVulkanDevice. The adopted device has the default uncaptured-error handler: uncaptured errors END THE PROCESS (use error scopes). */
+    /** wgpuCodebrixInstanceAdoptVulkanDevice. ABORTS on the first uncaptured error: the adopted device has the default uncaptured-error handler (use error scopes). */
     WGPUStatus (*codebrixInstanceAdoptVulkanDevice)(WGPUInstance instance, WGPUCodebrixVulkanAdoptDescriptor const * descriptor, WGPUAdapter * adapter, WGPUDevice * device);
     /** wgpuCodebrixTextureGetD3d12Info. */
     WGPUStatus (*codebrixTextureGetD3d12Info)(WGPUTexture texture, WGPUCodebrixD3d12TextureInfo * info);
     /** wgpuCodebrixTextureGetVulkanInfo. */
     WGPUStatus (*codebrixTextureGetVulkanInfo)(WGPUTexture texture, WGPUCodebrixVulkanTextureInfo * info);
+    /** wgpuCodebrixVulkanAdoptRequirementsFreeMembers. */
+    void (*codebrixVulkanAdoptRequirementsFreeMembers)(WGPUCodebrixVulkanAdoptRequirements codebrixVulkanAdoptRequirements);
+    /** wgpuCodebrixVulkanGetAdoptRequirements. */
+    WGPUStatus (*codebrixVulkanGetAdoptRequirements)(WGPUCodebrixVulkanAdoptDescriptor const * descriptor, WGPUCodebrixVulkanAdoptRequirements * requirements);
     /** wgpuCommandBufferAddRef. */
     void (*commandBufferAddRef)(WGPUCommandBuffer commandBuffer);
     /** wgpuCommandBufferRelease. */
@@ -272,7 +288,7 @@ typedef struct WGPUCodebrixProcTable {
     WGPUQueue (*deviceGetQueue)(WGPUDevice device);
     /** wgpuDeviceHasFeature. */
     WGPUBool (*deviceHasFeature)(WGPUDevice device, WGPUFeatureName feature);
-    /** wgpuDevicePoll. ABORTS when the wait fails (a foreign submission index, a lost device). */
+    /** wgpuDevicePoll. NOTE: returns false when the wait fails (a foreign submission index, a lost device); the failure goes to the device's error scopes / uncaptured-error callback. */
     WGPUBool (*devicePoll)(WGPUDevice device, WGPUBool wait, WGPUSubmissionIndex const * submissionIndex);
     /** wgpuDevicePopErrorScope. */
     WGPUFuture (*devicePopErrorScope)(WGPUDevice device, WGPUPopErrorScopeCallbackInfo callbackInfo);
@@ -314,7 +330,7 @@ typedef struct WGPUCodebrixProcTable {
     void (*instanceGetWGSLLanguageFeatures)(WGPUInstance instance, WGPUSupportedWGSLLanguageFeatures * features);
     /** wgpuInstanceHasWGSLLanguageFeature. ABORTS: not implemented by the engine. */
     WGPUBool (*instanceHasWGSLLanguageFeature)(WGPUInstance instance, WGPUWGSLLanguageFeatureName feature);
-    /** wgpuInstanceProcessEvents. ABORTS when polling fails. */
+    /** wgpuInstanceProcessEvents. NOTE: a polling failure is only logged (no device's error path is reachable from the instance); use wgpuCodebrixDevicePoll for a structured result. */
     void (*instanceProcessEvents)(WGPUInstance instance);
     /** wgpuInstanceRelease. */
     void (*instanceRelease)(WGPUInstance instance);
@@ -342,7 +358,7 @@ typedef struct WGPUCodebrixProcTable {
     void (*querySetSetLabel)(WGPUQuerySet querySet, WGPUStringView label);
     /** wgpuQueueAddRef. */
     void (*queueAddRef)(WGPUQueue queue);
-    /** wgpuQueueGetNativeMetalCommandQueue. Always returns NULL with this engine. */
+    /** wgpuQueueGetNativeMetalCommandQueue. UNSUPPORTED: always returns NULL with this engine. */
     void * (*queueGetNativeMetalCommandQueue)(WGPUQueue queue);
     /** wgpuQueueGetTimestampPeriod. */
     float (*queueGetTimestampPeriod)(WGPUQueue queue);
@@ -622,7 +638,7 @@ typedef struct WGPUCodebrixFrameHandoff {
 
 WGPU_CODEBRIX_STATIC_ASSERT((sizeof(WGPUCodebrixProcTable) - offsetof(WGPUCodebrixProcTable, adapterAddRef)) / sizeof(void (*)(void)) == WGPU_CODEBRIX_PROC_TABLE_FUNCTION_COUNT, "function table entry count");
 #if UINTPTR_MAX == UINT64_MAX
-WGPU_CODEBRIX_STATIC_ASSERT(sizeof(WGPUCodebrixProcTable) == 1968, "WGPUCodebrixProcTable size");
+WGPU_CODEBRIX_STATIC_ASSERT(sizeof(WGPUCodebrixProcTable) == 2032, "WGPUCodebrixProcTable size");
 WGPU_CODEBRIX_STATIC_ASSERT(offsetof(WGPUCodebrixProcTable, size) == 0, "WGPUCodebrixProcTable.size offset");
 WGPU_CODEBRIX_STATIC_ASSERT(offsetof(WGPUCodebrixProcTable, apiVersion) == 4, "WGPUCodebrixProcTable.apiVersion offset");
 WGPU_CODEBRIX_STATIC_ASSERT(offsetof(WGPUCodebrixProcTable, functionCount) == 8, "WGPUCodebrixProcTable.functionCount offset");
@@ -653,5 +669,518 @@ WGPU_CODEBRIX_STATIC_ASSERT(offsetof(WGPUCodebrixFrameHandoff, texture) == 32, "
 WGPU_CODEBRIX_STATIC_ASSERT(offsetof(WGPUCodebrixFrameHandoff, textureView) == 40, "WGPUCodebrixFrameHandoff.textureView offset");
 WGPU_CODEBRIX_STATIC_ASSERT(offsetof(WGPUCodebrixFrameHandoff, commandEncoder) == 48, "WGPUCodebrixFrameHandoff.commandEncoder offset");
 #endif
+
+/**
+ * Initializers of the static status and required-backend tables, one element per function-table entry, in
+ * table order (from the notes; the library's wgpuCodebrixGetProcStatus also reports
+ * WGPUCodebrixProcStatus_NotAvailableOnBackend for a backend it was built without). Use as
+ *     static const WGPUCodebrixProcStatus statuses[] = WGPU_CODEBRIX_PROC_STATUS_TABLE;
+ */
+#define WGPU_CODEBRIX_PROC_STATUS_TABLE { \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsOnError, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsOnError, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_AbortsOnError, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Unsupported, \
+    WGPUCodebrixProcStatus_AbortsOnError, \
+    WGPUCodebrixProcStatus_AbortsOnError, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsOnError, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsOnError, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsOnError, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Unsupported, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_AbortsOnError, \
+    WGPUCodebrixProcStatus_AbortsOnError, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsOnError, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsOnError, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsOnError, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_Implemented, \
+    WGPUCodebrixProcStatus_AbortsUnimplemented, \
+}
+#define WGPU_CODEBRIX_PROC_BACKEND_TABLE { \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_D3D12, \
+    WGPUBackendType_Metal, \
+    WGPUBackendType_Vulkan, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_D3D12, \
+    WGPUBackendType_Vulkan, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_D3D12, \
+    WGPUBackendType_Metal, \
+    WGPUBackendType_Vulkan, \
+    WGPUBackendType_D3D12, \
+    WGPUBackendType_Vulkan, \
+    WGPUBackendType_Vulkan, \
+    WGPUBackendType_Vulkan, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Metal, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Metal, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Metal, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+    WGPUBackendType_Undefined, \
+}
 
 #endif  /* CODEBRIX_WGPU_PROCS_H_ */

@@ -136,10 +136,18 @@ LOADING AND DIAGNOSTICS: static class CodeBrixWebGpuNative
     static void VerifyStructLayouts();            // throws on any mismatch
     static CodebrixProcTable* GetProcTable();     // function table for native
                                                   // modules (see NATIVE MODULES)
+    static CodebrixProcStatus GetProcStatus(string symbol);
+        // what the LOADED native knows about a function: Implemented,
+        // AbortsUnimplemented, AbortsOnError, Unsupported,
+        // NotAvailableOnBackend; Unknown for a symbol not in the table
+    static int ProcOrdinal(string symbol);        // index in CodebrixProcTable.Symbols, or -1
 
     sealed record WgpuBuildInfo(uint ApiVersion, string WgpuNativeVersion,
         string WgpuCoreVersion, string Backends, string TargetTriple,
-        string Profile);
+        string Profile, string Patches);
+        // Patches: the native fix set - comma-separated names of the patches
+        // the engine was built with; compare it (never the export set) to tell
+        // a fixed native from an older one
     readonly record struct StructLayoutInfo(string CName, int Size, int Alignment)
         static StructLayoutInfo Of<T>(string cName) where T : unmanaged;
     sealed record StructLayoutCheck(StructLayoutInfo Managed, StructLayoutInfo? Native)
@@ -267,9 +275,14 @@ An exception must never escape an UnmanagedCallersOnly method.
 ERRORS
 
 Set DeviceDescriptor.UncapturedErrorCallbackInfo (Callback, Userdata1/2)
-before requesting the device; validation and out-of-memory errors arrive there
-with an ErrorType and a message. Error scopes (DevicePushErrorScope /
-DevicePopErrorScope) work as in C.
+before requesting the device; validation, out-of-memory and internal errors
+arrive there with an ErrorType and a message. Error scopes (DevicePushErrorScope /
+DevicePopErrorScope) work as in C, with all three filters (Validation,
+OutOfMemory, Internal); popping an empty stack reports PopErrorScopeStatus.Error.
+A DevicePoll wait that fails (a submission index this device never returned)
+returns 0 and reports the reason through the same path (InstanceProcessEvents
+reaches no device, so a polling failure there is only logged; use
+WebGpu.PollDevice for a structured result).
 
 THE CODEBRIX EXTRAS (native-device access)
 
@@ -284,11 +297,12 @@ Vulkan (Linux, Android, Windows-on-Vulkan):
 
     Status CodebrixDeviceGetVulkanInfo(Device, CodebrixVulkanDeviceInfo*);
         // VkInstance, VkPhysicalDevice, VkDevice, VkQueue, queue family/index,
-        // the LOADER-reported API version (the instance may have been created
-        // with a lower one - never use it as Skia's MaxAPIVersion or as an
-        // adopt descriptor's InstanceApiVersion), vkGetInstanceProcAddr, enabled instance and
-        // device extensions (CodebrixName arrays). Owned by wgpu; valid while
-        // the device lives.
+        // InstanceApiVersion = the apiVersion vkCreateInstance was given (wgpu's
+        // own instances: 1.0 when the loader is below 1.1, otherwise exactly
+        // 1.3, also on a 1.4 loader; adopted devices: the descriptor's value -
+        // what Skia's MaxAPIVersion and another adopt descriptor expect),
+        // vkGetInstanceProcAddr, enabled instance and device extensions
+        // (CodebrixName arrays). Owned by wgpu; valid while the device lives.
     Status CodebrixTextureGetVulkanInfo(Texture, CodebrixVulkanTextureInfo*);
         // VkImage, VkFormat, sample count
     Texture CodebrixDeviceCreateTextureFromVulkanImage(Device, void* vkImage,
@@ -296,6 +310,17 @@ Vulkan (Linux, Android, Windows-on-Vulkan):
     Status CodebrixInstanceAdoptVulkanDevice(Instance, CodebrixVulkanAdoptDescriptor*,
         Adapter* adapter, Device* device);
         // wraps an application-owned VkDevice as a wgpu adapter + device
+    sealed class VulkanAdoptRequirements : IDisposable
+        static VulkanAdoptRequirements Query(CodebrixVulkanAdoptDescriptor*);
+        IReadOnlyList<string> RequiredDeviceExtensions { get; }
+        nint PhysicalDeviceFeatures2 { get; }   // VkPhysicalDeviceFeatures2* + pNext chain
+        uint PhysicalDeviceApiVersion { get; }
+        // BEFORE creating your own VkDevice for adoption: fill the adopt
+        // descriptor's instance fields + RequiredFeatures, ask, then create the
+        // device with those extensions and that chain in VkDeviceCreateInfo.pNext
+        // (pEnabledFeatures NULL; add your own features, never fewer). The chain
+        // is owned until Dispose. Raw: CodebrixVulkanGetAdoptRequirements +
+        // CodebrixVulkanAdoptRequirementsFreeMembers.
 
 Direct3D 12 (Windows): CodebrixDeviceGetD3d12Info, CodebrixTextureGetD3d12Info,
 CodebrixDeviceCreateTextureFromD3d12Resource, CodebrixInstanceAdoptD3d12Device.
@@ -312,8 +337,50 @@ Synchronisation with another renderer on the same device:
         // texture (ColorTarget, ShaderResource, CopySrc, CopyDst, Present, ...);
         // takes effect when the encoder's command buffer is submitted.
 
+Capabilities beyond AdapterGetFeatures / AdapterGetLimits (which stay the
+source for WebGPU features and limits):
+
+    CodebrixDownlevelCapabilities WebGpu.GetDownlevelCapabilities(Adapter);
+        // Flags (CodebrixDownlevelFlags: ComputeShaders, FragmentWritableStorage,
+        // IndirectExecution, ...), ShaderModel (Sm2 / Sm4 / Sm5),
+        // WebgpuCompliant (1 = the full WebGPU baseline)
+    CodebrixTextureFormatFeatures WebGpu.GetTextureFormatFeatures(Adapter, TextureFormat);
+        // AllowedUsages (TextureUsage) + Flags (Filterable, MultisampleX2..X16,
+        // MultisampleResolve, StorageReadOnly / WriteOnly / ReadWrite / Atomic,
+        // Blendable); both throw WgpuException for a null adapter / unknown format
+    (raw: CodebrixAdapterGetDownlevelCapabilities, CodebrixAdapterGetTextureFormatFeatures)
+
+Bounded, NON-ABORTING poll:
+
+    CodebrixPollResult WebGpu.PollDevice(Device, bool wait, TimeSpan timeout,
+        ulong? submissionIndex = null);
+        // QueueEmpty, WaitSucceeded, Poll (no-wait poll, work in flight),
+        // Timeout, DeviceLost, InvalidSubmissionIndex (an index this device
+        // never returned), Error. Never ends the process; callbacks of finished
+        // work run during the call. timeout <= 0 waits without limit.
+    (raw: Status CodebrixDevicePoll(Device, uint wait, ulong timeoutNs,
+        ulong* submissionIndex, CodebrixPollResult* result))
+
+Fault listeners (a host-owned fault dispatcher on a device someone else owns):
+
+    sealed class WebGpuFaultListener : IDisposable
+        static WebGpuFaultListener Attach(Device device);
+        event Action<ErrorType, string> UncapturedError;
+        event Action<DeviceLostReason, string> DeviceLost;
+        ulong Id { get; }
+        // Runs AFTER the device's own callbacks, never instead of them (with
+        // the engine's default handler - which ends the process - just before
+        // it). DeviceLost also fires once when PollDevice first sees the device
+        // lost. Raised on the thread that found the fault with the device's
+        // error sink locked: keep handlers short, never call WebGpu functions
+        // on that device or dispose a listener inside them. Dispose = removed;
+        // no handler runs afterwards.
+    (raw: ulong CodebrixDeviceAddFaultListener(Device, CodebrixFaultCallbacks*)
+        -> listener id, 0 on failure; Status CodebrixDeviceRemoveFaultListener(Device, ulong))
+
 Contract/diagnostics: CodebrixGetApiVersion, CodebrixGetBuildInfo,
-CodebrixGetStructLayout (all wrapped by CodeBrixWebGpuNative).
+CodebrixGetStructLayout, CodebrixGetProcStatus (all wrapped by
+CodeBrixWebGpuNative).
 
 
 SHARING CONTRACTS (hand-written, not generated)
@@ -508,6 +575,8 @@ allocation):
             the WebGpu method: DeviceCreateBuffer, QueueSubmit, ...>;
         const uint EntryCount; const ulong ExpectedSignatureHash; const int HeaderSize;
         static IReadOnlyList<string> Symbols;   // C symbols, table order
+        static IReadOnlyList<CodebrixProcStatus> Statuses;   // static status, table order
+        static IReadOnlyList<BackendType> RequiredBackends;  // Undefined = none
     static CodebrixProcTable* CodeBrixWebGpuNative.GetProcTable();
         // built once from the exports of the library .NET loaded (never a
         // second copy), process-lifetime native memory (never free it),
@@ -549,6 +618,30 @@ PASS AND THREADING RULES (both routes)
   * The calls under LIMITS end the process from a module exactly as from C#:
     the notes on the entries of codebrix_wgpu_procs.h / .rs and of
     CodebrixProcTable mark them ("ABORTS: ...").
+
+CAPABILITY STATUS (export presence is not capability evidence). Every
+function-table entry has a status: Implemented, AbortsUnimplemented (calling
+it ends the process), AbortsOnError (ends the process on the inputs its note
+names), Unsupported (always fails), NotAvailableOnBackend (needs Vulkan /
+Direct3D 12 / Metal, which this native lacks). Ask the LOADED library -
+wgpuCodebrixGetProcStatus(ordinal) (ordinal = table index for this
+signatureHash; CodeBrixWebGpuNative.GetProcStatus(symbol) from .NET) - rather
+than the header's static copy (WGPU_CODEBRIX_PROC_STATUS_TABLE /
+WGPU_CODEBRIX_PROC_BACKEND_TABLE initializers in codebrix_wgpu_procs.h, the
+same-named constants in codebrix_wgpu_procs.rs, CodebrixProcTable.Statuses),
+which cannot know the backends. A semantic fix with the same table hash shows
+up in wgpuCodebrixGetBuildInfo's `patches` (the native fix set).
+
+FAULTS ON A SHARED DEVICE. A module (or a host) that needs to hear about
+errors on a device it does not own adds a fault listener
+(wgpuCodebrixDeviceAddFaultListener with a WGPUCodebrixFaultCallbacks of the
+standard webgpu.h callback-info types; wgpuCodebrixDeviceRemoveFaultListener)
+instead of replacing the owner's callbacks: listeners run after the owner's
+own callback, on the thread that discovered the fault, with the error sink
+locked - never call webgpu.h functions on that device or add/remove
+listeners from inside one. For a bounded wait that cannot end the process use
+wgpuCodebrixDevicePoll (timeout, optional submission index, structured
+result).
 
 
 COMPLETE EXAMPLES
@@ -781,8 +874,6 @@ an error scope can catch.
         not mapped (or mapped for the other mode), or with an offset / size
         that is misaligned (offset multiple of 8, size multiple of 4) or
         outside the mapped range;
-      - DevicePoll when the wait fails (a submission index that is not from
-        this device's queue, a lost device); InstanceProcessEvents likewise;
       - InstanceCreateSurface with handles that do not belong together,
         SurfaceConfigure with a configuration the surface's capabilities do
         not allow, SurfaceGetCurrentTexture on an unconfigured surface.
@@ -799,7 +890,8 @@ an error scope can catch.
     device request that requires one fails, even when the adapter lists it.
   * Device loss is not delivered through DeviceLostCallbackInfo: using a
     destroyed device reports a Validation error through the uncaptured-error
-    callback instead.
+    callback instead. WebGpu.PollDevice reports CodebrixPollResult.DeviceLost
+    (and fault listeners' DeviceLost then fires once).
   * DeviceCreateShaderModuleSpirV (passthrough) needs a feature this engine
     does not expose; use ShaderModuleDescriptor + ShaderSourceSPIRV.
   * Debug groups and markers recorded into render bundles are dropped;

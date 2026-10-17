@@ -294,7 +294,7 @@ public sealed unsafe class CodebrixHandoffTests : IClassFixture<GpuFixture>
     /// </summary>
     private static Buffer ModuleFrame(CodebrixDeviceHandoff* device, CodebrixFrameHandoff* frame, uint bytesPerRow)
     {
-        if (device->Version != 1 || device->Size < 64 || device->ApiVersion != 1 || frame->Version != 1 || frame->CommandEncoder.IsNull) return Buffer.Null;
+        if (device->Version != 1 || device->Size < 64 || device->ApiVersion != Constants.ApiVersion || frame->Version != 1 || frame->CommandEncoder.IsNull) return Buffer.Null;
         CodebrixProcTable* t = device->Procs;
         if (t->FunctionCount != CodebrixProcTable.EntryCount || t->SignatureHash != CodebrixProcTable.ExpectedSignatureHash) return Buffer.Null;
 
@@ -345,6 +345,9 @@ public sealed unsafe class CodebrixHandoffTests : IClassFixture<GpuFixture>
         CommandEncoder encoder = CodebrixFrameHandoff.BeginWebGpuPass(target, frame);
         Buffer readback = ModuleFrame(device, frame, BytesPerRow);
         target.EndWebGpuPass();
+
+        // A refused hand-off returns no buffer; mapping a null buffer would end the test process.
+        readback.IsNull.Should().BeFalse("the module accepted the hand-off versions and the function table");
         MapAsyncStatus status = GpuSession.MapRead(session.Device, readback, BytesPerRow * Height);
         byte* pixels = (byte*)WebGpu.BufferGetConstMappedRange(readback, 0, BytesPerRow * Height);
         int last = (int)(BytesPerRow * (Height - 1)) + ((Width - 1) * 4);

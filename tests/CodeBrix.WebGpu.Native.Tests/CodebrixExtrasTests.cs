@@ -1,11 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Text;
 using SilverAssertions;
 using Xunit;
 
 namespace CodeBrix.WebGpu.Native.Tests;
 
-/// <summary>The codebrix_wgpu extras on a Linux Vulkan device: native getters, transitions and device adoption.</summary>
+/// <summary>
+/// The codebrix_wgpu extras on a Linux Vulkan device: native getters, transitions, device adoption, the capability
+/// queries and the bounded poll.
+/// </summary>
 public unsafe class CodebrixExtrasTests : IClassFixture<GpuFixture>
 {
     private readonly GpuSession gpu;
@@ -211,5 +216,181 @@ public unsafe class CodebrixExtrasTests : IClassFixture<GpuFixture>
         WebGpu.DeviceRelease(device);
         WebGpu.AdapterRelease(adapter);
         WebGpu.InstanceRelease(second);
+    }
+
+    // vkGetInstanceProcAddr(instance, "vkGetDeviceProcAddr"), then vkGetDeviceProcAddr(device, name).
+    private static void* DeviceProcAddress(CodebrixVulkanDeviceInfo info, string name)
+    {
+        delegate* unmanaged<void*, byte*, void*> getInstanceProcAddr = (delegate* unmanaged<void*, byte*, void*>)info.GetInstanceProcAddr;
+        byte[] getDevice = Encoding.ASCII.GetBytes("vkGetDeviceProcAddr\0");
+        byte[] wanted = Encoding.ASCII.GetBytes(name + "\0");
+        fixed (byte* getDeviceName = getDevice)
+        fixed (byte* wantedName = wanted)
+        {
+            delegate* unmanaged<void*, byte*, void*> getDeviceProcAddr = (delegate* unmanaged<void*, byte*, void*>)getInstanceProcAddr(info.Instance, getDeviceName);
+            return getDeviceProcAddr == null ? null : getDeviceProcAddr(info.Device, wantedName);
+        }
+    }
+
+    [Fact]
+    public void CodebrixDeviceGetVulkanInfo_reports_the_api_version_the_instance_was_created_with()
+    {
+        //Arrange
+        RequireLinuxGpu();
+        CodebrixVulkanDeviceInfo info = default;
+        WebGpu.CodebrixDeviceGetVulkanInfo(gpu.Device, &info).Should().Be(Status.Success);
+        const uint Vulkan10 = 1u << 22;
+        const uint Vulkan13 = (1u << 22) | (3u << 12);
+
+        //Act
+        void* core10 = DeviceProcAddress(info, "vkGetDeviceQueue");
+        void* core14 = DeviceProcAddress(info, "vkCopyMemoryToImage");
+
+        //Assert
+        (info.InstanceApiVersion == Vulkan10 || info.InstanceApiVersion == Vulkan13).Should().BeTrue("wgpu-hal creates its instance with 1.0 (loader < 1.1) or exactly 1.3");
+        ((IntPtr)core10).Should().NotBe(IntPtr.Zero);
+        ((IntPtr)core14).Should().Be(IntPtr.Zero, "a 1.4 entry point is not loaded by a 1.3 instance - consistent with the reported version");
+    }
+
+    [Fact]
+    public void GetDownlevelCapabilities_reports_a_compliant_vulkan_adapter()
+    {
+        //Arrange
+        RequireLinuxGpu();
+
+        //Act
+        CodebrixDownlevelCapabilities capabilities = WebGpu.GetDownlevelCapabilities(gpu.Adapter);
+
+        //Assert
+        capabilities.Flags.HasFlag(CodebrixDownlevelFlags.ComputeShaders).Should().BeTrue();
+        capabilities.Flags.HasFlag(CodebrixDownlevelFlags.FragmentWritableStorage).Should().BeTrue();
+        capabilities.ShaderModel.Should().Be(CodebrixShaderModel.Sm5);
+        capabilities.WebgpuCompliant.Should().Be(1u);
+    }
+
+    [Fact]
+    public void CodebrixAdapterGetDownlevelCapabilities_refuses_a_null_adapter()
+    {
+        //Arrange
+        CodeBrixWebGpuNative.EnsureLoaded();
+        CodebrixDownlevelCapabilities capabilities = default;
+
+        //Act
+        Status status = WebGpu.CodebrixAdapterGetDownlevelCapabilities(Adapter.Null, &capabilities);
+        Action managed = () => WebGpu.GetDownlevelCapabilities(Adapter.Null);
+
+        //Assert
+        status.Should().Be(Status.Error);
+        managed.Should().Throw<WgpuException>();
+    }
+
+    [Fact]
+    public void GetTextureFormatFeatures_reports_rgba8_as_renderable_and_filterable()
+    {
+        //Arrange
+        RequireLinuxGpu();
+
+        //Act
+        CodebrixTextureFormatFeatures rgba8 = WebGpu.GetTextureFormatFeatures(gpu.Adapter, TextureFormat.RGBA8Unorm);
+        CodebrixTextureFormatFeatures float32 = WebGpu.GetTextureFormatFeatures(gpu.Adapter, TextureFormat.RGBA32Float);
+
+        //Assert
+        TextureUsage expected = TextureUsage.CopySrc | TextureUsage.CopyDst | TextureUsage.TextureBinding | TextureUsage.RenderAttachment;
+        (rgba8.AllowedUsages & expected).Should().Be(expected);
+        rgba8.Flags.HasFlag(CodebrixTextureFormatFeatureFlags.Filterable).Should().BeTrue();
+        rgba8.Flags.HasFlag(CodebrixTextureFormatFeatureFlags.MultisampleX4).Should().BeTrue();
+        rgba8.Flags.HasFlag(CodebrixTextureFormatFeatureFlags.Blendable).Should().BeTrue();
+        float32.AllowedUsages.HasFlag(TextureUsage.StorageBinding).Should().BeTrue();
+    }
+
+    [Fact]
+    public void CodebrixAdapterGetTextureFormatFeatures_refuses_an_unknown_format_without_ending_the_process()
+    {
+        //Arrange
+        RequireLinuxGpu();
+        CodebrixTextureFormatFeatures features = default;
+
+        //Act
+        Status unknown = WebGpu.CodebrixAdapterGetTextureFormatFeatures(gpu.Adapter, (TextureFormat)0x7FFF0000, &features);
+        Status undefined = WebGpu.CodebrixAdapterGetTextureFormatFeatures(gpu.Adapter, TextureFormat.Undefined, &features);
+
+        //Assert
+        unknown.Should().Be(Status.Error);
+        undefined.Should().Be(Status.Error);
+    }
+
+    [Fact]
+    public void PollDevice_on_an_empty_queue_returns_QueueEmpty_quickly()
+    {
+        //Arrange
+        RequireLinuxGpu();
+        Stopwatch watch = Stopwatch.StartNew();
+
+        //Act
+        CodebrixPollResult waited = WebGpu.PollDevice(gpu.Device, true, TimeSpan.FromSeconds(5));
+        CodebrixPollResult polled = WebGpu.PollDevice(gpu.Device, false, TimeSpan.Zero);
+
+        //Assert
+        waited.Should().Be(CodebrixPollResult.QueueEmpty);
+        (polled == CodebrixPollResult.QueueEmpty || polled == CodebrixPollResult.Poll).Should().BeTrue();
+        watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public void PollDevice_waits_for_a_real_submission_index()
+    {
+        //Arrange
+        RequireLinuxGpu();
+        CommandEncoder encoder = WebGpu.DeviceCreateCommandEncoder(gpu.Device, null);
+        CommandBuffer commands = WebGpu.CommandEncoderFinish(encoder, null);
+        ulong index = WebGpu.QueueSubmitForIndex(gpu.Queue, 1, &commands);
+        CodebrixPollResult result = CodebrixPollResult.Error;
+
+        //Act
+        Status status = WebGpu.CodebrixDevicePoll(gpu.Device, 1, 5_000_000_000UL, &index, &result);
+
+        //Assert
+        status.Should().Be(Status.Success);
+        (result == CodebrixPollResult.QueueEmpty || result == CodebrixPollResult.WaitSucceeded).Should().BeTrue();
+        WebGpu.CommandBufferRelease(commands);
+        WebGpu.CommandEncoderRelease(encoder);
+    }
+
+    [Fact]
+    public void PollDevice_reports_a_foreign_submission_index_instead_of_ending_the_process()
+    {
+        //Arrange
+        RequireLinuxGpu();
+        CommandEncoder encoder = WebGpu.DeviceCreateCommandEncoder(gpu.Device, null);
+        CommandBuffer commands = WebGpu.CommandEncoderFinish(encoder, null);
+        ulong index = WebGpu.QueueSubmitForIndex(gpu.Queue, 1, &commands);
+
+        //Act
+        CodebrixPollResult result = WebGpu.PollDevice(gpu.Device, true, TimeSpan.Zero, index + 1_000_000UL);
+        CodebrixPollResult after = WebGpu.PollDevice(gpu.Device, true, TimeSpan.FromSeconds(5));
+
+        //Assert
+        result.Should().Be(CodebrixPollResult.InvalidSubmissionIndex);
+        after.Should().Be(CodebrixPollResult.QueueEmpty, "the device is unaffected");
+        gpu.UncapturedErrors.Should().BeEmpty();
+        WebGpu.CommandBufferRelease(commands);
+        WebGpu.CommandEncoderRelease(encoder);
+    }
+
+    [Fact]
+    public void CodebrixDevicePoll_reports_a_null_device_as_an_error()
+    {
+        //Arrange
+        CodeBrixWebGpuNative.EnsureLoaded();
+        CodebrixPollResult result = CodebrixPollResult.QueueEmpty;
+
+        //Act
+        Status status = WebGpu.CodebrixDevicePoll(Device.Null, 1, 0, null, &result);
+        Status noResult = WebGpu.CodebrixDevicePoll(Device.Null, 0, 0, null, null);
+
+        //Assert
+        status.Should().Be(Status.Error);
+        result.Should().Be(CodebrixPollResult.Error);
+        noResult.Should().Be(Status.Error);
     }
 }

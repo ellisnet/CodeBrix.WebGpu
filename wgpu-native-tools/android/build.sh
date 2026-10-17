@@ -34,7 +34,7 @@
 #   file exact - and, with DEVICE_* set, the smoke test on a real device.
 # It writes LICENSE-WgpuNative.txt beside the binary and BUILD-INFO.txt, and (ADOPT=1) copies the
 # two files into src/CodeBrix.WebGpu.Native/runtimes/<rid>/native/ and the unstripped twin into
-# unstripped/<rid>/.
+# unstripped/<rid>/, and updates that RID's line in output/SHA256SUMS and unstripped/SHA256SUMS.
 #
 # NEEDS: rustup with the pinned toolchain and both Android targets for it
 #     rustup toolchain install 1.93
@@ -167,6 +167,16 @@ verify_lib() {
     if [ -z "$extra" ]; then pass "nothing else exported (no Rust symbols)"; else fail "unexpected exports: $(printf '%s' "$extra" | cut -c1-400)"; fi
 }
 
+# Replaces (or adds) the "<sha256>  <rid>/<lib>" line of <dir>/SHA256SUMS for one file, keeping every
+# other line (the Linux, Windows and macOS entries); LC_ALL=C sorted by path like linux/build.sh writes it.
+record_sha256() {
+    local sums="$1/SHA256SUMS" rel="$2" file="$3" line
+    line="$(sha256_of "$file" | cut -d' ' -f1)  $rel"
+    { [ -f "$sums" ] && awk -v rel="$rel" 'NF == 2 && $2 != rel { print }' "$sums"; printf '%s\n' "$line"; } \
+        | LC_ALL=C sort -k2 > "$sums.new"
+    mv -f "$sums.new" "$sums"
+}
+
 adopt_rid() {
     local rid="$1" src="$OUTPUT_DIR/$1" dest="$RUNTIMES_DIR/$1/native"
     if [ "${ADOPT:-1}" = "0" ]; then echo "  adopt     : skipped (ADOPT=0)"; return 0; fi
@@ -175,6 +185,9 @@ adopt_rid() {
     cp "$src/unstripped/$LIB_NAME" "$UNSTRIPPED_DIR/$rid/$LIB_NAME"
     echo "  adopt     : -> src/CodeBrix.WebGpu.Native/runtimes/$rid/native/ ($LIB_NAME + $LICENSE_NAME)"
     echo "              -> wgpu-native-tools/unstripped/$rid/$LIB_NAME"
+    record_sha256 "$OUTPUT_DIR" "$rid/$LIB_NAME" "$src/$LIB_NAME"
+    record_sha256 "$UNSTRIPPED_DIR" "$rid/$LIB_NAME" "$UNSTRIPPED_DIR/$rid/$LIB_NAME"
+    echo "              -> output/SHA256SUMS + unstripped/SHA256SUMS lines for $rid"
 }
 
 run_on_device() {

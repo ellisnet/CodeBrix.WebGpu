@@ -4,8 +4,8 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   dcf6270f6e6f2ddb8a33a0ac108d58cf046f561eaed4679c9fab1fd350cb0c9b  wgpu-native-tools/specs/codebrix.yml
-//   9cdbd3d22f3ae770d1f0243f83eb2d9a7bc869976d3c337cc40043a958ad2426  wgpu-native-tools/specs/proc-table-notes.txt
+//   e0a21af4d2a3eeafde38d13a7f0943e3acd2bcd95f736c24b86544b8c4c9fb65  wgpu-native-tools/specs/codebrix.yml
+//   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 using System;
 using System.Globalization;

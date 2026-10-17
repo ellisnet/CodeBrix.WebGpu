@@ -16,7 +16,7 @@
 #       /Brepro so two builds of the same source give the same bytes; the .pdb comes from
 #       Cargo.toml's debug = true and is referenced by file name only (rustc's /PDBALTPATH);
 #     * the smoke test (..\smoke-test.c) is compiled with cl.exe for the target architecture;
-#     * the export set is checked against ..\specs\expected-exports.txt (243 functions).
+#     * the export set is checked against ..\specs\expected-exports.txt (251 functions).
 #
 #   FIRST RUN 2026-10-10 on Jeremy's x64 Windows 11 machine (Visual Studio Professional 2026
 #   18.10.3, rustup toolchain 1.93 = rustc 1.93.1, libclang = Visual Studio's own LLVM via

@@ -169,8 +169,7 @@ public sealed partial class GraphicsContext
 
     /// <summary>
     /// Decodes a JPEG XL panorama to linear light: CodeBrix.Imaging converts any source encoding (float, linear, PQ,
-    /// HLG, wide gamut) to the sRGB curve with values outside 0..1 kept, and the extended inverse curve undoes it.
-    /// Negative (out-of-gamut) and NaN components become 0; radiance is capped at the half-float maximum.
+    /// HLG, wide gamut) straight to linear sRGB with values outside 0..1 kept. Negative (out-of-gamut) and NaN components become 0; radiance is capped at the half-float maximum.
     /// </summary>
     /// <param name="data">The file bytes.</param>
     /// <param name="what">What is decoded (for messages).</param>
@@ -211,14 +210,10 @@ public sealed partial class GraphicsContext
         }
     }
 
-    /// <summary>Linearises one extended-sRGB sample into a radiance the half-float cubes hold (negative and NaN to 0, at most 65504).</summary>
-    /// <param name="encoded">The sRGB-encoded sample.</param>
+    /// <summary>Clamps one linear sample into a radiance the half-float cubes hold (negative and NaN to 0, at most 65504).</summary>
+    /// <param name="linear">The linear sample.</param>
     /// <returns>The radiance.</returns>
-    private static float ToRadiance(float encoded)
-    {
-        float linear = ImageUpload.SrgbToLinearExtended(encoded);
-        return linear > 0f ? Math.Min(linear, 65504f) : 0f;
-    }
+    private static float ToRadiance(float linear) => linear > 0f ? Math.Min(linear, 65504f) : 0f;
 
     private static float SrgbToLinear(float value)
     {

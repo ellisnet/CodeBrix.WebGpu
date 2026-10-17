@@ -2,7 +2,6 @@ using System.IO;
 using CodeBrix.Imaging;
 using CodeBrix.Imaging.Formats.Jxl;
 using CodeBrix.Imaging.PixelFormats;
-using Xunit;
 
 namespace CodeBrix.WebGpu.Graphics.Tests;
 
@@ -11,6 +10,9 @@ internal static class TestJxl
 {
     /// <summary>The fast lossless encoder the tests use.</summary>
     public static readonly JxlEncoder Lossless = new JxlEncoder { Lossless = true, Effort = 3 };
+
+    /// <summary>The same encoder with the samples tagged as linear sRGB (libjxl's float convention).</summary>
+    public static readonly JxlEncoder LinearLossless = new JxlEncoder { Lossless = true, Effort = 3, ColorEncoding = JxlColorEncodingInfo.LinearSrgb };
 
     /// <summary>Encodes an image as lossless JPEG XL (one frame or an animation).</summary>
     /// <param name="image">The image.</param>
@@ -34,21 +36,9 @@ internal static class TestJxl
     /// <returns>The file bytes.</returns>
     public static byte[] LinearFloat(int width, int height, float red, float green, float blue)
     {
-        float[] r = Fill(width * height, red);
-        float[] g = Fill(width * height, green);
-        float[] b = Fill(width * height, blue);
-        using JxlRawImage raw = new JxlRawImage(width, height, new[]
-        {
-            new JxlRawFrame(new[]
-            {
-                JxlRawPlane.FromFloats(width, height, r, 0, null, null),
-                JxlRawPlane.FromFloats(width, height, g, 1, null, null),
-                JxlRawPlane.FromFloats(width, height, b, 2, null, null),
-            }, JxlRawColorSpace.Rgb, null),
-        }, null);
-        raw.Encoding.ColorEncoding = new JxlColorEncodingInfo { WhitePoint = 1, Primaries = 1, TransferFunction = 8, RenderingIntent = 1 };
+        using Image<RgbaVector> image = new Image<RgbaVector>(width, height, new RgbaVector(red, green, blue, 1f));
         using MemoryStream stream = new MemoryStream();
-        Lossless.EncodeRaw(raw, stream, null, TestContext.Current.CancellationToken);
+        image.SaveAsJxl(stream, LinearLossless);
         return stream.ToArray();
     }
 
@@ -119,12 +109,5 @@ internal static class TestJxl
 
         /// <inheritdoc />
         public override void Write(byte[] buffer, int offset, int count) => throw new System.NotSupportedException();
-    }
-
-    private static float[] Fill(int count, float value)
-    {
-        float[] values = new float[count];
-        System.Array.Fill(values, value);
-        return values;
     }
 }

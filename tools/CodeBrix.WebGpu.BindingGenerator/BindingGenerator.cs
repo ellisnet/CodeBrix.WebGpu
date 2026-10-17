@@ -81,6 +81,7 @@ public static class BindingGenerator
             outputs.Add(output.Key, output.Value);
         }
 
+        outputs.Add(PatchListRenderer.OutputPath, PatchListRenderer.Render(PatchListRenderer.PatchNames(repositoryRoot)));
         return outputs;
     }
 

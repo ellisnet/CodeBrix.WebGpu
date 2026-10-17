@@ -1,0 +1,205 @@
+CodeBrix patch 0003 - ErrorFilter.Internal error scopes (wgpu-native/src/lib.rs)
+
+WHAT: wgpuDevicePushErrorScope accepts WGPUErrorFilter_Internal (it panicked - a process abort at
+the C boundary - for anything but Validation / OutOfMemory). handle_error classifies an error as
+internal when wgpu-core's own WebGpuError classification says ErrorType::Internal (shader
+generation failures; backend pipeline linkage / entry-point failures) and stores it as a new
+Error::Internal, captured by the innermost Internal scope, reported as WGPUErrorType_Internal by
+wgpuDevicePopErrorScope, or delivered to the uncaptured-error callback when no Internal scope is
+open. The same classification also fixes OutOfMemory: wgpu-core wraps DeviceError with
+`#[error(transparent)]`, which forwards source() PAST it, so the source() walk never saw a wrapped
+DeviceError::OutOfMemory and reported it as a VALIDATION error (observed: an over-large texture,
+"Not enough memory left.", captured by a Validation scope). Validation and device-lost handling are
+unchanged (device loss still needs a bare DeviceError::Lost - reclassifying wrapped losses would
+run the device-lost callback, whose default ends the process, on every later call); nothing is
+relabelled. The classified type list is the wgpu-core 29 error types that can classify as
+Internal or OutOfMemory; an unlisted type keeps the old walk.
+wgpuDevicePopErrorScope on an EMPTY stack calls back with WGPUPopErrorScopeStatus_Error (webgpu.h)
+instead of panicking on unwrap().
+WHY: applications open Internal scopes during normal initialization (WebGPU's GPUErrorFilter
+"internal"); the engine aborted the process on the push.
+UPSTREAM: no fix exists. gfx-rs/wgpu-native trunk (589e6caa4e, 2026-10-05) still panics on the
+filter; open PR #630 ("Expand wgpu 30 API parity") classifies through webgpu_error_type() but maps
+Internal onto Validation and still panics on the filter. CodeBrix's own change; candidate for
+upstreaming.
+
+--- a/wgpu-native/src/lib.rs
++++ b/wgpu-native/src/lib.rs
+@@ -454,6 +454,11 @@ pub enum Error {
+         source: Box<dyn error::Error + Send + 'static>,
+         description: String,
+     },
++    // CodeBrix (patches/0003): errors wgpu-core classifies as ErrorType::Internal.
++    Internal {
++        source: Box<dyn error::Error + Send + 'static>,
++        description: String,
++    },
+ }
+ 
+ impl error::Error for Error {
+@@ -462,6 +467,7 @@ impl error::Error for Error {
+             Error::DeviceLost { source } => Some(source.as_ref()),
+             Error::OutOfMemory { source } => Some(source.as_ref()),
+             Error::Validation { source, .. } => Some(source.as_ref()),
++            Error::Internal { source, .. } => Some(source.as_ref()),
+         }
+     }
+ }
+@@ -472,6 +478,7 @@ impl Display for Error {
+             Error::DeviceLost { .. } => f.write_str("Device lost"),
+             Error::OutOfMemory { .. } => f.write_str("Out of Memory"),
+             Error::Validation { description, .. } => f.write_str(description),
++            Error::Internal { description, .. } => f.write_str(description),
+         }
+     }
+ }
+@@ -482,6 +489,8 @@ pub enum ErrorFilter {
+     OutOfMemory,
+     /// Catch only validation errors.
+     Validation,
++    /// Catch only internal errors (CodeBrix, patches/0003).
++    Internal,
+ }
+ 
+ type ErrorSink = Arc<Mutex<ErrorSinkRaw>>;
+@@ -536,6 +545,10 @@ impl ErrorSinkRaw {
+                 native::WGPUErrorType_Validation,
+                 crate::ErrorFilter::Validation,
+             ),
++            crate::Error::Internal { .. } => (
++                native::WGPUErrorType_Internal,
++                crate::ErrorFilter::Internal,
++            ),
+         };
+ 
+         match self
+@@ -605,6 +618,62 @@ fn handle_error_fatal(
+     panic!("Error in {operation}: {f}", f = format_error(&cause));
+ }
+ 
++// CodeBrix (patches/0003): wgpu-core's own WebGpuError classification of one level of an error
++// chain, for the wgpu-core error types that can classify as Internal or OutOfMemory. The source()
++// walk in handle_error cannot see those cases by itself: an internal error is a variant of the
++// creation error, and `#[error(transparent)] Device(DeviceError)` forwards source() PAST the
++// DeviceError, so a wrapped DeviceError::OutOfMemory used to be reported as a validation error.
++fn webgpu_error_type_of(e: &(dyn error::Error + 'static)) -> Option<wgt::error::ErrorType> {
++    use wgt::error::WebGpuError;
++    macro_rules! classify {
++        ($($t:ty),* $(,)?) => {
++            $(if let Some(e) = e.downcast_ref::<$t>() {
++                return Some(e.webgpu_error_type());
++            })*
++        };
++    }
++    classify!(
++        wgc::binding_model::CreateBindGroupError,
++        wgc::binding_model::CreateBindGroupLayoutError,
++        wgc::binding_model::CreatePipelineLayoutError,
++        wgc::command::ClearError,
++        wgc::command::CommandEncoderError,
++        wgc::command::ComputePassError,
++        wgc::command::CreateRenderBundleError,
++        wgc::command::QueryError,
++        wgc::command::RenderBundleError,
++        wgc::command::RenderPassError,
++        wgc::command::TransferError,
++        wgc::command::TransitionResourcesError,
++        wgc::device::queue::QueueSubmitError,
++        wgc::device::queue::QueueWriteError,
++        wgc::pipeline::CreateComputePipelineError,
++        wgc::pipeline::CreatePipelineCacheError,
++        wgc::pipeline::CreateRenderPipelineError,
++        wgc::pipeline::CreateShaderModuleError,
++        wgc::pipeline::ImplicitLayoutError,
++        wgc::present::ConfigureSurfaceError,
++        wgc::present::SurfaceError,
++        wgc::ray_tracing::BlasPrepareCompactError,
++        wgc::ray_tracing::BuildAccelerationStructureError,
++        wgc::ray_tracing::CompactBlasError,
++        wgc::ray_tracing::CreateBlasError,
++        wgc::ray_tracing::CreateTlasError,
++        wgc::resource::BufferAccessError,
++        wgc::resource::CreateBufferError,
++        wgc::resource::CreateExternalTextureError,
++        wgc::resource::CreateQuerySetError,
++        wgc::resource::CreateSamplerError,
++        wgc::resource::CreateTextureError,
++        wgc::resource::CreateTextureViewError,
++    );
++    // WaitIdleError has no WebGpuError impl; its device errors classify as DeviceError does.
++    if let Some(wgc::device::WaitIdleError::Device(e)) = e.downcast_ref::<wgc::device::WaitIdleError>() {
++        return Some(e.webgpu_error_type());
++    }
++    None
++}
++
+ fn handle_error(
+     sink_mutex: &Mutex<ErrorSinkRaw>,
+     source: impl error::Error + Send + Sync + 'static,
+@@ -632,6 +701,25 @@ fn handle_error(
+             }
+             _ => (),
+         }
++        // CodeBrix (patches/0003): Internal and (wrapped) OutOfMemory from core's classification.
++        // DeviceLost keeps the bare-DeviceError rule above: reclassifying wrapped losses would run
++        // the device-lost callback (wgpu's default one ends the process) on every later call.
++        match webgpu_error_type_of(source) {
++            Some(wgt::error::ErrorType::Internal) => {
++                let description =
++                    format_error(&error).replacen("Validation Error", "Internal Error", 1);
++                return sink.handle_error(crate::Error::Internal {
++                    description,
++                    source: Box::new(error),
++                });
++            }
++            Some(wgt::error::ErrorType::OutOfMemory) => {
++                return sink.handle_error(crate::Error::OutOfMemory {
++                    source: Box::new(error),
++                });
++            }
++            _ => (),
++        }
+         source_opt = source.source();
+     }
+ 
+@@ -2713,13 +2801,31 @@ pub unsafe extern "C" fn wgpuDevicePopErrorScope(
+     let device = device.as_ref().expect("invalid device");
+     let callback = callback_info.callback.expect("invalid callback");
+     let mut error_sink = device.error_sink.lock();
+-    let scope = error_sink.scopes.pop().unwrap();
++    // CodeBrix (patches/0003): popping an empty stack reports WGPUPopErrorScopeStatus_Error
++    // (webgpu.h) instead of panicking (which aborts the process at the C boundary).
++    let scope = match error_sink.scopes.pop() {
++        Some(scope) => scope,
++        None => {
++            let msg = "the error scope stack is empty";
++            unsafe {
++                callback(
++                    native::WGPUPopErrorScopeStatus_Error,
++                    native::WGPUErrorType_NoError,
++                    str_into_string_view(msg),
++                    callback_info.userdata1,
++                    callback_info.userdata2,
++                );
++            };
++            return NULL_FUTURE;
++        }
++    };
+ 
+     match scope.error {
+         Some(error) => {
+             let typ = match error {
+                 crate::Error::OutOfMemory { .. } => native::WGPUErrorType_OutOfMemory,
+                 crate::Error::Validation { .. } => native::WGPUErrorType_Validation,
++                crate::Error::Internal { .. } => native::WGPUErrorType_Internal,
+                 // We handle device lost error early in ErrorSinkRaw::handle_error
+                 // so we should never get device lost error here.
+                 crate::Error::DeviceLost { .. } => unreachable!(),
+@@ -2764,6 +2870,7 @@ pub unsafe extern "C" fn wgpuDevicePushErrorScope(
+         filter: match filter {
+             native::WGPUErrorFilter_Validation => ErrorFilter::Validation,
+             native::WGPUErrorFilter_OutOfMemory => ErrorFilter::OutOfMemory,
++            native::WGPUErrorFilter_Internal => ErrorFilter::Internal,
+             _ => panic!("invalid error filter"),
+         },
+     });

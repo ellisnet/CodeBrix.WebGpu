@@ -512,7 +512,32 @@ specs/codebrix.yml - THE contract of the codebrix_wgpu extras (enum_prefix
 `api_version` constant (the managed side refuses a native whose
 wgpuCodebrixGetApiVersion differs from Constants.ApiVersion), and any added
 function changes the export set, so all nine natives must be rebuilt before
-the next publish.
+the next publish. The hand-off structs (WGPUCodebrixDeviceHandoff 64 bytes,
+WGPUCodebrixFrameHandoff 56) keep their own layout versions: an api_version
+bump changes only the apiVersion value they carry. The out-param structs
+carry no size field - their layout is that of the contract version. Several
+contract pieces are DERIVED, not hand-kept:
+  * the capability status table: proc-table-notes.txt's leading keyword per
+    note (ABORTS: / ABORTS / UNSUPPORTED: / NOTE: - the generator refuses any
+    other start) + the backend from the symbol name (Vulkan / D3d12 / Metal)
+    -> codebrix-wgpu/src/proc_status.rs (GENERATED, compiled into
+    wgpuCodebrixGetProcStatus, which adds NotAvailableOnBackend from the
+    build's cfgs) and the static tables in codebrix_wgpu_procs.h / .rs and
+    ModuleInterop.g.cs. Changing a note's keyword changes what the loaded
+    library reports, so it needs a native rebuild like any other change.
+  * the native fix set: codebrix-wgpu/applied-patches.txt (GENERATED from
+    wgpu-native-tools/patches/*.patch; build.rs compiles it into
+    wgpuCodebrixGetBuildInfo's `patches`; the build scripts copy only
+    wgpu-native/ and codebrix-wgpu/ into scratch, so the list travels with
+    the crate). Adding a patch = generator --write, then rebuild; the Native
+    test BuildInfo_patches_are_the_patches_folder_in_apply_order fails until
+    the loaded native carries the new list.
+  * every out-param struct needs an android/layout-check.c assert beside the
+    gen-layouts.sh table (the Android gate compiles it with -Werror).
+The fault-listener fan-out lives in codebrix-wgpu/bridge/bridge.rs
+(device_fault_hook) and depends on wgpu-native's private ErrorSinkRaw fields
+uncaptured_handler / device_lost_handler and its default handler functions:
+re-check them on every wgpu-native bump.
 
 specs/expected-exports.txt - GENERATED. The native gate compares every built
 library's export table with it (ignoring '#' lines): nothing missing, nothing
@@ -525,7 +550,14 @@ NATIVE LIBRARIES
 
 One native per RID, named codebrix_wgpu, built from wgpu-native-tools/
 codebrix-wgpu (our cdylib; links wgpu-native as an rlib via the scratch-only
-patch and re-exports its symbols; adds the wgpuCodebrix* extras). Beside every
+patch and re-exports its symbols; adds the wgpuCodebrix* extras). Two build
+patches (0001 rlib, 0002 the bridge module line) plus the behaviour fixes 0003
+onward (error scopes with the Internal filter, absent pipeline-layout slots,
+zero-initialized workgroup memory, WGPU_WHOLE_MAP_SIZE maps, a non-aborting
+DevicePoll / InstanceProcessEvents, surface usage flags, WGPUBool results) are
+applied to a scratch copy by every script; each patch header says what, why
+and its provenance (wgpu-native-tools/patches/README.txt lists them). A built
+native names its fix set in wgpuCodebrixGetBuildInfo's `patches`. Beside every
 binary: LICENSE-WgpuNative.txt (identical bytes on every RID). Details, gates
 and build records: wgpu-native-tools/README.txt and BUILD-PROVENANCE.txt.
 
@@ -569,7 +601,10 @@ commands, with hand edits only where the C API itself changed.
        downloads the tag + the webgpu-headers commit it pins, records sha256s
        (UPSTREAM.txt, upstream-downloads/), replaces the vendored trees,
        re-applies patches/ to a scratch copy (fails loudly if one no longer
-       applies) and prints the function/struct/enum delta.
+       applies) and prints the function/struct/enum delta. Re-check every
+       behaviour patch (0003 onward) against the new release: drop one that
+       upstream now fixes (its header names the upstream PR / commit where
+       there is one), then --write so applied-patches.txt follows.
   2. Edit wgpu-native-tools/specs/wgpu.yml for whatever wgpu.h changed, until
          dotnet test tests/CodeBrix.WebGpu.BindingGenerator.Tests (HeaderParityTests)
      passes. (webgpu.yml needs no edits - it is upstream's.)

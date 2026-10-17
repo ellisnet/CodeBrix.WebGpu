@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="CodeBrix.Graphics3D.Gltf2.MitLicenseForever" Version="1.0.261.293" />
+    <PackageReference Include="CodeBrix.Graphics3D.Gltf2.MitLicenseForever" Version="1.0.290.996" />
     <PackageReference Include="CodeBrix.Sdl3.ZlibLicenseForever" Version="1.0.275.85" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.153.1" />
     <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.153.1" />

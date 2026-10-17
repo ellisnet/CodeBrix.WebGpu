@@ -4,8 +4,8 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   dcf6270f6e6f2ddb8a33a0ac108d58cf046f561eaed4679c9fab1fd350cb0c9b  wgpu-native-tools/specs/codebrix.yml
-//   9cdbd3d22f3ae770d1f0243f83eb2d9a7bc869976d3c337cc40043a958ad2426  wgpu-native-tools/specs/proc-table-notes.txt
+//   e0a21af4d2a3eeafde38d13a7f0943e3acd2bcd95f736c24b86544b8c4c9fb65  wgpu-native-tools/specs/codebrix.yml
+//   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 using System.Runtime.InteropServices;
 
@@ -467,6 +467,15 @@ public unsafe struct CodebrixBuildInfo
     /// The cargo profile ("release").
     /// </summary>
     public StringView Profile;
+
+    /// <summary>
+    /// The native fix set: comma-separated names (file names without <c>.patch</c>, in apply order) of
+    /// the wgpu-native-tools/patches this library was built with, e.g.
+    /// "0001-wgpu-native-crate-type-rlib,0002-wgpu-native-codebrix-bridge-module". Two libraries
+    /// with the same contract version and function-table hash but different <c>patches</c> behave
+    /// differently; compare this string, never the export set, to tell a fixed native from an old one.
+    /// </summary>
+    public StringView Patches;
 }
 
 /// <summary>
@@ -553,6 +562,57 @@ public unsafe struct CodebrixD3d12TextureInfo
 }
 
 /// <summary>
+/// What an adapter can do compared with the WebGPU baseline (wgpu-core
+/// <c>adapter_downlevel_capabilities</c>). The WebGPU features and limits are NOT repeated here: use
+/// <c>wgpuAdapterGetFeatures</c>, <c>wgpuAdapterHasFeature</c> and <c>wgpuAdapterGetLimits</c> for those. (wgpu's
+/// <c>DownlevelLimits</c> has no members in this engine, so there are none here.) Filled by
+/// <see cref="WebGpu.CodebrixAdapterGetDownlevelCapabilities" />.
+/// </summary>
+/// <remarks>C type: <c>WGPUCodebrixDownlevelCapabilities</c>.</remarks>
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct CodebrixDownlevelCapabilities
+{
+    /// <summary>
+    /// The downlevel capabilities the adapter has.
+    /// </summary>
+    public CodebrixDownlevelFlags Flags;
+
+    /// <summary>
+    /// The shader model the adapter supports.
+    /// </summary>
+    public CodebrixShaderModel ShaderModel;
+
+    /// <summary>
+    /// True when the adapter offers the complete WebGPU baseline (every compliant flag and <c>sm5</c>).
+    /// </summary>
+    public uint WebgpuCompliant;
+}
+
+/// <summary>
+/// One fault listener for <c>wgpuCodebrixDeviceAddFaultListener:</c> the standard webgpu.h callback
+/// types, each with its own two userdata pointers. Either callback may be NULL. <c>nextInChain</c> and the
+/// device-lost <c>mode</c> are ignored: listeners always run spontaneously, on the thread that discovers
+/// the fault, while the device's error sink is locked - keep them small and NEVER call webgpu.h
+/// functions on that device (or add/remove listeners) from inside them; defer GPU work.
+/// </summary>
+/// <remarks>C type: <c>WGPUCodebrixFaultCallbacks</c>.</remarks>
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct CodebrixFaultCallbacks
+{
+    /// <summary>
+    /// Called for every error no error scope captures, AFTER the device's own uncaptured-error
+    /// callback.
+    /// </summary>
+    public UncapturedErrorCallbackInfo UncapturedErrorCallbackInfo;
+
+    /// <summary>
+    /// Called when the device's own device-lost callback is called, AFTER it, and once when
+    /// <see cref="WebGpu.CodebrixDevicePoll" /> first observes the device lost.
+    /// </summary>
+    public DeviceLostCallbackInfo DeviceLostCallbackInfo;
+}
+
+/// <summary>
 /// An application-owned Metal device to wrap as a wgpu adapter + device, for
 /// <see cref="WebGpu.CodebrixInstanceAdoptMetalDevice" />. The application keeps ownership; wgpu retains what it
 /// uses.
@@ -590,6 +650,27 @@ public unsafe struct CodebrixName
     /// The name, as a string view.
     /// </summary>
     public StringView Name;
+}
+
+/// <summary>
+/// What an adapter allows for one texture format (wgpu-core <c>adapter_get_texture_format_features</c>).
+/// With <see cref="NativeFeature.TextureAdapterSpecificFormatFeatures" /> enabled on a device these are the
+/// capabilities that device honours; without it the device keeps to the WebGPU rules for the format.
+/// Filled by <see cref="WebGpu.CodebrixAdapterGetTextureFormatFeatures" />.
+/// </summary>
+/// <remarks>C type: <c>WGPUCodebrixTextureFormatFeatures</c>.</remarks>
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct CodebrixTextureFormatFeatures
+{
+    /// <summary>
+    /// The texture usages the format may be created with.
+    /// </summary>
+    public TextureUsage AllowedUsages;
+
+    /// <summary>
+    /// Filterability, multisample counts, storage access modes and blendability.
+    /// </summary>
+    public CodebrixTextureFormatFeatureFlags Flags;
 }
 
 /// <summary>
@@ -632,10 +713,10 @@ public unsafe struct CodebrixVulkanAdoptDescriptor
 
     /// <summary>
     /// The Vulkan API version the application created the instance with (<c>VkApplicationInfo::apiVersion</c>,
-    /// <c>VK_MAKE_API_VERSION</c> packed); wgpu uses no instance-level functionality above it. The version the
-    /// Vulkan loader / driver reports (<c>vkEnumerateInstanceVersion</c>, and the <c>instance_api_version</c> of
-    /// <see cref="CodebrixVulkanDeviceInfo" />) may be higher than the instance's and is only a best-effort fallback when the
-    /// real value is unknown.
+    /// <c>VK_MAKE_API_VERSION</c> packed); wgpu uses no instance-level functionality above it. When the
+    /// instance came from wgpu, the <c>instance_api_version</c> of <see cref="CodebrixVulkanDeviceInfo" /> is that
+    /// value. The version the Vulkan loader reports (<c>vkEnumerateInstanceVersion</c>) may be higher than
+    /// the instance's and is only a best-effort fallback when the real value is unknown.
     /// </summary>
     public uint InstanceApiVersion;
 
@@ -674,6 +755,43 @@ public unsafe struct CodebrixVulkanAdoptDescriptor
     /// The wgpu features the adopted device must expose (<c>WGPUFeatureName</c> values). May be empty.
     /// </summary>
     public FeatureName* RequiredFeatures;
+}
+
+/// <summary>
+/// What an application must create its <c>VkDevice</c> with so that
+/// <see cref="WebGpu.CodebrixInstanceAdoptVulkanDevice" /> accepts it: the device extensions wgpu-hal's
+/// <c>required_device_extensions</c> returns for the adapter and feature set, and the feature structures
+/// wgpu-hal's <c>physical_device_features</c> would enable. Filled by
+/// <see cref="WebGpu.CodebrixVulkanGetAdoptRequirements" />; release with
+/// <see cref="WebGpu.CodebrixVulkanAdoptRequirementsFreeMembers" />.
+/// </summary>
+/// <remarks>C type: <c>WGPUCodebrixVulkanAdoptRequirements</c>.</remarks>
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct CodebrixVulkanAdoptRequirements
+{
+    /// <summary>
+    /// The number of elements in <see cref="CodebrixVulkanAdoptRequirements.RequiredDeviceExtensions" />.
+    /// </summary>
+    public nuint RequiredDeviceExtensionCount;
+
+    /// <summary>
+    /// Enable every one of these device extensions (you may enable more). Static strings, valid for
+    /// the life of the process (FreeMembers does not free them).
+    /// </summary>
+    public CodebrixName* RequiredDeviceExtensions;
+
+    /// <summary>
+    /// A <c>VkPhysicalDeviceFeatures2*</c> with its <c>pNext</c> chain of the feature structures wgpu enables,
+    /// OWNED by the library until FreeMembers. Put it into <c>VkDeviceCreateInfo::pNext</c> (with
+    /// <c>pEnabledFeatures</c> NULL), or copy it and OR in features of your own - never enable fewer. To
+    /// chain structures of your own, put them in front of it; never write into it.
+    /// </summary>
+    public void* PhysicalDeviceFeatures2;
+
+    /// <summary>
+    /// The physical device's <c>VkPhysicalDeviceProperties::apiVersion</c>.
+    /// </summary>
+    public uint PhysicalDeviceApiVersion;
 }
 
 /// <summary>
@@ -717,12 +835,14 @@ public unsafe struct CodebrixVulkanDeviceInfo
     public uint QueueIndex;
 
     /// <summary>
-    /// The Vulkan API version the Vulkan loader / driver reported (<c>vkEnumerateInstanceVersion</c>,
-    /// <c>VK_MAKE_API_VERSION</c> packed) when wgpu created the instance. The instance itself may have been
-    /// created with a LOWER version (wgpu caps the version it creates the instance with at 1.3), so this
-    /// is not the instance's API version: do not use it as Skia's <c>MaxAPIVersion</c> (see
-    /// <c>VulkanSkiaBridge.SkiaApiVersion</c> in CodeBrix.WebGpu.Skia), and do not copy it into
-    /// <see cref="CodebrixVulkanAdoptDescriptor" /> <c>instance_api_version</c> for another instance.
+    /// The <c>VkApplicationInfo::apiVersion</c> the instance was created with (<c>VK_MAKE_API_VERSION</c>
+    /// packed). For an instance wgpu created this is wgpu-hal's rule: 1.0 when the Vulkan loader
+    /// reports less than 1.1 (<c>vkEnumerateInstanceVersion</c>), otherwise exactly 1.3 (wgpu-hal's maximum)
+    /// - so a 1.4 loader still gives 1.3, and no 1.4 entry point is loaded. For an adopted device it is
+    /// the <c>instance_api_version</c> of its <see cref="CodebrixVulkanAdoptDescriptor" />. This is the value
+    /// Skia's <c>MaxAPIVersion</c> and another adopt descriptor expect. (Vulkan's own rule still applies on
+    /// top: device-level functionality is limited to the lower of this and the physical device's
+    /// <c>apiVersion</c>.)
     /// </summary>
     public uint InstanceApiVersion;
 

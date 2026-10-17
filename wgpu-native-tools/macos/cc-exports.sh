@@ -5,7 +5,7 @@
 # ==============================================================================================
 #
 # rustc links a cdylib with "-Wl,-exported_symbols_list -Wl,<temp file>" listing every #[no_mangle]
-# / #[export_name] symbol of the whole crate graph. On macOS that is the 243 functions of the C API
+# / #[export_name] symbol of the whole crate graph. On macOS that is the 251 functions of the C API
 # PLUS the statics objc2's define_class! macro export-names for every Objective-C class a crate
 # defines (raw-window-metal 1.1's RawWindowMetalLayer, via wgpu-hal's Metal backend):
 #     __CLASS_<Name>  __IVAR_OFFSET_<Name>  __DROP_FLAG_OFFSET_<Name>  __REGISTER_CLASS_<Name>

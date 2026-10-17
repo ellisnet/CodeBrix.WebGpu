@@ -47,7 +47,7 @@ public class WgpuLibraryTests
 
         //Assert
         message.Should().Contain("contract version 7");
-        message.Should().Contain("contract version 1");
+        message.Should().Contain("contract version 2");
     }
 
     [Fact]

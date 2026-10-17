@@ -90,7 +90,8 @@ public static unsafe class CodeBrixWebGpuNative
                 WgpuString.ToManaged(info.WgpuCoreVersion),
                 WgpuString.ToManaged(info.Backends),
                 WgpuString.ToManaged(info.TargetTriple),
-                WgpuString.ToManaged(info.Profile));
+                WgpuString.ToManaged(info.Profile),
+                WgpuString.ToManaged(info.Patches));
         }
     }
 
@@ -144,6 +145,45 @@ public static unsafe class CodeBrixWebGpuNative
             Volatile.Write(ref procTableAddress, (nint)table);
             return table;
         }
+    }
+
+    /// <summary>
+    /// What the LOADED native library knows about one exported function (<c>wgpuCodebrixGetProcStatus</c>): implemented,
+    /// ends the process when called or on bad input, always fails, or needs a backend this native was built without.
+    /// Export presence alone is no evidence that a function works; ask this.
+    /// </summary>
+    /// <param name="symbol">The C symbol, for example <c>wgpuInstanceWaitAny</c>.</param>
+    /// <returns>The status; <see cref="CodebrixProcStatus.Unknown" /> for a symbol that is not in the function table.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="symbol" /> is null.</exception>
+    /// <exception cref="WgpuException">The library cannot be loaded or speaks another contract version.</exception>
+    public static CodebrixProcStatus GetProcStatus(string symbol)
+    {
+        ArgumentNullException.ThrowIfNull(symbol);
+        WgpuLibrary.EnsureLoaded();
+        int ordinal = ProcOrdinal(symbol);
+        return ordinal < 0 ? CodebrixProcStatus.Unknown : WebGpu.CodebrixGetProcStatus((uint)ordinal);
+    }
+
+    /// <summary>The function-table ordinal of a C symbol (its index in <see cref="CodebrixProcTable.Symbols" />), or -1.</summary>
+    /// <param name="symbol">The C symbol.</param>
+    /// <returns>The ordinal, or -1 when the symbol is not in the table.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="symbol" /> is null.</exception>
+    public static int ProcOrdinal(string symbol)
+    {
+        ArgumentNullException.ThrowIfNull(symbol);
+        IReadOnlyList<string> symbols = CodebrixProcTable.Symbols;
+        int low = 0;
+        int high = symbols.Count - 1;
+        while (low <= high)
+        {
+            int middle = low + ((high - low) / 2);
+            int order = string.CompareOrdinal(symbols[middle], symbol);
+            if (order == 0) return middle;
+            if (order < 0) low = middle + 1;
+            else high = middle - 1;
+        }
+
+        return -1;
     }
 
     /// <summary>Splits a <c>wgpuGetVersion</c> value into its four bytes.</summary>
@@ -212,10 +252,15 @@ public static unsafe class CodeBrixWebGpuNative
 /// <param name="Backends">Comma-separated backends compiled in (for example <c>vulkan,gles</c>).</param>
 /// <param name="TargetTriple">The target triple the library was built for.</param>
 /// <param name="Profile">The build profile.</param>
+/// <param name="Patches">
+/// The native fix set: comma-separated names of the wgpu-native-tools patches the library was built with, in apply
+/// order. Compare it (not the export set) to tell a fixed native from an older one.
+/// </param>
 public sealed record WgpuBuildInfo(
     uint ApiVersion,
     string WgpuNativeVersion,
     string WgpuCoreVersion,
     string Backends,
     string TargetTriple,
-    string Profile);
+    string Profile,
+    string Patches);

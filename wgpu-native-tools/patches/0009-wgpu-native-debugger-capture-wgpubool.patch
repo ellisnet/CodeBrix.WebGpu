@@ -1,0 +1,32 @@
+CodeBrix patch 0009 - WGPUBool result of wgpuDeviceStartGraphicsDebuggerCapture (wgpu-native/src/lib.rs)
+
+WHAT: the Rust function returns native::WGPUBool (uint32_t), as wgpu.h declares, instead of Rust's
+one-byte bool. The value is unchanged (always true - wgpu-core reports nothing).
+WHY: found along the way while fencing patch 0007 (wgpuDevicePoll had the same mismatch): a C
+caller reads a 32-bit WGPUBool, and with a one-byte bool the upper 24 bits of the return register
+are whatever was left there (0xFFFFFF01 was observed for wgpuDevicePoll's "true" on x86_64). C
+signature (wgpu.h) unchanged.
+UPSTREAM: no fix exists: trunk (589e6caa4e) and open PR #630 both still return `bool`.
+CodeBrix's own change; candidate for upstreaming.
+
+--- a/wgpu-native/src/lib.rs
++++ b/wgpu-native/src/lib.rs
+@@ -2702,7 +2702,8 @@ pub unsafe extern "C" fn wgpuDeviceGetFeatures(
+ #[no_mangle]
+ pub unsafe extern "C" fn wgpuDeviceStartGraphicsDebuggerCapture(
+     device: native::WGPUDevice,
+-) -> bool {
++) -> native::WGPUBool {
++    // CodeBrix (patches/0009): WGPUBool (uint32_t) as wgpu.h declares, not Rust's one-byte bool.
+     let (device_id, context) = {
+         let device = device.as_ref().expect("invalid device");
+         (device.id, &device.context)
+@@ -2710,7 +2711,7 @@ pub unsafe extern "C" fn wgpuDeviceStartGraphicsDebuggerCapture(
+ 
+     // FIXME: wgpu-hal's start_graphics_debugger_capture returns a bool, but wgpu's doesn't
+     context.device_start_graphics_debugger_capture(device_id);
+-    true
++    true as native::WGPUBool
+ }
+ 
+ #[no_mangle]

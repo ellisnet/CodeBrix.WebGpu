@@ -4,8 +4,8 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   dcf6270f6e6f2ddb8a33a0ac108d58cf046f561eaed4679c9fab1fd350cb0c9b  wgpu-native-tools/specs/codebrix.yml
-//   9cdbd3d22f3ae770d1f0243f83eb2d9a7bc869976d3c337cc40043a958ad2426  wgpu-native-tools/specs/proc-table-notes.txt
+//   e0a21af4d2a3eeafde38d13a7f0943e3acd2bcd95f736c24b86544b8c4c9fb65  wgpu-native-tools/specs/codebrix.yml
+//   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -23,10 +23,10 @@ namespace CodeBrix.WebGpu.Native;
 public unsafe partial struct CodebrixProcTable
 {
     /// <summary>The number of function pointers (<c>WGPU_CODEBRIX_PROC_TABLE_FUNCTION_COUNT</c>).</summary>
-    public const uint EntryCount = 243u;
+    public const uint EntryCount = 251u;
 
     /// <summary>FNV-1a 64 of every entry's C signature in table order (<c>WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH</c>).</summary>
-    public const ulong ExpectedSignatureHash = 0x4326A43FF281069BUL;
+    public const ulong ExpectedSignatureHash = 0x8F18F0987BEF9F9FUL;
 
     /// <summary>The byte offset of the first function pointer.</summary>
     public const int HeaderSize = 24;
@@ -60,21 +60,29 @@ public unsafe partial struct CodebrixProcTable
         "wgpuBufferSetLabel",
         "wgpuBufferUnmap",
         "wgpuBufferWriteMappedRange",
+        "wgpuCodebrixAdapterGetDownlevelCapabilities",
+        "wgpuCodebrixAdapterGetTextureFormatFeatures",
         "wgpuCodebrixCommandEncoderTransitionTexture",
+        "wgpuCodebrixDeviceAddFaultListener",
         "wgpuCodebrixDeviceCreateTextureFromD3d12Resource",
         "wgpuCodebrixDeviceCreateTextureFromMetalTexture",
         "wgpuCodebrixDeviceCreateTextureFromVulkanImage",
         "wgpuCodebrixDeviceGetBackend",
         "wgpuCodebrixDeviceGetD3d12Info",
         "wgpuCodebrixDeviceGetVulkanInfo",
+        "wgpuCodebrixDevicePoll",
+        "wgpuCodebrixDeviceRemoveFaultListener",
         "wgpuCodebrixGetApiVersion",
         "wgpuCodebrixGetBuildInfo",
+        "wgpuCodebrixGetProcStatus",
         "wgpuCodebrixGetStructLayout",
         "wgpuCodebrixInstanceAdoptD3d12Device",
         "wgpuCodebrixInstanceAdoptMetalDevice",
         "wgpuCodebrixInstanceAdoptVulkanDevice",
         "wgpuCodebrixTextureGetD3d12Info",
         "wgpuCodebrixTextureGetVulkanInfo",
+        "wgpuCodebrixVulkanAdoptRequirementsFreeMembers",
+        "wgpuCodebrixVulkanGetAdoptRequirements",
         "wgpuCommandBufferAddRef",
         "wgpuCommandBufferRelease",
         "wgpuCommandBufferSetLabel",
@@ -281,6 +289,526 @@ public unsafe partial struct CodebrixProcTable
     /// <summary>The C symbol of every entry, in table order.</summary>
     public static IReadOnlyList<string> Symbols => SymbolTable;
 
+    private static readonly CodebrixProcStatus[] StatusTable =
+    {
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsOnError,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsOnError,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.AbortsOnError,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Unsupported,
+        CodebrixProcStatus.AbortsOnError,
+        CodebrixProcStatus.AbortsOnError,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsOnError,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsOnError,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsOnError,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Unsupported,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.AbortsOnError,
+        CodebrixProcStatus.AbortsOnError,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsOnError,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsOnError,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsOnError,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.AbortsUnimplemented,
+    };
+
+    private static readonly BackendType[] BackendTable =
+    {
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.D3D12,
+        BackendType.Metal,
+        BackendType.Vulkan,
+        BackendType.Undefined,
+        BackendType.D3D12,
+        BackendType.Vulkan,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.D3D12,
+        BackendType.Metal,
+        BackendType.Vulkan,
+        BackendType.D3D12,
+        BackendType.Vulkan,
+        BackendType.Vulkan,
+        BackendType.Vulkan,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Metal,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Metal,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Metal,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+        BackendType.Undefined,
+    };
+
+    /// <summary>
+    /// The static status of every entry, in table order, from the notes this binding was generated with (never
+    /// <see cref="CodebrixProcStatus.NotAvailableOnBackend" />: ask the loaded library with
+    /// <see cref="WebGpu.CodebrixGetProcStatus" /> for the answer that includes its backends).
+    /// </summary>
+    public static IReadOnlyList<CodebrixProcStatus> Statuses => StatusTable;
+
+    /// <summary>The backend every entry needs (<see cref="BackendType.Undefined" /> for none), in table order.</summary>
+    public static IReadOnlyList<BackendType> RequiredBackends => BackendTable;
+
     /// <summary>sizeof(WGPUCodebrixProcTable) of the library side that filled the table.</summary>
     public uint Size;
 
@@ -318,7 +846,7 @@ public unsafe partial struct CodebrixProcTable
     public delegate* unmanaged[Cdecl]<Adapter, void> AdapterRelease;
 
     /// <summary><c>wgpuAdapterRequestDevice</c> - see <see cref="WebGpu.AdapterRequestDevice" />.</summary>
-    /// <remarks>Without DeviceDescriptor.uncapturedErrorCallbackInfo.callback the default handler ENDS THE PROCESS on the first uncaptured error.</remarks>
+    /// <remarks>ABORTS on the first uncaptured error when DeviceDescriptor.uncapturedErrorCallbackInfo.callback is not set (the default handler ends the process).</remarks>
     public delegate* unmanaged[Cdecl]<Adapter, DeviceDescriptor*, RequestDeviceCallbackInfo, Future> AdapterRequestDevice;
 
     /// <summary><c>wgpuBindGroupAddRef</c> - see <see cref="WebGpu.BindGroupAddRef" />.</summary>
@@ -386,8 +914,17 @@ public unsafe partial struct CodebrixProcTable
     /// <remarks>ABORTS: not implemented by the engine (use wgpuBufferGetMappedRange).</remarks>
     public delegate* unmanaged[Cdecl]<Buffer, nuint, void*, nuint, Status> BufferWriteMappedRange;
 
+    /// <summary><c>wgpuCodebrixAdapterGetDownlevelCapabilities</c> - see <see cref="WebGpu.CodebrixAdapterGetDownlevelCapabilities" />.</summary>
+    public delegate* unmanaged[Cdecl]<Adapter, CodebrixDownlevelCapabilities*, Status> CodebrixAdapterGetDownlevelCapabilities;
+
+    /// <summary><c>wgpuCodebrixAdapterGetTextureFormatFeatures</c> - see <see cref="WebGpu.CodebrixAdapterGetTextureFormatFeatures" />.</summary>
+    public delegate* unmanaged[Cdecl]<Adapter, TextureFormat, CodebrixTextureFormatFeatures*, Status> CodebrixAdapterGetTextureFormatFeatures;
+
     /// <summary><c>wgpuCodebrixCommandEncoderTransitionTexture</c> - see <see cref="WebGpu.CodebrixCommandEncoderTransitionTexture" />.</summary>
     public delegate* unmanaged[Cdecl]<CommandEncoder, Texture, CodebrixTextureState, Status> CodebrixCommandEncoderTransitionTexture;
+
+    /// <summary><c>wgpuCodebrixDeviceAddFaultListener</c> - see <see cref="WebGpu.CodebrixDeviceAddFaultListener" />.</summary>
+    public delegate* unmanaged[Cdecl]<Device, CodebrixFaultCallbacks*, ulong> CodebrixDeviceAddFaultListener;
 
     /// <summary><c>wgpuCodebrixDeviceCreateTextureFromD3d12Resource</c> - see <see cref="WebGpu.CodebrixDeviceCreateTextureFromD3d12Resource" />.</summary>
     public delegate* unmanaged[Cdecl]<Device, void*, TextureDescriptor*, CodebrixTextureState, Texture> CodebrixDeviceCreateTextureFromD3d12Resource;
@@ -407,25 +944,34 @@ public unsafe partial struct CodebrixProcTable
     /// <summary><c>wgpuCodebrixDeviceGetVulkanInfo</c> - see <see cref="WebGpu.CodebrixDeviceGetVulkanInfo" />.</summary>
     public delegate* unmanaged[Cdecl]<Device, CodebrixVulkanDeviceInfo*, Status> CodebrixDeviceGetVulkanInfo;
 
+    /// <summary><c>wgpuCodebrixDevicePoll</c> - see <see cref="WebGpu.CodebrixDevicePoll" />.</summary>
+    public delegate* unmanaged[Cdecl]<Device, uint, ulong, ulong*, CodebrixPollResult*, Status> CodebrixDevicePoll;
+
+    /// <summary><c>wgpuCodebrixDeviceRemoveFaultListener</c> - see <see cref="WebGpu.CodebrixDeviceRemoveFaultListener" />.</summary>
+    public delegate* unmanaged[Cdecl]<Device, ulong, Status> CodebrixDeviceRemoveFaultListener;
+
     /// <summary><c>wgpuCodebrixGetApiVersion</c> - see <see cref="WebGpu.CodebrixGetApiVersion" />.</summary>
     public delegate* unmanaged[Cdecl]<uint> CodebrixGetApiVersion;
 
     /// <summary><c>wgpuCodebrixGetBuildInfo</c> - see <see cref="WebGpu.CodebrixGetBuildInfo" />.</summary>
     public delegate* unmanaged[Cdecl]<CodebrixBuildInfo*, void> CodebrixGetBuildInfo;
 
+    /// <summary><c>wgpuCodebrixGetProcStatus</c> - see <see cref="WebGpu.CodebrixGetProcStatus" />.</summary>
+    public delegate* unmanaged[Cdecl]<uint, CodebrixProcStatus> CodebrixGetProcStatus;
+
     /// <summary><c>wgpuCodebrixGetStructLayout</c> - see <see cref="WebGpu.CodebrixGetStructLayout" />.</summary>
     public delegate* unmanaged[Cdecl]<StringView, nuint*, nuint*, Status> CodebrixGetStructLayout;
 
     /// <summary><c>wgpuCodebrixInstanceAdoptD3d12Device</c> - see <see cref="WebGpu.CodebrixInstanceAdoptD3d12Device" />.</summary>
-    /// <remarks>Always returns WGPUStatus_Error with this engine.</remarks>
+    /// <remarks>UNSUPPORTED: always returns WGPUStatus_Error with this engine.</remarks>
     public delegate* unmanaged[Cdecl]<Instance, CodebrixD3d12AdoptDescriptor*, Adapter*, Device*, Status> CodebrixInstanceAdoptD3d12Device;
 
     /// <summary><c>wgpuCodebrixInstanceAdoptMetalDevice</c> - see <see cref="WebGpu.CodebrixInstanceAdoptMetalDevice" />.</summary>
-    /// <remarks>The adopted device has the default uncaptured-error handler: uncaptured errors END THE PROCESS (use error scopes).</remarks>
+    /// <remarks>ABORTS on the first uncaptured error: the adopted device has the default uncaptured-error handler (use error scopes).</remarks>
     public delegate* unmanaged[Cdecl]<Instance, CodebrixMetalAdoptDescriptor*, Adapter*, Device*, Status> CodebrixInstanceAdoptMetalDevice;
 
     /// <summary><c>wgpuCodebrixInstanceAdoptVulkanDevice</c> - see <see cref="WebGpu.CodebrixInstanceAdoptVulkanDevice" />.</summary>
-    /// <remarks>The adopted device has the default uncaptured-error handler: uncaptured errors END THE PROCESS (use error scopes).</remarks>
+    /// <remarks>ABORTS on the first uncaptured error: the adopted device has the default uncaptured-error handler (use error scopes).</remarks>
     public delegate* unmanaged[Cdecl]<Instance, CodebrixVulkanAdoptDescriptor*, Adapter*, Device*, Status> CodebrixInstanceAdoptVulkanDevice;
 
     /// <summary><c>wgpuCodebrixTextureGetD3d12Info</c> - see <see cref="WebGpu.CodebrixTextureGetD3d12Info" />.</summary>
@@ -433,6 +979,12 @@ public unsafe partial struct CodebrixProcTable
 
     /// <summary><c>wgpuCodebrixTextureGetVulkanInfo</c> - see <see cref="WebGpu.CodebrixTextureGetVulkanInfo" />.</summary>
     public delegate* unmanaged[Cdecl]<Texture, CodebrixVulkanTextureInfo*, Status> CodebrixTextureGetVulkanInfo;
+
+    /// <summary><c>wgpuCodebrixVulkanAdoptRequirementsFreeMembers</c> - see <see cref="WebGpu.CodebrixVulkanAdoptRequirementsFreeMembers" />.</summary>
+    public delegate* unmanaged[Cdecl]<CodebrixVulkanAdoptRequirements, void> CodebrixVulkanAdoptRequirementsFreeMembers;
+
+    /// <summary><c>wgpuCodebrixVulkanGetAdoptRequirements</c> - see <see cref="WebGpu.CodebrixVulkanGetAdoptRequirements" />.</summary>
+    public delegate* unmanaged[Cdecl]<CodebrixVulkanAdoptDescriptor*, CodebrixVulkanAdoptRequirements*, Status> CodebrixVulkanGetAdoptRequirements;
 
     /// <summary><c>wgpuCommandBufferAddRef</c> - see <see cref="WebGpu.CommandBufferAddRef" />.</summary>
     public delegate* unmanaged[Cdecl]<CommandBuffer, void> CommandBufferAddRef;
@@ -639,7 +1191,7 @@ public unsafe partial struct CodebrixProcTable
     public delegate* unmanaged[Cdecl]<Device, FeatureName, uint> DeviceHasFeature;
 
     /// <summary><c>wgpuDevicePoll</c> - see <see cref="WebGpu.DevicePoll" />.</summary>
-    /// <remarks>ABORTS when the wait fails (a foreign submission index, a lost device).</remarks>
+    /// <remarks>NOTE: returns false when the wait fails (a foreign submission index, a lost device); the failure goes to the device's error scopes / uncaptured-error callback.</remarks>
     public delegate* unmanaged[Cdecl]<Device, uint, ulong*, uint> DevicePoll;
 
     /// <summary><c>wgpuDevicePopErrorScope</c> - see <see cref="WebGpu.DevicePopErrorScope" />.</summary>
@@ -713,7 +1265,7 @@ public unsafe partial struct CodebrixProcTable
     public delegate* unmanaged[Cdecl]<Instance, WGSLLanguageFeatureName, uint> InstanceHasWGSLLanguageFeature;
 
     /// <summary><c>wgpuInstanceProcessEvents</c> - see <see cref="WebGpu.InstanceProcessEvents" />.</summary>
-    /// <remarks>ABORTS when polling fails.</remarks>
+    /// <remarks>NOTE: a polling failure is only logged (no device's error path is reachable from the instance); use wgpuCodebrixDevicePoll for a structured result.</remarks>
     public delegate* unmanaged[Cdecl]<Instance, void> InstanceProcessEvents;
 
     /// <summary><c>wgpuInstanceRelease</c> - see <see cref="WebGpu.InstanceRelease" />.</summary>
@@ -760,7 +1312,7 @@ public unsafe partial struct CodebrixProcTable
     public delegate* unmanaged[Cdecl]<Queue, void> QueueAddRef;
 
     /// <summary><c>wgpuQueueGetNativeMetalCommandQueue</c> - see <see cref="WebGpu.QueueGetNativeMetalCommandQueue" />.</summary>
-    /// <remarks>Always returns NULL with this engine.</remarks>
+    /// <remarks>UNSUPPORTED: always returns NULL with this engine.</remarks>
     public delegate* unmanaged[Cdecl]<Queue, void*> QueueGetNativeMetalCommandQueue;
 
     /// <summary><c>wgpuQueueGetTimestampPeriod</c> - see <see cref="WebGpu.QueueGetTimestampPeriod" />.</summary>

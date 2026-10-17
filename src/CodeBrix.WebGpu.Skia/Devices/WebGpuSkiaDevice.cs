@@ -26,12 +26,22 @@ namespace CodeBrix.WebGpu.Skia;
 /// </remarks>
 public sealed unsafe class WebGpuSkiaDevice : IDisposable, IWebGpuDeviceSource
 {
+    /// <summary>Where the native feature names start (values below it are standard WebGPU features).</summary>
+    private const uint NativeFeatureBase = 0x00030000;
+
+    private static readonly IReadOnlyList<WebGpuSkiaUnmetRequirement> NoUnmetRequirements = Array.Empty<WebGpuSkiaUnmetRequirement>();
+    private static readonly IReadOnlyList<FeatureName> NoFeatures = Array.Empty<FeatureName>();
+    private static readonly IReadOnlyList<NativeFeature> NoNativeFeatures = Array.Empty<NativeFeature>();
+
     private readonly ConcurrentQueue<string> uncapturedErrors = new ConcurrentQueue<string>();
     private readonly List<IntPtr> adoptAllocations = new List<IntPtr>();
     private readonly bool ownsGrContext;
     private SkiaBridge bridge;
     private GRContext grContext;
     private GCHandle self;
+    private WebGpuFaultListener faultListener;
+    private HashSet<uint> enabledFeatures = new HashSet<uint>();
+    private volatile string lostReason;
     private bool disposed;
 
     private WebGpuSkiaDevice(string reason)
@@ -94,6 +104,52 @@ public sealed unsafe class WebGpuSkiaDevice : IDisposable, IWebGpuDeviceSource
     /// <summary>Why <see cref="CreateGrContext" /> returned null, or null.</summary>
     public string GrContextReason { get; private set; }
 
+    /// <summary>
+    /// The requirements of <see cref="WebGpuSkiaDeviceOptions" /> (features, native features, limits) that no tried
+    /// adapter could satisfy - one entry per requirement and backend, each naming the feature or limit and, for a
+    /// limit, the requested and the adapter's value. Empty for an available device and for a device that is
+    /// unavailable for any other reason. A caller can fall back by creating the device again with fewer requirements.
+    /// </summary>
+    public IReadOnlyList<WebGpuSkiaUnmetRequirement> UnmetRequirements { get; private set; } = NoUnmetRequirements;
+
+    /// <summary>
+    /// The standard WebGPU features the device was created with (owned route: the ones
+    /// <see cref="WebGpuSkiaDeviceOptions.RequiredFeatures" /> asked for; adopted route: what the native adoption
+    /// enabled), in value order. Always a subset of <see cref="AdapterFeatures" />. Empty when unavailable.
+    /// </summary>
+    public IReadOnlyList<FeatureName> Features { get; private set; } = NoFeatures;
+
+    /// <summary>The native engine features the device was created with, in value order. A subset of <see cref="AdapterNativeFeatures" />.</summary>
+    public IReadOnlyList<NativeFeature> NativeFeatures { get; private set; } = NoNativeFeatures;
+
+    /// <summary>
+    /// The device's limits (<c>wgpuDeviceGetLimits</c>): the WebGPU defaults unless
+    /// <see cref="WebGpuSkiaDeviceOptions.RequiredLimits" /> raised some. Default (all zero) when unavailable.
+    /// </summary>
+    public Limits Limits { get; private set; }
+
+    /// <summary>
+    /// The standard WebGPU features the adapter offers (<c>wgpuAdapterGetFeatures</c>), in value order: what a device
+    /// on it could be created with. A feature here but not in <see cref="Features" /> is "available, not enabled".
+    /// </summary>
+    public IReadOnlyList<FeatureName> AdapterFeatures { get; private set; } = NoFeatures;
+
+    /// <summary>The native engine features the adapter offers, in value order (it may list experimental ones the engine never enables).</summary>
+    public IReadOnlyList<NativeFeature> AdapterNativeFeatures { get; private set; } = NoNativeFeatures;
+
+    /// <summary>The adapter's best limits (<c>wgpuAdapterGetLimits</c>): the most a device on it could be created with.</summary>
+    public Limits AdapterLimits { get; private set; }
+
+    /// <summary>
+    /// True once the native device has been reported lost (the owned device's device-lost callback; for an adopted
+    /// device a fault listener; for both, a lost device seen while polling for a read-back). Release the targets and
+    /// the device and create a new one.
+    /// </summary>
+    public bool IsLost => lostReason != null;
+
+    /// <summary>The reason and message of the device loss, or null while <see cref="IsLost" /> is false.</summary>
+    public string LostReason => lostReason;
+
     /// <summary>The device's backend as WebGPU names it (<see cref="Native.BackendType.Undefined" /> when unavailable).</summary>
     Native.BackendType IWebGpuDeviceSource.Backend => IsAvailable ? BackendType(Backend) : Native.BackendType.Undefined;
 
@@ -119,6 +175,7 @@ public sealed unsafe class WebGpuSkiaDevice : IDisposable, IWebGpuDeviceSource
         if (!TryLoadNative(out string loadReason)) return new WebGpuSkiaDevice(loadReason);
 
         List<string> failures = new List<string>();
+        List<WebGpuSkiaUnmetRequirement> unmet = new List<WebGpuSkiaUnmetRequirement>();
         foreach (WebGpuSkiaBackend backend in BackendOrder(options))
         {
             if (!PlatformCompiles(backend))
@@ -144,10 +201,36 @@ public sealed unsafe class WebGpuSkiaDevice : IDisposable, IWebGpuDeviceSource
             }
 
             candidate.Adapter = adapter;
-            Device device = WgpuRequests.RequestDevice(instance, adapter, GCHandle.ToIntPtr(candidate.self), out string deviceMessage);
+            string adapterName = ReadAdapterName(adapter);
+            List<WebGpuSkiaUnmetRequirement> missing = DeviceRequirements.Check(adapter, backend, adapterName, options, out FeatureName[] features, out Limits? limits);
+            if (missing.Count > 0)
+            {
+                unmet.AddRange(missing);
+                List<string> messages = new List<string>();
+                foreach (WebGpuSkiaUnmetRequirement requirement in missing) messages.Add(requirement.Message);
+                failures.Add(backend + ": the adapter cannot satisfy the requirements (" + string.Join(" ", messages) + ")");
+                candidate.Dispose();
+                continue;
+            }
+
+            Limits requestedLimits = limits.GetValueOrDefault();
+            Device device;
+            fixed (FeatureName* list = features)
+            {
+                device = WgpuRequests.RequestDevice(instance, adapter, GCHandle.ToIntPtr(candidate.self), features.Length == 0 ? null : list, features.Length, limits.HasValue ? &requestedLimits : null, out string deviceMessage);
+                if (device.IsNull)
+                {
+                    failures.Add(backend + ": the adapter refused a device (" + Describe(deviceMessage) + ")");
+                    if (features.Length > 0 || limits.HasValue)
+                    {
+                        unmet.Add(new WebGpuSkiaUnmetRequirement(backend, adapterName, WebGpuSkiaRequirementKind.DeviceRequest, "DeviceRequest", 0, 0,
+                            "The " + backend + " adapter refused a device with the required features and limits: " + Describe(deviceMessage)));
+                    }
+                }
+            }
+
             if (device.IsNull)
             {
-                failures.Add(backend + ": the adapter refused a device (" + Describe(deviceMessage) + ")");
                 candidate.Dispose();
                 continue;
             }
@@ -157,7 +240,9 @@ public sealed unsafe class WebGpuSkiaDevice : IDisposable, IWebGpuDeviceSource
             return candidate;
         }
 
-        return new WebGpuSkiaDevice("No WebGPU device could be created: " + string.Join("; ", failures) + ".");
+        WebGpuSkiaDevice unavailable = new WebGpuSkiaDevice("No WebGPU device could be created: " + string.Join("; ", failures) + ".");
+        if (unmet.Count > 0) unavailable.UnmetRequirements = unmet.ToArray();
+        return unavailable;
     }
 
     /// <summary>
@@ -340,6 +425,16 @@ public sealed unsafe class WebGpuSkiaDevice : IDisposable, IWebGpuDeviceSource
     public bool SharesDeviceWith(GRRecordingContext context) =>
         context != null && grContext != null && IsAvailable && context.Handle == grContext.Handle;
 
+    /// <summary>True when the device was created with a standard feature (see <see cref="Features" />).</summary>
+    /// <param name="feature">The feature.</param>
+    /// <returns>True when enabled.</returns>
+    public bool HasFeature(FeatureName feature) => enabledFeatures.Contains((uint)feature);
+
+    /// <summary>True when the device was created with a native feature (see <see cref="NativeFeatures" />).</summary>
+    /// <param name="feature">The feature.</param>
+    /// <returns>True when enabled.</returns>
+    public bool HasFeature(NativeFeature feature) => enabledFeatures.Contains((uint)feature);
+
     /// <summary>
     /// Returns and clears the WebGPU validation errors reported through the device's uncaptured-error callback
     /// (owned route only; an adopted device has no callback).
@@ -374,6 +469,8 @@ public sealed unsafe class WebGpuSkiaDevice : IDisposable, IWebGpuDeviceSource
 
         bridge?.Dispose();
         bridge = null;
+        faultListener?.Dispose();
+        faultListener = null;
         if (!Queue.IsNull) Native.WebGpu.QueueRelease(Queue);
         if (!Device.IsNull) Native.WebGpu.DeviceRelease(Device);
         if (!Adapter.IsNull) Native.WebGpu.AdapterRelease(Adapter);
@@ -391,6 +488,14 @@ public sealed unsafe class WebGpuSkiaDevice : IDisposable, IWebGpuDeviceSource
     /// <summary>Queues a message from the uncaptured-error callback.</summary>
     /// <param name="message">The message.</param>
     internal void ReportUncapturedError(string message) => uncapturedErrors.Enqueue(message);
+
+    /// <summary>Records the device loss (the first report wins).</summary>
+    /// <param name="reason">The reason.</param>
+    /// <param name="message">The message, or null.</param>
+    internal void ReportDeviceLost(DeviceLostReason reason, string message)
+    {
+        if (lostReason == null) lostReason = reason + (string.IsNullOrEmpty(message) ? string.Empty : ": " + message);
+    }
 
     /// <summary>The backend bridge (null when unavailable).</summary>
     internal SkiaBridge Bridge => bridge;
@@ -413,6 +518,17 @@ public sealed unsafe class WebGpuSkiaDevice : IDisposable, IWebGpuDeviceSource
         Native.WebGpu.QueueSubmit(Queue, 1, &commands);
         Native.WebGpu.CommandBufferRelease(commands);
         if (!SharesQueueWithSkia) Native.WebGpu.DevicePoll(Device, 1, null);
+    }
+
+    /// <summary>Like <see cref="Submit" />, and returns the submission's index (for a bounded wait on exactly that work).</summary>
+    /// <param name="commands">The command buffer (released here).</param>
+    /// <returns>The submission index.</returns>
+    internal ulong SubmitForIndex(CommandBuffer commands)
+    {
+        ulong index = Native.WebGpu.QueueSubmitForIndex(Queue, 1, &commands);
+        Native.WebGpu.CommandBufferRelease(commands);
+        if (!SharesQueueWithSkia) Native.WebGpu.PollDevice(Device, true, TimeSpan.Zero, index);
+        return index;
     }
 
     /// <summary>The backend the native library compiles for this operating system.</summary>
@@ -464,17 +580,91 @@ public sealed unsafe class WebGpuSkiaDevice : IDisposable, IWebGpuDeviceSource
     {
         Device = device;
         Queue = Native.WebGpu.DeviceGetQueue(device);
-        AdapterInfo info = default;
-        if (!Adapter.IsNull && Native.WebGpu.AdapterGetInfo(Adapter, &info) == Status.Success)
+        if (!Adapter.IsNull) AdapterName = ReadAdapterName(Adapter);
+        ReadCapabilities();
+
+        // An adopted device keeps the native default fault handlers; a listener (called before them, never instead of
+        // them) records a device loss without touching the application's own handlers.
+        if (Route == WebGpuSkiaDeviceRoute.Adopted)
         {
-            AdapterName = WgpuString.ToManaged(info.Device);
-            string driver = WgpuString.ToManaged(info.Description);
-            if (!string.IsNullOrEmpty(driver)) AdapterName += " (" + driver + ")";
-            Native.WebGpu.AdapterInfoFreeMembers(info);
+            try
+            {
+                faultListener = WebGpuFaultListener.Attach(device);
+                faultListener.DeviceLost += ReportDeviceLost;
+            }
+            catch (WgpuException)
+            {
+                faultListener = null;
+            }
         }
 
         Reason = null;
         GrContextReason = null;
+    }
+
+    private void ReadCapabilities()
+    {
+        SupportedFeatures supported = default;
+        Native.WebGpu.DeviceGetFeatures(Device, &supported);
+        uint[] enabled = CopyFeatures(supported);
+        Native.WebGpu.SupportedFeaturesFreeMembers(supported);
+        enabledFeatures = new HashSet<uint>(enabled);
+        Features = SplitFeatures(enabled, out IReadOnlyList<NativeFeature> enabledNative);
+        NativeFeatures = enabledNative;
+        Limits deviceLimits = default;
+        if (Native.WebGpu.DeviceGetLimits(Device, &deviceLimits) == Status.Success)
+        {
+            deviceLimits.NextInChain = null;
+            Limits = deviceLimits;
+        }
+
+        if (Adapter.IsNull) return;
+        supported = default;
+        Native.WebGpu.AdapterGetFeatures(Adapter, &supported);
+        uint[] offered = CopyFeatures(supported);
+        Native.WebGpu.SupportedFeaturesFreeMembers(supported);
+        AdapterFeatures = SplitFeatures(offered, out IReadOnlyList<NativeFeature> offeredNative);
+        AdapterNativeFeatures = offeredNative;
+        Limits adapterLimits = default;
+        if (Native.WebGpu.AdapterGetLimits(Adapter, &adapterLimits) == Status.Success)
+        {
+            adapterLimits.NextInChain = null;
+            AdapterLimits = adapterLimits;
+        }
+    }
+
+    private static uint[] CopyFeatures(SupportedFeatures supported)
+    {
+        uint[] features = new uint[(int)supported.FeatureCount];
+        for (int index = 0; index < features.Length; index++) features[index] = (uint)supported.Features[index];
+        return features;
+    }
+
+    private static IReadOnlyList<FeatureName> SplitFeatures(uint[] features, out IReadOnlyList<NativeFeature> native)
+    {
+        List<FeatureName> standard = new List<FeatureName>();
+        List<NativeFeature> engine = new List<NativeFeature>();
+        foreach (uint feature in features)
+        {
+            if (feature >= NativeFeatureBase) engine.Add((NativeFeature)feature);
+            else standard.Add((FeatureName)feature);
+        }
+
+        standard.Sort();
+        engine.Sort();
+        native = engine.ToArray();
+        return standard.ToArray();
+    }
+
+    private static string ReadAdapterName(Adapter adapter)
+    {
+        AdapterInfo info = default;
+        if (Native.WebGpu.AdapterGetInfo(adapter, &info) != Status.Success) return null;
+        string name = WgpuString.ToManaged(info.Device);
+        string driver = WgpuString.ToManaged(info.Description);
+        if (!string.IsNullOrEmpty(driver)) name += " (" + driver + ")";
+        Native.WebGpu.AdapterInfoFreeMembers(info);
+        return name;
     }
 
     private CodebrixName* AllocateNames(IReadOnlyList<string> names)

@@ -21,23 +21,35 @@
 //   * wgpuCodebrixCommandEncoderTransitionTexture validates the texture's usage against `state`
 //     itself (WGPUStatus_Error, nothing recorded); wgpu-core resolves the rest when the encoder
 //     is finished, reporting through the device's error sink as every encoder call does.
+//   * Fault listeners: wgpu-native calls a device's device-lost callback only for an error whose
+//     chain holds a bare DeviceError::Lost; use of a destroyed device arrives as an uncaptured
+//     VALIDATION error instead. The listeners therefore see every uncaptured error, the (rare)
+//     device-lost callbacks wgpu-native makes, and one device-lost call when
+//     wgpuCodebrixDevicePoll first observes the device lost.
+//   * wgpuCodebrixDevicePoll never ends the process, but wgpu-core's own `assert!` inside
+//     Device::maintain (queue empty yet fence behind the waited index - "should never be hit")
+//     would still abort; nothing in this file can intercept it.
 //
 // Copyright (c) 2026 Jeremy Ellis and contributors. SPDX-License-Identifier: MIT
 // =================================================================================================
 
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
+use std::cell::Cell;
 use std::ffi::{c_char, c_void};
 #[cfg(codebrix_vulkan)]
 use std::ffi::CStr;
 #[cfg(any(codebrix_vulkan, codebrix_dx12))]
-use std::{collections::HashMap, sync::Mutex};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Mutex;
+use std::time::Duration;
 
 use wgpu_native::codebrix_bridge as bridge;
 use wgpu_native::native;
 
 /// The `api_version` constant of codebrix.yml.
-pub const WGPU_CODEBRIX_API_VERSION: u32 = 1;
+pub const WGPU_CODEBRIX_API_VERSION: u32 = 2;
 
 // --- enum codebrix_texture_state (enum_prefix 0x000C) ---------------------------------------------
 pub type WGPUCodebrixTextureState = u32;
@@ -50,6 +62,37 @@ pub const WGPUCodebrixTextureState_ColorTarget: WGPUCodebrixTextureState = 0x000
 pub const WGPUCodebrixTextureState_DepthStencilRead: WGPUCodebrixTextureState = 0x000C0006;
 pub const WGPUCodebrixTextureState_DepthStencilWrite: WGPUCodebrixTextureState = 0x000C0007;
 pub const WGPUCodebrixTextureState_Present: WGPUCodebrixTextureState = 0x000C0008;
+
+// --- enum codebrix_proc_status ---------------------------------------------------------------------
+pub type WGPUCodebrixProcStatus = u32;
+pub const WGPUCodebrixProcStatus_Unknown: WGPUCodebrixProcStatus = 0x000C0000;
+pub const WGPUCodebrixProcStatus_Implemented: WGPUCodebrixProcStatus = 0x000C0001;
+pub const WGPUCodebrixProcStatus_AbortsUnimplemented: WGPUCodebrixProcStatus = 0x000C0002;
+pub const WGPUCodebrixProcStatus_AbortsOnError: WGPUCodebrixProcStatus = 0x000C0003;
+pub const WGPUCodebrixProcStatus_Unsupported: WGPUCodebrixProcStatus = 0x000C0004;
+pub const WGPUCodebrixProcStatus_NotAvailableOnBackend: WGPUCodebrixProcStatus = 0x000C0005;
+
+// --- enum codebrix_poll_result ---------------------------------------------------------------------
+pub type WGPUCodebrixPollResult = u32;
+pub const WGPUCodebrixPollResult_QueueEmpty: WGPUCodebrixPollResult = 0x000C0000;
+pub const WGPUCodebrixPollResult_WaitSucceeded: WGPUCodebrixPollResult = 0x000C0001;
+pub const WGPUCodebrixPollResult_Poll: WGPUCodebrixPollResult = 0x000C0002;
+pub const WGPUCodebrixPollResult_Timeout: WGPUCodebrixPollResult = 0x000C0003;
+pub const WGPUCodebrixPollResult_DeviceLost: WGPUCodebrixPollResult = 0x000C0004;
+pub const WGPUCodebrixPollResult_InvalidSubmissionIndex: WGPUCodebrixPollResult = 0x000C0005;
+pub const WGPUCodebrixPollResult_Error: WGPUCodebrixPollResult = 0x000C0006;
+
+// --- enum codebrix_shader_model ----------------------------------------------------------------------
+pub type WGPUCodebrixShaderModel = u32;
+pub const WGPUCodebrixShaderModel_Sm2: WGPUCodebrixShaderModel = 0x000C0000;
+pub const WGPUCodebrixShaderModel_Sm4: WGPUCodebrixShaderModel = 0x000C0001;
+pub const WGPUCodebrixShaderModel_Sm5: WGPUCodebrixShaderModel = 0x000C0002;
+
+// --- bitflags codebrix_downlevel_flags / codebrix_texture_format_feature_flags ----------------------
+// Their bit values are wgpu-types' DownlevelFlags / TextureFormatFeatureFlags bits (codebrix.yml), so
+// they are passed through as `bits()`.
+pub type WGPUCodebrixDownlevelFlags = native::WGPUFlags;
+pub type WGPUCodebrixTextureFormatFeatureFlags = native::WGPUFlags;
 
 // --- structs (field order and types exactly as include/codebrix_wgpu.h) -------------------------
 #[repr(C)]
@@ -67,6 +110,7 @@ pub struct WGPUCodebrixBuildInfo {
     pub backends: native::WGPUStringView,
     pub targetTriple: native::WGPUStringView,
     pub profile: native::WGPUStringView,
+    pub patches: native::WGPUStringView,
 }
 
 #[repr(C)]
@@ -144,6 +188,37 @@ pub struct WGPUCodebrixMetalAdoptDescriptor {
     pub device: *mut c_void,
     pub requiredFeatureCount: usize,
     pub requiredFeatures: *const native::WGPUFeatureName,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct WGPUCodebrixDownlevelCapabilities {
+    pub flags: WGPUCodebrixDownlevelFlags,
+    pub shaderModel: WGPUCodebrixShaderModel,
+    pub webgpuCompliant: native::WGPUBool,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct WGPUCodebrixTextureFormatFeatures {
+    pub allowedUsages: native::WGPUTextureUsage,
+    pub flags: WGPUCodebrixTextureFormatFeatureFlags,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct WGPUCodebrixVulkanAdoptRequirements {
+    pub requiredDeviceExtensionCount: usize,
+    pub requiredDeviceExtensions: *const WGPUCodebrixName,
+    pub physicalDeviceFeatures2: *mut c_void,
+    pub physicalDeviceApiVersion: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct WGPUCodebrixFaultCallbacks {
+    pub uncapturedErrorCallbackInfo: native::WGPUUncapturedErrorCallbackInfo,
+    pub deviceLostCallbackInfo: native::WGPUDeviceLostCallbackInfo,
 }
 
 // --- helpers ---------------------------------------------------------------------------------------
@@ -259,6 +334,7 @@ pub unsafe extern "C" fn wgpuCodebrixGetBuildInfo(info: *mut WGPUCodebrixBuildIn
             backends: static_view(env!("CODEBRIX_WGPU_BACKENDS")),
             targetTriple: static_view(env!("CODEBRIX_WGPU_TARGET")),
             profile: static_view(env!("CODEBRIX_WGPU_PROFILE")),
+            patches: static_view(env!("CODEBRIX_WGPU_PATCHES")),
         };
     }
 }
@@ -366,7 +442,7 @@ pub unsafe extern "C" fn wgpuCodebrixDeviceGetVulkanInfo(
                 queue: dev.raw_queue().as_raw() as usize as *mut c_void,
                 queueFamilyIndex: dev.queue_family_index(),
                 queueIndex: dev.queue_index(),
-                instanceApiVersion: shared.instance_api_version(),
+                instanceApiVersion: instance_create_api_version(shared.raw_instance().handle().as_raw(), shared.instance_api_version()),
                 getInstanceProcAddr: shared.entry().static_fn().get_instance_proc_addr as usize as *mut c_void,
                 enabledInstanceExtensionCount: instance_exts.len(),
                 enabledInstanceExtensions: instance_exts.as_ptr(),
@@ -395,7 +471,7 @@ pub unsafe extern "C" fn wgpuCodebrixTextureGetVulkanInfo(
     {
         use ash::vk::Handle;
         let Some(t) = (unsafe { bridge::texture_parts(texture) }) else { return STATUS_ERROR };
-        let Some(format) = wgpu_native::conv::map_texture_format(t.format) else { return STATUS_ERROR };
+        let Some(format) = bridge::texture_format(t.format) else { return STATUS_ERROR };
         let Some(device_id) = t.device_id else { return STATUS_ERROR };
         let Some(dev) = (unsafe { t.context.device_as_hal::<hal::api::Vulkan>(device_id) }) else { return STATUS_ERROR };
         let Some(raw) = (unsafe { t.context.texture_as_hal::<hal::api::Vulkan>(t.id) }) else { return STATUS_ERROR };
@@ -509,6 +585,24 @@ pub unsafe extern "C" fn wgpuCodebrixInstanceAdoptVulkanDevice(
     }
 }
 
+/// The VkInstance handles of adopted devices' instances: for those, wgpu-hal's instance_api_version
+/// IS the application's VkApplicationInfo::apiVersion (from the adopt descriptor).
+#[cfg(codebrix_vulkan)]
+static ADOPTED_INSTANCES: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+
+/// The apiVersion the instance was created with. wgpu-hal 29.0.3 (vulkan/instance.rs, Instance::init)
+/// stores the LOADER's version (vkEnumerateInstanceVersion, 1.0 when that entry point is missing) as
+/// instance_api_version, but passes `if loader < 1.1 { 1.0 } else { 1.3 }` to vkCreateInstance - 1.3
+/// being its hard maximum. An adopted instance's value is already the application's own.
+#[cfg(codebrix_vulkan)]
+fn instance_create_api_version(instance: u64, hal_instance_api_version: u32) -> u32 {
+    use ash::vk;
+    if ADOPTED_INSTANCES.lock().unwrap_or_else(|e| e.into_inner()).contains(&instance) {
+        return hal_instance_api_version;
+    }
+    if hal_instance_api_version < vk::API_VERSION_1_1 { vk::API_VERSION_1_0 } else { vk::API_VERSION_1_3 }
+}
+
 /// Extension names as `&'static CStr` (what wgpu-hal stores). Each adopt call leaks its copies -
 /// a few hundred bytes per adopted device.
 #[cfg(codebrix_vulkan)]
@@ -530,13 +624,30 @@ unsafe fn adopt_vulkan(
     use ash::vk::{self, Handle};
     let ctx = unsafe { bridge::instance_context(instance) }.ok_or("null instance")?;
     let d = unsafe { descriptor.as_ref() }.ok_or("null descriptor")?;
-    if d.instance.is_null() || d.physicalDevice.is_null() || d.device.is_null() || d.getInstanceProcAddr.is_null() {
+    if d.device.is_null() {
         return Err("instance, physicalDevice, device and getInstanceProcAddr are required".into());
     }
     let required = unsafe { features_of(d.requiredFeatures, d.requiredFeatureCount) }
         .ok_or("requiredFeatures holds a feature this library does not know")?;
-    let instance_exts = unsafe { leak_names(slice_of(d.enabledInstanceExtensions, d.enabledInstanceExtensionCount))? };
     let device_exts = unsafe { leak_names(slice_of(d.enabledDeviceExtensions, d.enabledDeviceExtensionCount))? };
+    let hal_instance = unsafe { vulkan_hal_instance(d)? };
+    let raw_device =
+        unsafe { ash::Device::load(hal_instance.shared_instance().raw_instance().fp_v1_0(), vk::Device::from_raw(d.device as usize as u64)) };
+    let exposed = hal_instance
+        .expose_adapter(vk::PhysicalDevice::from_raw(d.physicalDevice as usize as u64))
+        .ok_or("wgpu-hal cannot use this physical device (wgpu's minimum Vulkan requirements are not met)")?;
+    adopt_vulkan_exposed(&ctx, d, required, device_exts, exposed, raw_device)
+}
+
+/// A wgpu-hal Vulkan instance over an application's VkInstance (the adopt descriptor's instance
+/// fields). The application keeps ownership: the instance is never destroyed by wgpu.
+#[cfg(codebrix_vulkan)]
+unsafe fn vulkan_hal_instance(d: &WGPUCodebrixVulkanAdoptDescriptor) -> Result<hal::vulkan::Instance, String> {
+    use ash::vk::{self, Handle};
+    if d.instance.is_null() || d.physicalDevice.is_null() || d.getInstanceProcAddr.is_null() {
+        return Err("instance, physicalDevice, device and getInstanceProcAddr are required".into());
+    }
+    let instance_exts = unsafe { leak_names(slice_of(d.enabledInstanceExtensions, d.enabledInstanceExtensionCount))? };
 
     // Entry + instance over the application's vkGetInstanceProcAddr: wgpu never loads the Vulkan
     // loader itself for an adopted device.
@@ -547,8 +658,7 @@ unsafe fn adopt_vulkan(
     };
     let entry = unsafe { ash::Entry::from_static_fn(static_fn) };
     let raw_instance = unsafe { ash::Instance::load(entry.static_fn(), vk::Instance::from_raw(d.instance as usize as u64)) };
-    let raw_device = unsafe { ash::Device::load(raw_instance.fp_v1_0(), vk::Device::from_raw(d.device as usize as u64)) };
-    let hal_instance = unsafe {
+    unsafe {
         hal::vulkan::Instance::from_raw(
             entry,
             raw_instance,
@@ -563,10 +673,18 @@ unsafe fn adopt_vulkan(
             Some(Box::new(|| {})),
         )
     }
-    .map_err(|e| format!("wgpu-hal refused the instance: {e}"))?;
-    let exposed = hal_instance
-        .expose_adapter(vk::PhysicalDevice::from_raw(d.physicalDevice as usize as u64))
-        .ok_or("wgpu-hal cannot use this physical device (wgpu's minimum Vulkan requirements are not met)")?;
+    .map_err(|e| format!("wgpu-hal refused the instance: {e}"))
+}
+
+#[cfg(codebrix_vulkan)]
+unsafe fn adopt_vulkan_exposed(
+    ctx: &std::sync::Arc<wgpu_native::Context>,
+    d: &WGPUCodebrixVulkanAdoptDescriptor,
+    required: wgt::Features,
+    device_exts: Vec<&'static CStr>,
+    exposed: hal::ExposedAdapter<hal::api::Vulkan>,
+    raw_device: ash::Device,
+) -> Result<(native::WGPUAdapter, native::WGPUDevice), String> {
     if !exposed.features.contains(required) {
         return Err(format!("the adapter lacks required features {:?}", required - exposed.features));
     }
@@ -605,7 +723,14 @@ unsafe fn adopt_vulkan(
         ..Default::default()
     };
     match unsafe { ctx.create_device_from_hal(adapter_id, open.into(), &device_desc, None, None) } {
-        Ok((device_id, queue_id)) => Ok((bridge::new_adapter(&ctx, adapter_id), bridge::new_device(&ctx, device_id, queue_id))),
+        Ok((device_id, queue_id)) => {
+            let mut adopted = ADOPTED_INSTANCES.lock().unwrap_or_else(|e| e.into_inner());
+            let raw = d.instance as usize as u64;
+            if !adopted.contains(&raw) {
+                adopted.push(raw);
+            }
+            Ok((bridge::new_adapter(ctx, adapter_id), bridge::new_device(ctx, device_id, queue_id)))
+        }
         Err(e) => {
             ctx.adapter_drop(adapter_id);
             Err(format!("wgpu-core refused the device: {e}"))
@@ -943,4 +1068,455 @@ pub unsafe extern "C" fn wgpuCodebrixCommandEncoderTransitionTexture(
             STATUS_ERROR
         }
     }
+}
+
+// --- capability manifest ------------------------------------------------------------------------------
+
+#[no_mangle]
+pub extern "C" fn wgpuCodebrixGetProcStatus(ordinal: u32) -> WGPUCodebrixProcStatus {
+    let Some(&(status, backend)) = crate::proc_status::PROC_STATUS.get(ordinal as usize) else {
+        return WGPUCodebrixProcStatus_Unknown;
+    };
+    // proc_status.rs backend codes: 0 none, 1 Vulkan, 2 Direct3D 12, 3 Metal.
+    let available = match backend {
+        0 => true,
+        1 => cfg!(codebrix_vulkan),
+        2 => cfg!(codebrix_dx12),
+        3 => cfg!(codebrix_metal),
+        _ => false,
+    };
+    if available { status } else { WGPUCodebrixProcStatus_NotAvailableOnBackend }
+}
+
+// --- capability queries ---------------------------------------------------------------------------------
+
+#[no_mangle]
+pub unsafe extern "C" fn wgpuCodebrixAdapterGetDownlevelCapabilities(
+    adapter: native::WGPUAdapter,
+    capabilities: *mut WGPUCodebrixDownlevelCapabilities,
+) -> native::WGPUStatus {
+    if capabilities.is_null() {
+        return STATUS_ERROR;
+    }
+    let Some((ctx, adapter_id)) = (unsafe { bridge::adapter_parts(adapter) }) else { return STATUS_ERROR };
+    let caps = ctx.adapter_downlevel_capabilities(adapter_id);
+    unsafe {
+        *capabilities = WGPUCodebrixDownlevelCapabilities {
+            flags: caps.flags.bits() as u64,
+            shaderModel: match caps.shader_model {
+                wgt::ShaderModel::Sm2 => WGPUCodebrixShaderModel_Sm2,
+                wgt::ShaderModel::Sm4 => WGPUCodebrixShaderModel_Sm4,
+                wgt::ShaderModel::Sm5 => WGPUCodebrixShaderModel_Sm5,
+            },
+            webgpuCompliant: caps.is_webgpu_compliant() as native::WGPUBool,
+        };
+    }
+    STATUS_OK
+}
+
+/// WebGPU usage bits of wgpu's texture usages (wgpu-native's conv::to_native_texture_usage_flags maps
+/// COPY_DST to CopySrc and drops STORAGE_BINDING, so it is not used here). STORAGE_ATOMIC has no
+/// WebGPU usage bit; it is reported through the format feature flags.
+fn webgpu_texture_usage_of(usages: wgt::TextureUsages) -> native::WGPUTextureUsage {
+    let mut out = native::WGPUTextureUsage_None;
+    for (wgt_bit, native_bit) in [
+        (wgt::TextureUsages::COPY_SRC, native::WGPUTextureUsage_CopySrc),
+        (wgt::TextureUsages::COPY_DST, native::WGPUTextureUsage_CopyDst),
+        (wgt::TextureUsages::TEXTURE_BINDING, native::WGPUTextureUsage_TextureBinding),
+        (wgt::TextureUsages::STORAGE_BINDING, native::WGPUTextureUsage_StorageBinding),
+        (wgt::TextureUsages::RENDER_ATTACHMENT, native::WGPUTextureUsage_RenderAttachment),
+        (wgt::TextureUsages::TRANSIENT, native::WGPUTextureUsage_TransientAttachment),
+    ] {
+        if usages.contains(wgt_bit) {
+            out |= native_bit;
+        }
+    }
+    out
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wgpuCodebrixAdapterGetTextureFormatFeatures(
+    adapter: native::WGPUAdapter,
+    format: native::WGPUTextureFormat,
+    features: *mut WGPUCodebrixTextureFormatFeatures,
+) -> native::WGPUStatus {
+    if features.is_null() {
+        return STATUS_ERROR;
+    }
+    let Some((ctx, adapter_id)) = (unsafe { bridge::adapter_parts(adapter) }) else { return STATUS_ERROR };
+    let Some(format) = bridge::texture_format(format) else { return STATUS_ERROR };
+    let found = ctx.adapter_get_texture_format_features(adapter_id, format);
+    unsafe {
+        *features = WGPUCodebrixTextureFormatFeatures {
+            allowedUsages: webgpu_texture_usage_of(found.allowed_usages),
+            flags: found.flags.bits() as u64,
+        };
+    }
+    STATUS_OK
+}
+
+// --- bounded, non-aborting poll ---------------------------------------------------------------------
+
+#[no_mangle]
+pub unsafe extern "C" fn wgpuCodebrixDevicePoll(
+    device: native::WGPUDevice,
+    wait: native::WGPUBool,
+    timeoutNs: u64,
+    submissionIndex: *const u64,
+    result: *mut WGPUCodebrixPollResult,
+) -> native::WGPUStatus {
+    let outcome = unsafe { device_poll(device, wait != 0, timeoutNs, submissionIndex.as_ref().copied()) };
+    if !result.is_null() {
+        unsafe { *result = outcome };
+    }
+    if outcome == WGPUCodebrixPollResult_DeviceLost {
+        unsafe { fault_listeners_poll_lost(device) };
+    }
+    match outcome {
+        WGPUCodebrixPollResult_QueueEmpty | WGPUCodebrixPollResult_WaitSucceeded | WGPUCodebrixPollResult_Poll => STATUS_OK,
+        _ => STATUS_ERROR,
+    }
+}
+
+/// wgpu-core device_poll with every result and error mapped (nothing here may call
+/// handle_error_fatal or panic).
+unsafe fn device_poll(device: native::WGPUDevice, wait: bool, timeout_ns: u64, index: Option<u64>) -> WGPUCodebrixPollResult {
+    const FN: &str = "wgpuCodebrixDevicePoll";
+    let Some((ctx, device_id, _)) = (unsafe { bridge::device_parts(device) }) else {
+        log::error!("{FN}: null device");
+        return WGPUCodebrixPollResult_Error;
+    };
+    let poll_type = if wait {
+        wgt::PollType::Wait {
+            submission_index: index,
+            timeout: if timeout_ns == 0 { None } else { Some(Duration::from_nanos(timeout_ns)) },
+        }
+    } else {
+        wgt::PollType::Poll
+    };
+    match ctx.device_poll(device_id, poll_type) {
+        Ok(wgt::PollStatus::QueueEmpty) => WGPUCodebrixPollResult_QueueEmpty,
+        Ok(wgt::PollStatus::WaitSucceeded) => WGPUCodebrixPollResult_WaitSucceeded,
+        Ok(wgt::PollStatus::Poll) => WGPUCodebrixPollResult_Poll,
+        Err(wgc::device::WaitIdleError::Timeout) => WGPUCodebrixPollResult_Timeout,
+        Err(wgc::device::WaitIdleError::WrongSubmissionIndex(requested, last)) => {
+            log::warn!("{FN}: submission index {requested} was not returned by this device (last successful submission: {last})");
+            WGPUCodebrixPollResult_InvalidSubmissionIndex
+        }
+        Err(wgc::device::WaitIdleError::Device(wgc::device::DeviceError::Lost)) => {
+            log::error!("{FN}: the device is lost");
+            WGPUCodebrixPollResult_DeviceLost
+        }
+        Err(other) => {
+            log::error!("{FN}: {other}");
+            WGPUCodebrixPollResult_Error
+        }
+    }
+}
+
+// --- Vulkan adopt requirements ------------------------------------------------------------------------
+
+/// The feature chain handed out by wgpuCodebrixVulkanGetAdoptRequirements: `features2` first (its
+/// address IS the struct's), its pNext chain pointing into `phd`, which owns every structure. Boxed, so
+/// nothing moves until wgpuCodebrixVulkanAdoptRequirementsFreeMembers.
+#[cfg(codebrix_vulkan)]
+#[repr(C)]
+struct AdoptFeatureChain {
+    features2: ash::vk::PhysicalDeviceFeatures2<'static>,
+    phd: hal::vulkan::PhysicalDeviceFeatures,
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wgpuCodebrixVulkanGetAdoptRequirements(
+    descriptor: *const WGPUCodebrixVulkanAdoptDescriptor,
+    requirements: *mut WGPUCodebrixVulkanAdoptRequirements,
+) -> native::WGPUStatus {
+    if requirements.is_null() {
+        return STATUS_ERROR;
+    }
+    unsafe {
+        *requirements = WGPUCodebrixVulkanAdoptRequirements {
+            requiredDeviceExtensionCount: 0,
+            requiredDeviceExtensions: std::ptr::null(),
+            physicalDeviceFeatures2: std::ptr::null_mut(),
+            physicalDeviceApiVersion: 0,
+        };
+    }
+    #[cfg(codebrix_vulkan)]
+    {
+        match unsafe { vulkan_adopt_requirements(descriptor) } {
+            Ok(found) => {
+                unsafe { *requirements = found };
+                return STATUS_OK;
+            }
+            Err(message) => {
+                log::error!("wgpuCodebrixVulkanGetAdoptRequirements: {message}");
+                return STATUS_ERROR;
+            }
+        }
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = descriptor;
+        log::error!("wgpuCodebrixVulkanGetAdoptRequirements: this library has no Vulkan backend");
+        STATUS_ERROR
+    }
+}
+
+#[cfg(codebrix_vulkan)]
+unsafe fn vulkan_adopt_requirements(
+    descriptor: *const WGPUCodebrixVulkanAdoptDescriptor,
+) -> Result<WGPUCodebrixVulkanAdoptRequirements, String> {
+    use ash::vk::{self, Handle};
+    let d = unsafe { descriptor.as_ref() }.ok_or("null descriptor")?;
+    let required = unsafe { features_of(d.requiredFeatures, d.requiredFeatureCount) }
+        .ok_or("requiredFeatures holds a feature this library does not know")?;
+    let hal_instance = unsafe { vulkan_hal_instance(d)? };
+    let phd = vk::PhysicalDevice::from_raw(d.physicalDevice as usize as u64);
+    let exposed = hal_instance
+        .expose_adapter(phd)
+        .ok_or("wgpu-hal cannot use this physical device (wgpu's minimum Vulkan requirements are not met)")?;
+    if !exposed.features.contains(required) {
+        return Err(format!("the adapter lacks required features {:?}", required - exposed.features));
+    }
+    // Exactly what wgpu-hal's Adapter::open_with_callback computes before vkCreateDevice.
+    let extensions = exposed.adapter.required_device_extensions(required);
+    let phd_features = exposed.adapter.physical_device_features(&extensions, required);
+    let mut chain = Box::new(AdoptFeatureChain { features2: vk::PhysicalDeviceFeatures2::default(), phd: phd_features });
+    let next = {
+        let info = chain.phd.add_to_device_create(vk::DeviceCreateInfo::default());
+        info.p_next
+    };
+    chain.features2.features = chain.phd.get_core();
+    chain.features2.p_next = next as *mut c_void;
+    let api_version = unsafe { hal_instance.shared_instance().raw_instance().get_physical_device_properties(phd) }.api_version;
+    let names = name_list(&extensions);
+    Ok(WGPUCodebrixVulkanAdoptRequirements {
+        requiredDeviceExtensionCount: names.len(),
+        requiredDeviceExtensions: names.as_ptr(),
+        physicalDeviceFeatures2: Box::into_raw(chain) as *mut c_void,
+        physicalDeviceApiVersion: api_version,
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wgpuCodebrixVulkanAdoptRequirementsFreeMembers(
+    codebrixVulkanAdoptRequirements: WGPUCodebrixVulkanAdoptRequirements,
+) {
+    #[cfg(codebrix_vulkan)]
+    if !codebrixVulkanAdoptRequirements.physicalDeviceFeatures2.is_null() {
+        drop(unsafe { Box::from_raw(codebrixVulkanAdoptRequirements.physicalDeviceFeatures2 as *mut AdoptFeatureChain) });
+    }
+    let _ = codebrixVulkanAdoptRequirements;
+}
+
+// --- fault listeners -----------------------------------------------------------------------------------
+//
+// One FaultHub per hooked error sink (bridge::device_fault_hook swaps the sink's two callbacks for the
+// trampolines below, once). A trampoline calls the host's original callback, then every listener -
+// except for wgpu's DEFAULT handlers, which end the process: listeners run before those. Hubs are
+// leaked Boxes registered in HUBS with a weak reference to their sink and freed on a later add/remove
+// once the sink is gone (then no trampoline can run on them any more).
+
+struct Listener {
+    id: u64,
+    callbacks: WGPUCodebrixFaultCallbacks,
+}
+
+// SAFETY: C callbacks + userdata the application registered for "any thread" use (webgpu.h semantics).
+unsafe impl Send for Listener {}
+
+struct FaultHub {
+    host: bridge::HostFaultHandlers,
+    listeners: Mutex<Vec<Listener>>,
+    lost_reported: AtomicBool,
+}
+
+static HUBS: Mutex<Vec<(bridge::SinkRef, usize)>> = Mutex::new(Vec::new());
+static NEXT_LISTENER_ID: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    /// True while this thread runs a fault callback (host or listener): add/remove refuse then,
+    /// instead of deadlocking on the sink or listener lock.
+    static IN_FAULT_DISPATCH: Cell<bool> = const { Cell::new(false) };
+}
+
+struct DispatchGuard(bool);
+
+impl DispatchGuard {
+    fn enter() -> DispatchGuard {
+        DispatchGuard(IN_FAULT_DISPATCH.with(|f| f.replace(true)))
+    }
+}
+
+impl Drop for DispatchGuard {
+    fn drop(&mut self) {
+        let previous = self.0;
+        IN_FAULT_DISPATCH.with(|f| f.set(previous));
+    }
+}
+
+fn in_fault_dispatch() -> bool {
+    IN_FAULT_DISPATCH.with(|f| f.get())
+}
+
+impl FaultHub {
+    fn listeners(&self) -> std::sync::MutexGuard<'_, Vec<Listener>> {
+        self.listeners.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    unsafe fn fan_out_uncaptured(&self, device: *const native::WGPUDevice, typ: native::WGPUErrorType, message: native::WGPUStringView) {
+        for l in self.listeners().iter() {
+            let info = &l.callbacks.uncapturedErrorCallbackInfo;
+            if let Some(cb) = info.callback {
+                unsafe { cb(device, typ, message, info.userdata1, info.userdata2) };
+            }
+        }
+    }
+
+    unsafe fn fan_out_lost(&self, device: *const native::WGPUDevice, reason: native::WGPUDeviceLostReason, message: native::WGPUStringView) {
+        for l in self.listeners().iter() {
+            let info = &l.callbacks.deviceLostCallbackInfo;
+            if let Some(cb) = info.callback {
+                unsafe { cb(device, reason, message, info.userdata1, info.userdata2) };
+            }
+        }
+    }
+}
+
+unsafe extern "C" fn fault_uncaptured_trampoline(
+    device: *const native::WGPUDevice,
+    typ: native::WGPUErrorType,
+    message: native::WGPUStringView,
+    userdata1: *mut c_void,
+    _userdata2: *mut c_void,
+) {
+    let hub = unsafe { &*(userdata1 as *const FaultHub) };
+    let _guard = DispatchGuard::enter();
+    let [u1, u2] = hub.host.uncaptured_userdata;
+    if hub.host.uncaptured_is_default {
+        unsafe { hub.fan_out_uncaptured(device, typ, message) };
+        if let Some(cb) = hub.host.uncaptured {
+            unsafe { cb(device, typ, message, u1, u2) };
+        }
+    } else {
+        if let Some(cb) = hub.host.uncaptured {
+            unsafe { cb(device, typ, message, u1, u2) };
+        }
+        unsafe { hub.fan_out_uncaptured(device, typ, message) };
+    }
+}
+
+unsafe extern "C" fn fault_lost_trampoline(
+    device: *const native::WGPUDevice,
+    reason: native::WGPUDeviceLostReason,
+    message: native::WGPUStringView,
+    userdata1: *mut c_void,
+    _userdata2: *mut c_void,
+) {
+    let hub = unsafe { &*(userdata1 as *const FaultHub) };
+    let _guard = DispatchGuard::enter();
+    hub.lost_reported.store(true, Ordering::SeqCst);
+    let [u1, u2] = hub.host.lost_userdata;
+    if hub.host.lost_is_default {
+        unsafe { hub.fan_out_lost(device, reason, message) };
+        if let Some(cb) = hub.host.lost {
+            unsafe { cb(device, reason, message, u1, u2) };
+        }
+    } else {
+        if let Some(cb) = hub.host.lost {
+            unsafe { cb(device, reason, message, u1, u2) };
+        }
+        unsafe { hub.fan_out_lost(device, reason, message) };
+    }
+}
+
+/// Frees the hubs whose error sink is gone. Called with HUBS locked.
+fn prune_hubs(hubs: &mut Vec<(bridge::SinkRef, usize)>) {
+    hubs.retain(|(sink, hub)| {
+        if sink.is_alive() {
+            return true;
+        }
+        drop(unsafe { Box::from_raw(*hub as *mut FaultHub) });
+        false
+    });
+}
+
+/// The hub of a hooked device, or None (not hooked, or a null device).
+unsafe fn existing_hub<'a>(device: native::WGPUDevice) -> Option<&'a FaultHub> {
+    match unsafe { bridge::device_fault_hook(device, Some(fault_uncaptured_trampoline), Some(fault_lost_trampoline), None) } {
+        Some(bridge::FaultHook::Existing(hub)) => Some(unsafe { &*(hub as *const FaultHub) }),
+        _ => None,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wgpuCodebrixDeviceAddFaultListener(
+    device: native::WGPUDevice,
+    callbacks: *const WGPUCodebrixFaultCallbacks,
+) -> u64 {
+    const FN: &str = "wgpuCodebrixDeviceAddFaultListener";
+    let Some(callbacks) = (unsafe { callbacks.as_ref() }) else { return 0 };
+    if callbacks.uncapturedErrorCallbackInfo.callback.is_none() && callbacks.deviceLostCallbackInfo.callback.is_none() {
+        log::error!("{FN}: both callbacks are NULL");
+        return 0;
+    }
+    if in_fault_dispatch() {
+        log::error!("{FN}: called from inside a fault callback");
+        return 0;
+    }
+    let mut hubs = HUBS.lock().unwrap_or_else(|e| e.into_inner());
+    prune_hubs(&mut hubs);
+    let mut make = |host: bridge::HostFaultHandlers| -> *mut c_void {
+        Box::into_raw(Box::new(FaultHub { host, listeners: Mutex::new(Vec::new()), lost_reported: AtomicBool::new(false) })) as *mut c_void
+    };
+    let hub = match unsafe {
+        bridge::device_fault_hook(device, Some(fault_uncaptured_trampoline), Some(fault_lost_trampoline), Some(&mut make))
+    } {
+        Some(bridge::FaultHook::Existing(hub)) => hub,
+        Some(bridge::FaultHook::Installed(sink, hub)) => {
+            hubs.push((sink, hub as usize));
+            hub
+        }
+        Some(bridge::FaultHook::NotHooked) | None => return 0,
+    };
+    drop(hubs);
+    let hub = unsafe { &*(hub as *const FaultHub) };
+    let id = NEXT_LISTENER_ID.fetch_add(1, Ordering::Relaxed);
+    hub.listeners().push(Listener { id, callbacks: *callbacks });
+    id
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wgpuCodebrixDeviceRemoveFaultListener(device: native::WGPUDevice, listenerId: u64) -> native::WGPUStatus {
+    if in_fault_dispatch() {
+        log::error!("wgpuCodebrixDeviceRemoveFaultListener: called from inside a fault callback");
+        return STATUS_ERROR;
+    }
+    let removed = match unsafe { existing_hub(device) } {
+        Some(hub) => {
+            let mut listeners = hub.listeners();
+            let before = listeners.len();
+            listeners.retain(|l| l.id != listenerId);
+            listeners.len() != before
+        }
+        None => false,
+    };
+    prune_hubs(&mut HUBS.lock().unwrap_or_else(|e| e.into_inner()));
+    if removed { STATUS_OK } else { STATUS_ERROR }
+}
+
+/// wgpuCodebrixDevicePoll observed the device lost: tell the listeners once (never the host's own
+/// callback - wgpu's default one would end the process, which this poll promises never to do).
+unsafe fn fault_listeners_poll_lost(device: native::WGPUDevice) {
+    if in_fault_dispatch() {
+        return;
+    }
+    let Some(hub) = (unsafe { existing_hub(device) }) else { return };
+    if hub.lost_reported.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let _guard = DispatchGuard::enter();
+    let message = "the device is lost (observed by wgpuCodebrixDevicePoll)";
+    unsafe { hub.fan_out_lost(&device, native::WGPUDeviceLostReason_Unknown, static_view(message)) };
 }

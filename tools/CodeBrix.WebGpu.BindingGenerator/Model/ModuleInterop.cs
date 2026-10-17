@@ -64,6 +64,32 @@ public sealed class ProcEntry
 
     /// <summary>The C signature the hash covers: <c>return name(type, type)</c>.</summary>
     public string Signature { get; set; }
+
+    /// <summary>The static status from the notes.</summary>
+    public ProcStatus Status { get; set; }
+
+    /// <summary>The backend the function needs (from its name), or <see cref="ProcBackend.None" />.</summary>
+    public ProcBackend Backend { get; set; }
+}
+
+/// <summary>
+/// The backend a function needs to do anything: a symbol containing <c>Vulkan</c>, <c>D3d12</c> or <c>Metal</c>
+/// works only in a library built with that backend (elsewhere it returns <c>WGPUStatus_Error</c> / NULL).
+/// The values are the ones the native's generated status table uses.
+/// </summary>
+public enum ProcBackend
+{
+    /// <summary>No particular backend.</summary>
+    None = 0,
+
+    /// <summary>Vulkan.</summary>
+    Vulkan = 1,
+
+    /// <summary>Direct3D 12.</summary>
+    D3d12 = 2,
+
+    /// <summary>Metal.</summary>
+    Metal = 3,
 }
 
 /// <summary>
@@ -97,7 +123,15 @@ public sealed class ModuleInterop
             member = char.ToLowerInvariant(member[0]) + member.Substring(1);
             string returns = function.Return?.C ?? "void";
             string signature = returns + " " + function.CName + "(" + string.Join(", ", function.Parameters.Select(p => p.Type.C)) + ")";
-            Procs.Add(new ProcEntry { Function = function, MemberName = member, Note = notes.For(function.CName), Signature = signature });
+            Procs.Add(new ProcEntry
+            {
+                Function = function,
+                MemberName = member,
+                Note = notes.For(function.CName),
+                Signature = signature,
+                Status = notes.StatusFor(function.CName),
+                Backend = BackendOf(function.CName),
+            });
         }
 
         SignatureHash = Fnv1a64(string.Join("\n", Procs.Select(p => p.Signature)) + "\n");
@@ -177,6 +211,17 @@ public sealed class ModuleInterop
 
     /// <summary>The signature hash as a hex literal body (16 digits).</summary>
     public string SignatureHashHex => SignatureHash.ToString("X16", CultureInfo.InvariantCulture);
+
+    /// <summary>The backend a C symbol needs, by name.</summary>
+    /// <param name="symbol">The C symbol.</param>
+    /// <returns>The backend.</returns>
+    public static ProcBackend BackendOf(string symbol)
+    {
+        if (symbol.Contains("Vulkan", StringComparison.Ordinal)) return ProcBackend.Vulkan;
+        if (symbol.Contains("D3d12", StringComparison.Ordinal)) return ProcBackend.D3d12;
+        if (symbol.Contains("Metal", StringComparison.Ordinal)) return ProcBackend.Metal;
+        return ProcBackend.None;
+    }
 
     /// <summary>FNV-1a 64 over the UTF-8 bytes of a text.</summary>
     /// <param name="text">The text.</param>

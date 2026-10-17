@@ -26,6 +26,15 @@ public sealed class ModuleRenderer
     /// <summary>The generated Rust file.</summary>
     public const string RustPath = IncludeFolder + "/codebrix_wgpu_procs.rs";
 
+    /// <summary>The generated status table compiled into the native library (behind wgpuCodebrixGetProcStatus).</summary>
+    public const string NativeStatusPath = "wgpu-native-tools/codebrix-wgpu/src/proc_status.rs";
+
+    /// <summary>The C name of the static status table initializer (C header) / constant (Rust).</summary>
+    public const string StatusTableConstant = "WGPU_CODEBRIX_PROC_STATUS_TABLE";
+
+    /// <summary>The C name of the required-backend table initializer (C header) / constant (Rust).</summary>
+    public const string BackendTableConstant = "WGPU_CODEBRIX_PROC_BACKEND_TABLE";
+
     private static readonly HashSet<string> RustKeywords = new HashSet<string>(StringComparer.Ordinal)
     {
         "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in",
@@ -55,6 +64,57 @@ public sealed class ModuleRenderer
         yield return new KeyValuePair<string, string>(CSharpPath, OutputNormalizer.Normalize(CSharp()));
         yield return new KeyValuePair<string, string>(CHeaderPath, OutputNormalizer.Normalize(CHeader()));
         yield return new KeyValuePair<string, string>(RustPath, OutputNormalizer.Normalize(Rust()));
+        yield return new KeyValuePair<string, string>(NativeStatusPath, OutputNormalizer.Normalize(NativeStatus()));
+    }
+
+    /// <summary>The C enum constant of a status.</summary>
+    /// <param name="status">The status.</param>
+    /// <returns>For example <c>WGPUCodebrixProcStatus_AbortsOnError</c>.</returns>
+    public static string StatusCName(ProcStatus status) => "WGPUCodebrixProcStatus_" + status;
+
+    /// <summary>The <c>WGPUBackendType</c> constant (C) of a required backend.</summary>
+    /// <param name="backend">The backend.</param>
+    /// <returns>The C constant name.</returns>
+    public static string BackendCName(ProcBackend backend) => "WGPUBackendType_" + BackendCsName(backend);
+
+    /// <summary>The <c>BackendType</c> member (C#) of a required backend.</summary>
+    /// <param name="backend">The backend.</param>
+    /// <returns>The member name.</returns>
+    public static string BackendCsName(ProcBackend backend) => backend switch
+    {
+        ProcBackend.Vulkan => "Vulkan",
+        ProcBackend.D3d12 => "D3D12",
+        ProcBackend.Metal => "Metal",
+        _ => "Undefined",
+    };
+
+    private uint StatusValue(ProcStatus status)
+    {
+        ApiEnum value = model.Enums.Single(e => e.CName == "WGPUCodebrixProcStatus");
+        return value.Values.Single(v => v.CName == StatusCName(status)).Value;
+    }
+
+    // ------------------------------------------------------------------------------------------------ native table
+
+    private string NativeStatus()
+    {
+        StringBuilder b = new StringBuilder();
+        b.Append(banner("//")).Append("\n//\n");
+        b.Append("// The static half of wgpuCodebrixGetProcStatus: one (WGPUCodebrixProcStatus, required backend) pair per\n");
+        b.Append("// function-table ordinal (WGPUCodebrixProcTable order = the C symbols in ordinal order), from\n");
+        b.Append("// specs/proc-table-notes.txt. Backend: 0 none, 1 Vulkan, 2 Direct3D 12, 3 Metal (by symbol name); src/codebrix.rs\n");
+        b.Append("// turns a backend this build lacks into WGPUCodebrixProcStatus_NotAvailableOnBackend.\n\n");
+        b.Append("// It belongs to the function table with WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH 0x").Append(interop.SignatureHashHex).Append(".\n\n");
+        b.Append("/// (status, required backend) per function-table ordinal.\n");
+        b.Append("pub static PROC_STATUS: [(u32, u8); ").Append(interop.Procs.Count.ToString(CultureInfo.InvariantCulture)).Append("] = [\n");
+        foreach (ProcEntry entry in interop.Procs)
+        {
+            b.Append("    (0x").Append(StatusValue(entry.Status).ToString("X8", CultureInfo.InvariantCulture)).Append(", ")
+                .Append(((int)entry.Backend).ToString(CultureInfo.InvariantCulture)).Append("), // ").Append(entry.Function.CName).Append('\n');
+        }
+
+        b.Append("];\n");
+        return b.ToString();
     }
 
     // ------------------------------------------------------------------------------------------------ C#
@@ -84,6 +144,20 @@ public sealed class ModuleRenderer
         b.Append("    };\n\n");
         b.Append("    /// <summary>The C symbol of every entry, in table order.</summary>\n");
         b.Append("    public static IReadOnlyList<string> Symbols => SymbolTable;\n\n");
+        b.Append("    private static readonly CodebrixProcStatus[] StatusTable =\n    {\n");
+        foreach (ProcEntry entry in interop.Procs) b.Append("        CodebrixProcStatus.").Append(entry.Status).Append(",\n");
+        b.Append("    };\n\n");
+        b.Append("    private static readonly BackendType[] BackendTable =\n    {\n");
+        foreach (ProcEntry entry in interop.Procs) b.Append("        BackendType.").Append(BackendCsName(entry.Backend)).Append(",\n");
+        b.Append("    };\n\n");
+        b.Append("    /// <summary>\n");
+        b.Append("    /// The static status of every entry, in table order, from the notes this binding was generated with (never\n");
+        b.Append("    /// <see cref=\"CodebrixProcStatus.NotAvailableOnBackend\" />: ask the loaded library with\n");
+        b.Append("    /// <see cref=\"WebGpu.CodebrixGetProcStatus\" /> for the answer that includes its backends).\n");
+        b.Append("    /// </summary>\n");
+        b.Append("    public static IReadOnlyList<CodebrixProcStatus> Statuses => StatusTable;\n\n");
+        b.Append("    /// <summary>The backend every entry needs (<see cref=\"BackendType.Undefined\" /> for none), in table order.</summary>\n");
+        b.Append("    public static IReadOnlyList<BackendType> RequiredBackends => BackendTable;\n\n");
         foreach (ModuleField field in interop.ProcTableHeader)
         {
             b.Append("    /// <summary>").Append(DocWriter.Escape(field.Doc)).Append("</summary>\n");
@@ -224,7 +298,18 @@ public sealed class ModuleRenderer
             AppendCAsserts(b, value.CName, layout, value.Fields.Select(f => f.CName).ToList(), offsets);
         }
 
-        b.Append("#endif\n\n#endif  /* CODEBRIX_WGPU_PROCS_H_ */\n");
+        b.Append("#endif\n\n");
+        b.Append("/**\n * Initializers of the static status and required-backend tables, one element per function-table entry, in\n");
+        b.Append(" * table order (from the notes; the library's wgpuCodebrixGetProcStatus also reports\n");
+        b.Append(" * WGPUCodebrixProcStatus_NotAvailableOnBackend for a backend it was built without). Use as\n");
+        b.Append(" *     static const WGPUCodebrixProcStatus statuses[] = ").Append(StatusTableConstant).Append(";\n */\n");
+        b.Append("#define ").Append(StatusTableConstant).Append(" { \\\n");
+        foreach (ProcEntry entry in interop.Procs) b.Append("    ").Append(StatusCName(entry.Status)).Append(", \\\n");
+        b.Append("}\n");
+        b.Append("#define ").Append(BackendTableConstant).Append(" { \\\n");
+        foreach (ProcEntry entry in interop.Procs) b.Append("    ").Append(BackendCName(entry.Backend)).Append(", \\\n");
+        b.Append("}\n\n");
+        b.Append("#endif  /* CODEBRIX_WGPU_PROCS_H_ */\n");
         return b.ToString();
     }
 
@@ -380,6 +465,16 @@ public sealed class ModuleRenderer
 
             b.Append("}\n");
         }
+
+        b.Append("\n/// The static status of every function-table entry, in table order (from the notes; the library's\n");
+        b.Append("/// wgpuCodebrixGetProcStatus also reports WGPUCodebrixProcStatus_NotAvailableOnBackend).\n");
+        b.Append("pub const ").Append(StatusTableConstant).Append(": [WGPUCodebrixProcStatus; ").Append(interop.Procs.Count.ToString(CultureInfo.InvariantCulture)).Append("] = [\n");
+        foreach (ProcEntry entry in interop.Procs) b.Append("    ").Append(StatusCName(entry.Status)).Append(",\n");
+        b.Append("];\n");
+        b.Append("/// The backend every function-table entry needs (WGPUBackendType_Undefined for none), in table order.\n");
+        b.Append("pub const ").Append(BackendTableConstant).Append(": [WGPUBackendType; ").Append(interop.Procs.Count.ToString(CultureInfo.InvariantCulture)).Append("] = [\n");
+        foreach (ProcEntry entry in interop.Procs) b.Append("    ").Append(BackendCName(entry.Backend)).Append(",\n");
+        b.Append("];\n");
 
         b.Append("\n// ---------------------------------------------------------------- layout checks (64-bit targets)\n\n");
         b.Append("#[cfg(target_pointer_width = \"64\")]\nconst _: () = {\n");

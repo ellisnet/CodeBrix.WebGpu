@@ -1,0 +1,39 @@
+CodeBrix patch 0008 - surface capability usages: to_native_texture_usage_flags (wgpu-native/src/conv.rs)
+
+WHAT: wgt::TextureUsages -> WGPUTextureUsage, which feeds WGPUSurfaceCapabilities.usages
+(wgpuSurfaceGetCapabilities): COPY_DST now maps to WGPUTextureUsage_CopyDst (it mapped to
+CopySrc - a copy-paste slip), and STORAGE_BINDING -> StorageBinding and TRANSIENT ->
+TransientAttachment are no longer dropped.
+WHY: a host deciding whether it may copy into, or write storage to, a swapchain texture read the
+wrong answer.
+UPSTREAM: backport of the to_native_texture_usage_flags hunk of commit
+9b52924948ddfb9a0c23642099072debbd179264 ("Pull relevant changes from wgpu-native-complete",
+Inner-Daemons, 2026-07-28), part of open PR gfx-rs/wgpu-native #630 (head 8322fe1a94). Adapted to
+wgpu-types 29: the transient flag is TextureUsages::TRANSIENT there (TRANSIENT_ATTACHMENT in
+wgpu 30); the same hunk's STORAGE_ATOMIC raw-bit passthrough is NOT carried (no webgpu.h bit;
+PR #630 reworks it again later). Trunk (589e6caa4e) still has the bug.
+
+--- a/wgpu-native/src/conv.rs
++++ b/wgpu-native/src/conv.rs
+@@ -1831,14 +1831,20 @@ pub fn to_native_texture_usage_flags(flags: wgt::TextureUsages) -> native::WGPUT
+         flag |= native::WGPUTextureUsage_CopySrc;
+     }
+     if flags.contains(wgt::TextureUsages::COPY_DST) {
+-        flag |= native::WGPUTextureUsage_CopySrc;
++        flag |= native::WGPUTextureUsage_CopyDst;
+     }
+     if flags.contains(wgt::TextureUsages::TEXTURE_BINDING) {
+         flag |= native::WGPUTextureUsage_TextureBinding;
+     }
++    if flags.contains(wgt::TextureUsages::STORAGE_BINDING) {
++        flag |= native::WGPUTextureUsage_StorageBinding;
++    }
+     if flags.contains(wgt::TextureUsages::RENDER_ATTACHMENT) {
+         flag |= native::WGPUTextureUsage_RenderAttachment;
+     }
++    if flags.contains(wgt::TextureUsages::TRANSIENT) {
++        flag |= native::WGPUTextureUsage_TransientAttachment;
++    }
+     flag
+ }
+ 

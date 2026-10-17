@@ -13,14 +13,16 @@
 //
 // which makes this file a child module of wgpu-native's crate root. It does nothing on its own: it
 // only hands the codebrix-wgpu crate (src/codebrix.rs, where every wgpuCodebrix* export lives)
-// the context + ids behind a handle, and builds new handles exactly the way wgpu-native's own
-// wgpuAdapterRequestDevice / wgpuDeviceCreateTexture / wgpuInstanceEnumerateAdapters do.
+// the context + ids behind a handle, builds new handles exactly the way wgpu-native's own
+// wgpuAdapterRequestDevice / wgpuDeviceCreateTexture / wgpuInstanceEnumerateAdapters do, and swaps a
+// device's two fault callbacks (uncaptured error, device lost) for the fault-listener fan-out.
 // Keep it that small: everything else belongs in src/codebrix.rs.
 //
 // Copyright (c) 2026 Jeremy Ellis and contributors. SPDX-License-Identifier: MIT
 // =================================================================================================
 
-use std::sync::{atomic, Arc};
+use std::ffi::c_void;
+use std::sync::{atomic, Arc, Weak};
 
 use parking_lot::Mutex;
 use wgc::id;
@@ -108,6 +110,16 @@ pub fn new_device(
     Arc::into_raw(device_impl)
 }
 
+/// wgpu-native's conv::map_texture_format for a format it knows, None otherwise. conv's own `_` arm
+/// PANICS ("Unknown texture format", and this crate is built with panic=abort), so a value from an
+/// application is checked first: webgpu.h's formats are the contiguous 0x01..=ASTC12x12UnormSrgb
+/// (every one mapped), plus wgpu.h's NV12 (P010 is declared in wgpu.h but conv does not map it).
+pub fn texture_format(value: native::WGPUTextureFormat) -> Option<wgt::TextureFormat> {
+    let known = (native::WGPUTextureFormat_R8Unorm..=native::WGPUTextureFormat_ASTC12x12UnormSrgb).contains(&value)
+        || value == native::WGPUNativeTextureFormat_NV12 as native::WGPUTextureFormat;
+    if known { crate::conv::map_texture_format(value) } else { None }
+}
+
 /// Maps a WebGPU texture descriptor to wgpu-core's (None for an invalid format / usage / view
 /// format), with wgpu-native's own conversions.
 pub unsafe fn map_texture_descriptor<'a>(
@@ -115,7 +127,7 @@ pub unsafe fn map_texture_descriptor<'a>(
 ) -> Option<wgc::resource::TextureDescriptor<'a>> {
     let mut view_formats = Vec::new();
     for v in crate::utils::make_slice(descriptor.viewFormats, descriptor.viewFormatCount) {
-        view_formats.push(crate::conv::map_texture_format(*v)?);
+        view_formats.push(texture_format(*v)?);
     }
     Some(wgt::TextureDescriptor {
         label: unsafe { crate::utils::string_view_into_label(descriptor.label) },
@@ -124,7 +136,7 @@ pub unsafe fn map_texture_descriptor<'a>(
         sample_count: descriptor.sampleCount,
         dimension: crate::conv::map_texture_dimension(descriptor.dimension)
             .unwrap_or(wgt::TextureDimension::D2),
-        format: crate::conv::map_texture_format(descriptor.format)?,
+        format: texture_format(descriptor.format)?,
         usage: crate::conv::from_u64_bits(descriptor.usage)?,
         view_formats,
     })
@@ -171,4 +183,92 @@ pub unsafe fn command_encoder_report_error(
     if let Some(encoder) = unsafe { encoder.as_ref() } {
         crate::handle_error(&encoder.error_sink, cause, None, fn_ident);
     }
+}
+
+// --- fault listeners (wgpuCodebrixDeviceAddFaultListener) ------------------------------------------
+//
+// wgpu-native keeps a device's uncaptured-error and device-lost callbacks in its ErrorSinkRaw and calls
+// them with the sink locked. The listener fan-out (src/codebrix.rs) replaces BOTH with its own
+// trampolines exactly once per sink, keeping the host's originals in HostFaultHandlers so the
+// trampolines call them first (or last, for wgpu's default handler, which ends the process). These
+// helpers only read and swap the two fields; nothing else of the sink is touched.
+
+/// The callbacks a device's error sink had before the fan-out trampolines replaced them.
+#[derive(Clone, Copy)]
+pub struct HostFaultHandlers {
+    pub uncaptured: native::WGPUUncapturedErrorCallback,
+    pub uncaptured_userdata: [*mut c_void; 2],
+    /// The uncaptured handler is wgpu-native's default one (it ends the process).
+    pub uncaptured_is_default: bool,
+    pub lost: native::WGPUDeviceLostCallback,
+    pub lost_userdata: [*mut c_void; 2],
+    /// The device-lost handler is wgpu-native's default one (it ends the process).
+    pub lost_is_default: bool,
+}
+
+// SAFETY: plain C callback pointers and their userdata, which the host promised may be used from any
+// thread (webgpu.h: these callbacks may be called from any thread).
+unsafe impl Send for HostFaultHandlers {}
+unsafe impl Sync for HostFaultHandlers {}
+
+/// A weak reference to a device's error sink: alive while any device, texture, encoder ... handle that
+/// shares the sink is. Once it is dead the trampolines installed on it can never run again.
+pub struct SinkRef(Weak<Mutex<crate::ErrorSinkRaw>>);
+
+// SAFETY: only strong_count() is ever called through it (no access to the sink itself).
+unsafe impl Send for SinkRef {}
+
+impl SinkRef {
+    pub fn is_alive(&self) -> bool {
+        self.0.strong_count() > 0
+    }
+}
+
+/// The state of a device's fault hook.
+pub enum FaultHook {
+    /// The sink still has the host's own callbacks.
+    NotHooked,
+    /// The trampolines are installed; the userdata they carry.
+    Existing(*mut c_void),
+    /// The trampolines were installed by this call; the sink and the userdata they carry.
+    Installed(SinkRef, *mut c_void),
+}
+
+/// Reads (and, with `install`, performs) the fault hook of a device's error sink: when the sink's
+/// uncaptured callback is already `uncaptured`, returns Existing; otherwise, with `install`, swaps in
+/// `uncaptured` / `lost`, both carrying the userdata `install` makes from the host's originals.
+/// None for a null device. The sink stays locked for the whole call, so it never races a dispatch.
+pub unsafe fn device_fault_hook(
+    device: native::WGPUDevice,
+    uncaptured: native::WGPUUncapturedErrorCallback,
+    lost: native::WGPUDeviceLostCallback,
+    install: Option<&mut dyn FnMut(HostFaultHandlers) -> *mut c_void>,
+) -> Option<FaultHook> {
+    let d = unsafe { device.as_ref() }?;
+    let mut sink = d.error_sink.lock();
+    let ours = uncaptured.map(|f| f as usize);
+    if ours.is_some() && sink.uncaptured_handler.callback.map(|f| f as usize) == ours {
+        return Some(FaultHook::Existing(sink.uncaptured_handler.userdata.get_1()));
+    }
+    let Some(make) = install else { return Some(FaultHook::NotHooked) };
+    let default_uncaptured = crate::default_uncaptured_error_handler as *const () as usize;
+    let default_lost = crate::default_device_lost_handler as *const () as usize;
+    let host = HostFaultHandlers {
+        uncaptured: sink.uncaptured_handler.callback,
+        uncaptured_userdata: [sink.uncaptured_handler.userdata.get_1(), sink.uncaptured_handler.userdata.get_2()],
+        uncaptured_is_default: sink.uncaptured_handler.callback.map(|f| f as usize) == Some(default_uncaptured),
+        lost: sink.device_lost_handler.callback,
+        lost_userdata: [sink.device_lost_handler.userdata.get_1(), sink.device_lost_handler.userdata.get_2()],
+        lost_is_default: sink.device_lost_handler.callback.map(|f| f as usize) == Some(default_lost),
+    };
+    let userdata = make(host);
+    sink.uncaptured_handler = crate::DeviceCallback {
+        callback: uncaptured,
+        userdata: crate::utils::Userdata::new(userdata, std::ptr::null_mut()),
+    };
+    sink.device_lost_handler = crate::DeviceCallback {
+        callback: lost,
+        userdata: crate::utils::Userdata::new(userdata, std::ptr::null_mut()),
+    };
+    Some(FaultHook::Installed(SinkRef(Arc::downgrade(&d.error_sink)), userdata))
 }

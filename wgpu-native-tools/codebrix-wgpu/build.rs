@@ -1,5 +1,6 @@
 // build.rs - build-time facts for wgpuCodebrixGetBuildInfo, and the backend cfgs src/codebrix.rs
-// compiles against. Reads only the environment cargo provides and this crate's Cargo.lock.
+// compiles against. Reads only the environment cargo provides, this crate's Cargo.lock and its
+// applied-patches.txt.
 //
 // WGPU_NATIVE_VERSION is the SAME variable wgpu-native's wgpuGetVersion() bakes in (its release
 // pipeline sets it from the tag). The build scripts set it from linux/pins.env; a build without it
@@ -35,6 +36,17 @@ fn main() {
     }
     let core_version = core_version.expect("wgpu-core is not in Cargo.lock");
     println!("cargo:rustc-env=CODEBRIX_WGPU_CORE_VERSION={core_version}");
+
+    // The native fix set (wgpuCodebrixGetBuildInfo `patches`): applied-patches.txt, which the binding
+    // generator writes from wgpu-native-tools/patches/*.patch (the build scripts copy only wgpu-native/
+    // and codebrix-wgpu/ into their scratch tree, so the patches folder itself is not visible here; the
+    // generator's --check keeps the list equal to the folder).
+    println!("cargo:rerun-if-changed=applied-patches.txt");
+    let list_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("applied-patches.txt");
+    let list = fs::read_to_string(&list_path).expect("applied-patches.txt is missing (run the binding generator with --write)");
+    let patches: Vec<&str> = list.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
+    assert!(!patches.is_empty(), "applied-patches.txt lists no patch");
+    println!("cargo:rustc-env=CODEBRIX_WGPU_PATCHES={}", patches.join(","));
 
     let target = env::var("TARGET").unwrap();
     println!("cargo:rustc-env=CODEBRIX_WGPU_TARGET={target}");

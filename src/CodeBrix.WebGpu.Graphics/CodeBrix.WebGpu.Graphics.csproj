@@ -130,8 +130,8 @@
     from nuget.org. They are the package's only dependencies besides CodeBrix.WebGpu.Native.
   -->
   <ItemGroup>
-    <PackageReference Include="CodeBrix.Imaging.ApacheLicenseForever" Version="1.0.287.220" />
-    <PackageReference Include="CodeBrix.Graphics3D.Gltf2.MitLicenseForever" Version="1.0.261.293" />
+    <PackageReference Include="CodeBrix.Imaging.ApacheLicenseForever" Version="1.0.290.858" />
+    <PackageReference Include="CodeBrix.Graphics3D.Gltf2.MitLicenseForever" Version="1.0.290.996" />
   </ItemGroup>
 
   <!--

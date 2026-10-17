@@ -30,13 +30,22 @@ doc: |
   Versioning: `codebrix_get_api_version` returns CODEBRIX_API_VERSION (the `api_version` constant
   below). The managed side refuses a library whose value differs. Bump it whenever a function, struct
   or enum here changes shape or meaning. Adding a function also changes the export set, which means
-  all nine natives must be rebuilt before the next publish.
+  all nine natives must be rebuilt before the next publish. The out-param structs below carry no size
+  or version field of their own: their layout is the one of this contract version.
+
+  Capability evidence: an exported symbol only proves the function can be called, not that it works.
+  @ref wgpuCodebrixGetProcStatus reports, per function-table ordinal, what the LOADED library knows
+  about each function (implemented, ends the process when called, ends the process on bad input,
+  always fails, or needs a backend this build lacks); @ref WGPUCodebrixBuildInfo `patches` names the
+  native fix set; @ref wgpuCodebrixAdapterGetDownlevelCapabilities and
+  @ref wgpuCodebrixAdapterGetTextureFormatFeatures answer what the adapter can do beyond
+  `wgpuAdapterGetFeatures` / `wgpuAdapterGetLimits`.
 
   Threading: the same rules as the wgpu-native objects the functions take.
 
 constants:
   - name: api_version
-    value: 1
+    value: 2
     doc: |
       The version of this contract. Returned by @ref wgpuCodebrixGetApiVersion.
 
@@ -79,7 +88,240 @@ enums:
         doc: |
           Ready to present. Vulkan `PRESENT_SRC_KHR`; D3D12 `PRESENT`.
 
-bitflags: []
+  - name: codebrix_proc_status
+    doc: |
+      What the loaded library knows about one exported function, by its ordinal in the function table
+      (`WGPUCodebrixProcTable`, include/codebrix_wgpu_procs.h). Returned by
+      @ref wgpuCodebrixGetProcStatus. The static part comes from specs/proc-table-notes.txt (the same
+      notes the table's comments carry); `not_available_on_backend` is decided by the library itself
+      from the backends it was compiled with.
+    entries:
+      - name: unknown
+        doc: |
+          The ordinal is outside the function table.
+      - name: implemented
+        doc: |
+          Implemented; no recorded abort path. Functions for one backend (their name contains Vulkan,
+          D3d12 or Metal) still return `WGPUStatus_Error` / NULL for a device on another backend.
+      - name: aborts_unimplemented
+        doc: |
+          Not implemented by the engine: calling it ENDS THE PROCESS. Never call it.
+      - name: aborts_on_error
+        doc: |
+          Implemented, but ENDS THE PROCESS on the inputs or states its note names (see the table's
+          comment); guard those inputs.
+      - name: unsupported
+        doc: |
+          Exported and safe to call, but always fails (returns `WGPUStatus_Error` / NULL) with this engine.
+      - name: not_available_on_backend
+        doc: |
+          Needs a backend this library was not built with (Vulkan, Direct3D 12 or Metal); every call
+          returns `WGPUStatus_Error` / NULL.
+
+  - name: codebrix_poll_result
+    doc: |
+      The outcome of @ref wgpuCodebrixDevicePoll.
+    entries:
+      - name: queue_empty
+        doc: |
+          No submission was in flight when the poll ended (every callback of finished work has run).
+      - name: wait_succeeded
+        doc: |
+          The waited-for submission finished within the timeout; later submissions may still be in flight.
+      - name: poll
+        doc: |
+          A non-blocking poll (`wait` false) ran; submissions are still in flight.
+      - name: timeout
+        doc: |
+          The wait reached `timeoutNs` before the submission finished. Nothing is lost; poll again.
+      - name: device_lost
+        doc: |
+          The device is lost (driver or hardware failure). Release the device and create a new one.
+      - name: invalid_submission_index
+        doc: |
+          `submissionIndex` is not an index a successful @ref wgpuQueueSubmitForIndex on THIS device
+          returned (a foreign or future index). The device is unaffected.
+      - name: error
+        doc: |
+          Any other failure (out of memory, an invalid argument); the message goes to the log callback.
+
+  - name: codebrix_shader_model
+    doc: |
+      Which collection of shader features the adapter supports, in Direct3D shader-model terms
+      (wgpu-types `ShaderModel`). Part of @ref WGPUCodebrixDownlevelCapabilities.
+    entries:
+      - name: sm2
+        doc: |
+          Extremely limited shaders, including a total instruction limit.
+      - name: sm4
+        doc: |
+          Missing minor features and storage images.
+      - name: sm5
+        doc: |
+          Everything WebGPU requires.
+
+bitflags:
+  - name: codebrix_downlevel_flags
+    doc: |
+      Capabilities an adapter may lack compared with the WebGPU baseline (wgpu-types `DownlevelFlags`,
+      the same bit values). A WebGPU-compliant adapter (Vulkan, Metal, Direct3D 12 on capable hardware)
+      has all of them; GL ES adapters miss several. Part of @ref WGPUCodebrixDownlevelCapabilities.
+    entries:
+      - name: none
+        doc: |
+          No flags.
+        value: 0
+      - name: compute_shaders
+        doc: |
+          Compute shaders can be compiled and dispatched.
+        value: 1
+      - name: fragment_writable_storage
+        doc: |
+          Storage buffers and textures can be written from fragment shaders.
+        value: 2
+      - name: indirect_execution
+        doc: |
+          Indirect draws and dispatches.
+        value: 4
+      - name: base_vertex
+        doc: |
+          A non-zero `baseVertex` in direct indexed draws.
+        value: 8
+      - name: read_only_depth_stencil
+        doc: |
+          Sampling a depth/stencil texture while it is a read-only depth/stencil attachment.
+        value: 16
+      - name: non_power_of_two_mipmapped_textures
+        doc: |
+          Mipmapped textures whose size is not a power of two.
+        value: 32
+      - name: cube_array_textures
+        doc: |
+          Cube-array textures.
+        value: 64
+      - name: comparison_samplers
+        doc: |
+          Comparison samplers.
+        value: 128
+      - name: independent_blend
+        doc: |
+          A different blend state per colour attachment.
+        value: 256
+      - name: vertex_storage
+        doc: |
+          Storage buffers in vertex shaders.
+        value: 512
+      - name: anisotropic_filtering
+        doc: |
+          Anisotropic sampler filtering.
+        value: 1024
+      - name: fragment_storage
+        doc: |
+          Storage buffers in fragment shaders.
+        value: 2048
+      - name: multisampled_shading
+        doc: |
+          Sample-rate shading.
+        value: 4096
+      - name: depth_texture_and_buffer_copies
+        doc: |
+          Copies between depth textures and buffers.
+        value: 8192
+      - name: webgpu_texture_format_support
+        doc: |
+          Every texture usage WebGPU describes for every format; without it, ask
+          @ref wgpuCodebrixAdapterGetTextureFormatFeatures per format.
+        value: 16384
+      - name: buffer_bindings_not_16_byte_aligned
+        doc: |
+          Buffer bindings whose size is not a multiple of 16.
+        value: 32768
+      - name: unrestricted_index_buffer
+        doc: |
+          Index buffers combined with usages other than copies.
+        value: 65536
+      - name: full_draw_index_uint32
+        doc: |
+          The full 32-bit index range (otherwise 2^24-1).
+        value: 131072
+      - name: depth_bias_clamp
+        doc: |
+          Depth bias clamping.
+        value: 262144
+      - name: view_formats
+        doc: |
+          `viewFormats` on texture creation.
+        value: 524288
+      - name: unrestricted_external_texture_copies
+        doc: |
+          Unrestricted external-image copies.
+        value: 1048576
+      - name: surface_view_formats
+        doc: |
+          `viewFormats` on surface textures.
+        value: 2097152
+      - name: nonblocking_query_resolve
+        doc: |
+          Query resolves run on the queue timeline (otherwise they block the device timeline).
+        value: 4194304
+      - name: shader_f16_in_f32
+        doc: |
+          `quantizeToF16`, `pack2x16float` and `unpack2x16float` in shaders.
+        value: 8388608
+
+  - name: codebrix_texture_format_feature_flags
+    doc: |
+      Per-format capabilities of an adapter beyond its allowed usages (wgpu-types
+      `TextureFormatFeatureFlags`, the same bit values). Part of @ref WGPUCodebrixTextureFormatFeatures.
+    entries:
+      - name: none
+        doc: |
+          No flags.
+        value: 0
+      - name: filterable
+        doc: |
+          Can be sampled with a filtering sampler.
+        value: 1
+      - name: multisample_x2
+        doc: |
+          `sampleCount` 2.
+        value: 2
+      - name: multisample_x4
+        doc: |
+          `sampleCount` 4.
+        value: 4
+      - name: multisample_x8
+        doc: |
+          `sampleCount` 8.
+        value: 8
+      - name: multisample_x16
+        doc: |
+          `sampleCount` 16.
+        value: 16
+      - name: multisample_resolve
+        doc: |
+          Can be the resolve target of a multisampled render pass.
+        value: 32
+      - name: storage_read_only
+        doc: |
+          Can be bound as a read-only storage texture.
+        value: 64
+      - name: storage_write_only
+        doc: |
+          Can be bound as a write-only storage texture.
+        value: 128
+      - name: storage_read_write
+        doc: |
+          Can be bound as a read-write storage texture.
+        value: 256
+      - name: storage_atomic
+        doc: |
+          Can be bound as a storage texture with atomic access.
+        value: 512
+      - name: blendable
+        doc: |
+          Can be blended into as a render target.
+        value: 1024
 
 structs:
   - name: codebrix_name
@@ -125,6 +367,14 @@ structs:
         doc: |
           The cargo profile ("release").
         type: out_string
+      - name: patches
+        doc: |
+          The native fix set: comma-separated names (file names without `.patch`, in apply order) of
+          the wgpu-native-tools/patches this library was built with, e.g.
+          "0001-wgpu-native-crate-type-rlib,0002-wgpu-native-codebrix-bridge-module". Two libraries
+          with the same contract version and function-table hash but different `patches` behave
+          differently; compare this string, never the export set, to tell a fixed native from an old one.
+        type: out_string
 
   - name: codebrix_vulkan_device_info
     doc: |
@@ -164,12 +414,14 @@ structs:
         type: uint32
       - name: instance_api_version
         doc: |
-          The Vulkan API version the Vulkan loader / driver reported (`vkEnumerateInstanceVersion`,
-          `VK_MAKE_API_VERSION` packed) when wgpu created the instance. The instance itself may have been
-          created with a LOWER version (wgpu caps the version it creates the instance with at 1.3), so this
-          is not the instance's API version: do not use it as Skia's `MaxAPIVersion` (see
-          `VulkanSkiaBridge.SkiaApiVersion` in CodeBrix.WebGpu.Skia), and do not copy it into
-          @ref WGPUCodebrixVulkanAdoptDescriptor `instance_api_version` for another instance.
+          The `VkApplicationInfo::apiVersion` the instance was created with (`VK_MAKE_API_VERSION`
+          packed). For an instance wgpu created this is wgpu-hal's rule: 1.0 when the Vulkan loader
+          reports less than 1.1 (`vkEnumerateInstanceVersion`), otherwise exactly 1.3 (wgpu-hal's maximum)
+          - so a 1.4 loader still gives 1.3, and no 1.4 entry point is loaded. For an adopted device it is
+          the `instance_api_version` of its @ref WGPUCodebrixVulkanAdoptDescriptor. This is the value
+          Skia's `MaxAPIVersion` and another adopt descriptor expect. (Vulkan's own rule still applies on
+          top: device-level functionality is limited to the lower of this and the physical device's
+          `apiVersion`.)
         type: uint32
       - name: get_instance_proc_addr
         doc: |
@@ -286,10 +538,10 @@ structs:
       - name: instance_api_version
         doc: |
           The Vulkan API version the application created the instance with (`VkApplicationInfo::apiVersion`,
-          `VK_MAKE_API_VERSION` packed); wgpu uses no instance-level functionality above it. The version the
-          Vulkan loader / driver reports (`vkEnumerateInstanceVersion`, and the `instance_api_version` of
-          @ref WGPUCodebrixVulkanDeviceInfo) may be higher than the instance's and is only a best-effort fallback when the
-          real value is unknown.
+          `VK_MAKE_API_VERSION` packed); wgpu uses no instance-level functionality above it. When the
+          instance came from wgpu, the `instance_api_version` of @ref WGPUCodebrixVulkanDeviceInfo is that
+          value. The version the Vulkan loader reports (`vkEnumerateInstanceVersion`) may be higher than
+          the instance's and is only a best-effort fallback when the real value is unknown.
         type: uint32
       - name: get_instance_proc_addr
         doc: |
@@ -358,6 +610,95 @@ structs:
           The wgpu features the adopted device must expose. May be empty.
         type: array<enum.feature_name>
         pointer: immutable
+
+  - name: codebrix_downlevel_capabilities
+    doc: |
+      What an adapter can do compared with the WebGPU baseline (wgpu-core
+      `adapter_downlevel_capabilities`). The WebGPU features and limits are NOT repeated here: use
+      `wgpuAdapterGetFeatures`, `wgpuAdapterHasFeature` and `wgpuAdapterGetLimits` for those. (wgpu's
+      `DownlevelLimits` has no members in this engine, so there are none here.) Filled by
+      @ref wgpuCodebrixAdapterGetDownlevelCapabilities.
+    type: standalone
+    members:
+      - name: flags
+        doc: |
+          The downlevel capabilities the adapter has.
+        type: bitflag.codebrix_downlevel_flags
+      - name: shader_model
+        doc: |
+          The shader model the adapter supports.
+        type: enum.codebrix_shader_model
+      - name: webgpu_compliant
+        doc: |
+          True when the adapter offers the complete WebGPU baseline (every compliant flag and `sm5`).
+        type: bool
+
+  - name: codebrix_texture_format_features
+    doc: |
+      What an adapter allows for one texture format (wgpu-core `adapter_get_texture_format_features`).
+      With @ref WGPUNativeFeature_TextureAdapterSpecificFormatFeatures enabled on a device these are the
+      capabilities that device honours; without it the device keeps to the WebGPU rules for the format.
+      Filled by @ref wgpuCodebrixAdapterGetTextureFormatFeatures.
+    type: standalone
+    members:
+      - name: allowed_usages
+        doc: |
+          The texture usages the format may be created with.
+        type: bitflag.texture_usage
+      - name: flags
+        doc: |
+          Filterability, multisample counts, storage access modes and blendability.
+        type: bitflag.codebrix_texture_format_feature_flags
+
+  - name: codebrix_vulkan_adopt_requirements
+    doc: |
+      What an application must create its `VkDevice` with so that
+      @ref wgpuCodebrixInstanceAdoptVulkanDevice accepts it: the device extensions wgpu-hal's
+      `required_device_extensions` returns for the adapter and feature set, and the feature structures
+      wgpu-hal's `physical_device_features` would enable. Filled by
+      @ref wgpuCodebrixVulkanGetAdoptRequirements; release with
+      @ref wgpuCodebrixVulkanAdoptRequirementsFreeMembers.
+    type: standalone
+    free_members: true
+    members:
+      - name: required_device_extensions
+        doc: |
+          Enable every one of these device extensions (you may enable more). Static strings, valid for
+          the life of the process (FreeMembers does not free them).
+        type: array<struct.codebrix_name>
+        pointer: immutable
+      - name: physical_device_features2
+        doc: |
+          A `VkPhysicalDeviceFeatures2*` with its `pNext` chain of the feature structures wgpu enables,
+          OWNED by the library until FreeMembers. Put it into `VkDeviceCreateInfo::pNext` (with
+          `pEnabledFeatures` NULL), or copy it and OR in features of your own - never enable fewer. To
+          chain structures of your own, put them in front of it; never write into it.
+        type: c_void
+        pointer: mutable
+      - name: physical_device_api_version
+        doc: |
+          The physical device's `VkPhysicalDeviceProperties::apiVersion`.
+        type: uint32
+
+  - name: codebrix_fault_callbacks
+    doc: |
+      One fault listener for @ref wgpuCodebrixDeviceAddFaultListener: the standard webgpu.h callback
+      types, each with its own two userdata pointers. Either callback may be NULL. `nextInChain` and the
+      device-lost `mode` are ignored: listeners always run spontaneously, on the thread that discovers
+      the fault, while the device's error sink is locked - keep them small and NEVER call webgpu.h
+      functions on that device (or add/remove listeners) from inside them; defer GPU work.
+    type: standalone
+    members:
+      - name: uncaptured_error_callback_info
+        doc: |
+          Called for every error no error scope captures, AFTER the device's own uncaptured-error
+          callback.
+        type: callback.uncaptured_error
+      - name: device_lost_callback_info
+        doc: |
+          Called when the device's own device-lost callback is called, AFTER it, and once when
+          @ref wgpuCodebrixDevicePoll first observes the device lost.
+        type: callback.device_lost
 
 callbacks: []
 
@@ -694,5 +1035,175 @@ functions:
           Receives the device.
         type: object.device
         pointer: mutable
+
+  - name: codebrix_get_proc_status
+    doc: |
+      What this library knows about one exported function: the function at `ordinal` in the function
+      table (`WGPUCodebrixProcTable`; the ordinal is the entry's index, valid for the
+      `WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH` of this library). Answered by the LOADED library from a
+      table generated with it, so a module asks the binary it runs on, not the header it was built with.
+      The same table is in include/codebrix_wgpu_procs.h / .rs (without the backend resolution).
+    returns:
+      doc: |
+        The status; `WGPUCodebrixProcStatus_Unknown` for an ordinal outside the table.
+      type: enum.codebrix_proc_status
+    args:
+      - name: ordinal
+        doc: |
+          The function-table index.
+        type: uint32
+
+  - name: codebrix_adapter_get_downlevel_capabilities
+    doc: |
+      Fills @ref WGPUCodebrixDownlevelCapabilities for an adapter.
+    returns:
+      doc: |
+        `WGPUStatus_Success`, or `WGPUStatus_Error` for a null adapter or output.
+      type: enum.status
+    args:
+      - name: adapter
+        doc: |
+          The adapter.
+        type: object.adapter
+      - name: capabilities
+        doc: |
+          Receives the capabilities.
+        type: struct.codebrix_downlevel_capabilities
+        pointer: mutable
+
+  - name: codebrix_adapter_get_texture_format_features
+    doc: |
+      Fills @ref WGPUCodebrixTextureFormatFeatures for one format on an adapter. Works for every format
+      the library knows, including ones whose feature (e.g. a compressed family) the adapter lacks - then
+      the usages are empty.
+    returns:
+      doc: |
+        `WGPUStatus_Success`, or `WGPUStatus_Error` for a null adapter or output or an unknown format.
+      type: enum.status
+    args:
+      - name: adapter
+        doc: |
+          The adapter.
+        type: object.adapter
+      - name: format
+        doc: |
+          The format.
+        type: enum.texture_format
+      - name: features
+        doc: |
+          Receives the format's capabilities.
+        type: struct.codebrix_texture_format_features
+        pointer: mutable
+
+  - name: codebrix_device_poll
+    doc: |
+      Polls or waits for the device's queue WITHOUT ever ending the process (wgpu-core `device_poll`
+      with `PollType::Wait { submission_index, timeout }` or `PollType::Poll`). Callbacks of finished
+      work (buffer maps, submitted-work-done) run during the call, whatever the result. Every failure
+      comes back as a @ref WGPUCodebrixPollResult; nothing is reported through the device's error
+      callbacks (a fault listener's device-lost callback runs once when the device is first seen lost).
+    returns:
+      doc: |
+        `WGPUStatus_Success` when `result` is `QueueEmpty`, `WaitSucceeded` or `Poll`; `WGPUStatus_Error`
+        otherwise (also for a null device, with `result` = `Error`).
+      type: enum.status
+    args:
+      - name: device
+        doc: |
+          The device.
+        type: object.device
+      - name: wait
+        doc: |
+          True to block until the submission (or, without `submissionIndex`, the most recent one)
+          finished or the timeout passed; false for one non-blocking poll.
+        type: bool
+      - name: timeout_ns
+        doc: |
+          The longest wait in nanoseconds; 0 waits without limit. Ignored when `wait` is false.
+        type: uint64
+      - name: submission_index
+        doc: |
+          The submission to wait for (from @ref wgpuQueueSubmitForIndex on this device), or NULL for the
+          most recent one. Ignored when `wait` is false. (A `WGPUSubmissionIndex` of wgpu.h, spelled
+          `uint64_t` so that this header needs only webgpu.h.)
+        type: uint64
+        pointer: immutable
+        optional: true
+      - name: result
+        doc: |
+          Receives the outcome (may be NULL when only the status matters).
+        type: enum.codebrix_poll_result
+        pointer: mutable
+        optional: true
+
+  - name: codebrix_vulkan_get_adopt_requirements
+    doc: |
+      Tells an application what to create its `VkDevice` with BEFORE calling
+      @ref wgpuCodebrixInstanceAdoptVulkanDevice: fill the same
+      @ref WGPUCodebrixVulkanAdoptDescriptor you will adopt with - `instance`, `physicalDevice`,
+      `instanceApiVersion`, `getInstanceProcAddr`, `enabledInstanceExtensions` and `requiredFeatures`
+      (wgpu and native feature names); `device`, the queue indices and `enabledDeviceExtensions` are
+      ignored here. wgpu-hal inspects the physical device exactly as the adopt call will. Vulkan only.
+    returns:
+      doc: |
+        `WGPUStatus_Success`, or `WGPUStatus_Error` (no Vulkan backend in this library, a missing handle,
+        an unknown feature, a physical device wgpu cannot use, or a required feature it lacks; reason
+        through the log callback). On error `requirements` is zeroed.
+      type: enum.status
+    args:
+      - name: descriptor
+        doc: |
+          The Vulkan instance, physical device and requested features.
+        type: struct.codebrix_vulkan_adopt_descriptor
+        pointer: immutable
+      - name: requirements
+        doc: |
+          Receives the requirements; release with @ref wgpuCodebrixVulkanAdoptRequirementsFreeMembers.
+        type: struct.codebrix_vulkan_adopt_requirements
+        pointer: mutable
+
+  - name: codebrix_device_add_fault_listener
+    doc: |
+      Adds a fault listener to a device (the native half of a host-owned fault dispatcher): its
+      callbacks run AFTER the device's own uncaptured-error / device-lost callbacks, which keep working
+      unchanged - a listener never replaces or silences them. When the device has wgpu's DEFAULT
+      uncaptured-error handler (no `uncapturedErrorCallbackInfo.callback` at creation, or an adopted
+      device), that handler ends the process, so listeners run just BEFORE it instead (they see the fault,
+      the process still ends). The listener lives until removed or until the device's last handle and
+      every object created from it are released.
+    returns:
+      doc: |
+        The listener id (never 0), or 0 on failure (null device, both callbacks NULL, or called from
+        inside a fault callback).
+      type: uint64
+    args:
+      - name: device
+        doc: |
+          The device.
+        type: object.device
+      - name: callbacks
+        doc: |
+          The callbacks and their userdata (copied).
+        type: struct.codebrix_fault_callbacks
+        pointer: immutable
+
+  - name: codebrix_device_remove_fault_listener
+    doc: |
+      Removes a fault listener. When it returns, the listener's callbacks are not running and will not
+      be called again.
+    returns:
+      doc: |
+        `WGPUStatus_Success`, or `WGPUStatus_Error` when the device has no listener with that id (or when
+        called from inside a fault callback).
+      type: enum.status
+    args:
+      - name: device
+        doc: |
+          The device the listener was added to.
+        type: object.device
+      - name: listener_id
+        doc: |
+          The id @ref wgpuCodebrixDeviceAddFaultListener returned.
+        type: uint64
 
 objects: []

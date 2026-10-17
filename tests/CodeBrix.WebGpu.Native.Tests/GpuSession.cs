@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 
 namespace CodeBrix.WebGpu.Native.Tests;
@@ -96,6 +97,83 @@ public sealed unsafe class GpuSession : IDisposable
     /// <returns>The session (check <see cref="SkipReason" />).</returns>
     public static GpuSession CreateForThisPlatform() => new GpuSession(PlatformBackend);
 
+    /// <summary>Creates a session on the given backends (for example <see cref="InstanceBackend.GL" />).</summary>
+    /// <param name="backends">The instance backends.</param>
+    /// <returns>The session (check <see cref="SkipReason" />).</returns>
+    public static GpuSession CreateFor(InstanceBackend backends) => new GpuSession(backends);
+
+    /// <summary>Empties <see cref="UncapturedErrors" />.</summary>
+    public void ClearUncapturedErrors()
+    {
+        while (UncapturedErrors.TryDequeue(out _))
+        {
+        }
+    }
+
+    /// <summary>Creates a WGSL shader module on the device.</summary>
+    /// <param name="source">The WGSL source.</param>
+    /// <returns>The module.</returns>
+    public ShaderModule CreateWgslModule(string source)
+    {
+        byte[] code = Encoding.UTF8.GetBytes(source);
+        fixed (byte* text = code)
+        {
+            ShaderSourceWGSL wgsl = new ShaderSourceWGSL { Code = WgpuString.FromPinned(text, code.Length) };
+            wgsl.Chain.SType = ShaderSourceWGSL.StructType;
+            ShaderModuleDescriptor descriptor = new ShaderModuleDescriptor { NextInChain = &wgsl.Chain };
+            return WebGpu.DeviceCreateShaderModule(Device, &descriptor);
+        }
+    }
+
+    /// <summary>Creates a buffer on the device.</summary>
+    /// <param name="usage">The usage.</param>
+    /// <param name="size">The size in bytes.</param>
+    /// <returns>The buffer.</returns>
+    public Buffer CreateBuffer(BufferUsage usage, ulong size)
+    {
+        BufferDescriptor descriptor = new BufferDescriptor { Usage = usage, Size = size };
+        return WebGpu.DeviceCreateBuffer(Device, &descriptor);
+    }
+
+    /// <summary>Creates a compute pipeline with entry point <c>main</c>.</summary>
+    /// <param name="module">The shader module.</param>
+    /// <param name="layout">The pipeline layout, or null for an inferred layout.</param>
+    /// <returns>The pipeline.</returns>
+    public ComputePipeline CreateComputePipeline(ShaderModule module, PipelineLayout layout)
+    {
+        byte[] entry = "main"u8.ToArray();
+        fixed (byte* entryPoint = entry)
+        {
+            ComputePipelineDescriptor descriptor = default;
+            descriptor.Layout = layout;
+            descriptor.Compute.Module = module;
+            descriptor.Compute.EntryPoint = WgpuString.FromPinned(entryPoint, entry.Length);
+            return WebGpu.DeviceCreateComputePipeline(Device, &descriptor);
+        }
+    }
+
+    /// <summary>Pops the device's innermost error scope; the engine calls back before returning.</summary>
+    /// <returns>The pop status, the captured error type and its message.</returns>
+    public (PopErrorScopeStatus Status, ErrorType Type, string Message) PopErrorScope()
+    {
+        RequestState result = default;
+        PopErrorScopeCallbackInfo info = new PopErrorScopeCallbackInfo
+        {
+            Mode = CallbackMode.AllowSpontaneous,
+            Callback = &OnPopped,
+            Userdata1 = &result,
+        };
+
+        WebGpu.DevicePopErrorScope(Device, info);
+        for (int attempt = 0; attempt < 1000 && Volatile.Read(ref result.Called) == 0; attempt++)
+        {
+            WebGpu.InstanceProcessEvents(Instance);
+        }
+
+        string message = result.Message == IntPtr.Zero ? string.Empty : TakeMessage(result.Message);
+        return result.Called == 0 ? ((PopErrorScopeStatus)0, (ErrorType)0, message) : ((PopErrorScopeStatus)result.Status, (ErrorType)result.Handle, message);
+    }
+
     /// <summary>Requests the default adapter with the process-events callback pattern.</summary>
     /// <param name="instance">The instance.</param>
     /// <param name="message">The callback's message.</param>
@@ -144,7 +222,15 @@ public sealed unsafe class GpuSession : IDisposable
     /// <param name="buffer">The buffer.</param>
     /// <param name="size">Bytes to map.</param>
     /// <returns>The map status.</returns>
-    public static MapAsyncStatus MapRead(Device device, Buffer buffer, nuint size)
+    public static MapAsyncStatus MapRead(Device device, Buffer buffer, nuint size) => MapRead(device, buffer, 0, size);
+
+    /// <summary>Maps a range of a buffer for reading and waits (device poll) until the callback reports.</summary>
+    /// <param name="device">The device.</param>
+    /// <param name="buffer">The buffer.</param>
+    /// <param name="offset">The first byte to map.</param>
+    /// <param name="size">Bytes to map (or <see cref="Constants.WholeMapSize" />).</param>
+    /// <returns>The map status.</returns>
+    public static MapAsyncStatus MapRead(Device device, Buffer buffer, nuint offset, nuint size)
     {
         RequestState result = default;
         BufferMapCallbackInfo info = new BufferMapCallbackInfo
@@ -154,7 +240,7 @@ public sealed unsafe class GpuSession : IDisposable
             Userdata1 = &result,
         };
 
-        WebGpu.BufferMapAsync(buffer, MapMode.Read, 0, size, info);
+        WebGpu.BufferMapAsync(buffer, MapMode.Read, offset, size, info);
         for (int attempt = 0; attempt < 1000 && Volatile.Read(ref result.Called) == 0; attempt++)
         {
             WebGpu.DevicePoll(device, 1, null);
@@ -225,6 +311,16 @@ public sealed unsafe class GpuSession : IDisposable
     {
         RequestState* result = (RequestState*)userdata1;
         result->Status = (uint)status;
+        result->Message = KeepMessage(message);
+        Volatile.Write(ref result->Called, 1);
+    }
+
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static void OnPopped(PopErrorScopeStatus status, ErrorType type, StringView message, void* userdata1, void* userdata2)
+    {
+        RequestState* result = (RequestState*)userdata1;
+        result->Status = (uint)status;
+        result->Handle = (IntPtr)(uint)type;
         result->Message = KeepMessage(message);
         Volatile.Write(ref result->Called, 1);
     }

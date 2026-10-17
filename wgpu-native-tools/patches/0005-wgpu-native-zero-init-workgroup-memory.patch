@@ -1,0 +1,47 @@
+CodeBrix patch 0005 - zero-initialized workgroup memory by default (wgpu-native/src/lib.rs)
+
+WHAT: the compute stage and the vertex / fragment stages of the pipeline conversions pass
+zero_initialize_workgroup_memory: true (it was hard-coded false, marked "TODO(wgpu.h)").
+WHY: WebGPU requires workgroup (var<workgroup>) memory to start zeroed, and Rust wgpu's default is
+true; with false a shader that reads shared memory before writing it reads whatever the driver left
+there. No option is added: wgpu.h has no pipeline-descriptor extras struct to carry one, and adding
+one would change the C API; true is the safe default.
+UPSTREAM: trunk (589e6caa4e) still hard-codes false. Open PR #630 adds
+WGPUComputePipelineDescriptorExtras.zeroInitializeWorkgroupMemory (a wgpu 30-era header change)
+but still defaults to false without the extras. CodeBrix's own change.
+
+--- a/wgpu-native/src/lib.rs
++++ b/wgpu-native/src/lib.rs
+@@ -2158,7 +2158,9 @@ pub unsafe extern "C" fn wgpuDeviceCreateComputePipeline(
+             })
+             .collect(),
+             // TODO(wgpu.h)
+-            zero_initialize_workgroup_memory: false,
++            // CodeBrix (patches/0005): WebGPU requires workgroup memory to start zeroed (Rust
++            // wgpu's default is true too); `false` let shaders read stale shared memory.
++            zero_initialize_workgroup_memory: true,
+         },
+         // TODO(wgpu.h)
+         cache: None,
+@@ -2323,7 +2325,9 @@ pub unsafe extern "C" fn wgpuDeviceCreateRenderPipeline(
+                     })
+                     .collect(),
+                 // TODO(wgpu.h)
+-                zero_initialize_workgroup_memory: false,
++                // CodeBrix (patches/0005): WebGPU requires workgroup memory to start zeroed (Rust
++                // wgpu's default is true too); `false` let shaders read stale shared memory.
++                zero_initialize_workgroup_memory: true,
+             },
+             buffers: Cow::Owned(
+                 make_slice(descriptor.vertex.buffers, descriptor.vertex.bufferCount)
+@@ -2421,7 +2425,9 @@ pub unsafe extern "C" fn wgpuDeviceCreateRenderPipeline(
+                         })
+                         .collect(),
+                     // TODO(wgpu.h)
+-                    zero_initialize_workgroup_memory: false,
++                    // CodeBrix (patches/0005): WebGPU requires workgroup memory to start zeroed (Rust
++                    // wgpu's default is true too); `false` let shaders read stale shared memory.
++                    zero_initialize_workgroup_memory: true,
+                 },
+                 targets: Cow::Owned(
+                     make_slice(fragment.targets, fragment.targetCount)

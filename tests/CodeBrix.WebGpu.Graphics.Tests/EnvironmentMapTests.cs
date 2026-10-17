@@ -525,21 +525,6 @@ public class EnvironmentMapTests : IClassFixture<GraphicsGpuFixture>
     }
 
     [Fact]
-    public void the_extended_srgb_curve_inverts_the_jpeg_xl_encoding_beyond_one_and_below_zero()
-    {
-        //Arrange
-        float[] linear = { -2f, -0.002f, 0f, 0.002f, 0.18f, 0.5f, 1f, 4f, 100f };
-
-        //Act / Assert
-        foreach (float value in linear)
-        {
-            float magnitude = MathF.Abs(value);
-            float encoded = MathF.CopySign(magnitude <= 0.0031308f ? 12.92f * magnitude : (1.055f * MathF.Pow(magnitude, 1f / 2.4f)) - 0.055f, value);
-            CodeBrix.WebGpu.Graphics.Images.ImageUpload.SrgbToLinearExtended(encoded).Should().BeApproximately(value, Math.Max(1e-5f, magnitude * 1e-5f));
-        }
-    }
-
-    [Fact]
     public void png_panoramas_load_through_imaging_and_exr_files_are_refused()
     {
         //Arrange

@@ -16,8 +16,8 @@
 _Static_assert(sizeof(void *) == 8 && sizeof(size_t) == 8, "a 64-bit ABI");
 _Static_assert(sizeof(WGPUStringView) == 16, "WGPUStringView");
 _Static_assert(sizeof(WGPUCodebrixName) == 16 && _Alignof(WGPUCodebrixName) == 8, "WGPUCodebrixName == one WGPUStringView");
-_Static_assert(sizeof(WGPUCodebrixBuildInfo) == 88 && offsetof(WGPUCodebrixBuildInfo, wgpuNativeVersion) == 8
-               && offsetof(WGPUCodebrixBuildInfo, profile) == 72, "WGPUCodebrixBuildInfo");
+_Static_assert(sizeof(WGPUCodebrixBuildInfo) == 104 && offsetof(WGPUCodebrixBuildInfo, wgpuNativeVersion) == 8
+               && offsetof(WGPUCodebrixBuildInfo, profile) == 72 && offsetof(WGPUCodebrixBuildInfo, patches) == 88, "WGPUCodebrixBuildInfo");
 _Static_assert(sizeof(WGPUCodebrixVulkanDeviceInfo) == 88 && offsetof(WGPUCodebrixVulkanDeviceInfo, queueFamilyIndex) == 32
                && offsetof(WGPUCodebrixVulkanDeviceInfo, getInstanceProcAddr) == 48
                && offsetof(WGPUCodebrixVulkanDeviceInfo, enabledInstanceExtensionCount) == 56
@@ -30,4 +30,10 @@ _Static_assert(sizeof(WGPUCodebrixVulkanAdoptDescriptor) == 96 && offsetof(WGPUC
                && offsetof(WGPUCodebrixVulkanAdoptDescriptor, requiredFeatures) == 88, "WGPUCodebrixVulkanAdoptDescriptor");
 _Static_assert(sizeof(WGPUCodebrixD3d12AdoptDescriptor) == 40 && offsetof(WGPUCodebrixD3d12AdoptDescriptor, requiredFeatures) == 32, "WGPUCodebrixD3d12AdoptDescriptor");
 _Static_assert(sizeof(WGPUCodebrixMetalAdoptDescriptor) == 24 && offsetof(WGPUCodebrixMetalAdoptDescriptor, requiredFeatures) == 16, "WGPUCodebrixMetalAdoptDescriptor");
+_Static_assert(sizeof(WGPUCodebrixDownlevelCapabilities) == 16 && offsetof(WGPUCodebrixDownlevelCapabilities, shaderModel) == 8
+               && offsetof(WGPUCodebrixDownlevelCapabilities, webgpuCompliant) == 12, "WGPUCodebrixDownlevelCapabilities");
+_Static_assert(sizeof(WGPUCodebrixTextureFormatFeatures) == 16 && offsetof(WGPUCodebrixTextureFormatFeatures, flags) == 8, "WGPUCodebrixTextureFormatFeatures");
+_Static_assert(sizeof(WGPUCodebrixVulkanAdoptRequirements) == 32 && offsetof(WGPUCodebrixVulkanAdoptRequirements, physicalDeviceFeatures2) == 16
+               && offsetof(WGPUCodebrixVulkanAdoptRequirements, physicalDeviceApiVersion) == 24, "WGPUCodebrixVulkanAdoptRequirements");
+_Static_assert(sizeof(WGPUCodebrixFaultCallbacks) == 72 && offsetof(WGPUCodebrixFaultCallbacks, deviceLostCallbackInfo) == 32, "WGPUCodebrixFaultCallbacks");
 _Static_assert(sizeof(WGPUCodebrixTextureState) == 4 && WGPUCodebrixTextureState_Present == 0x000C0008, "WGPUCodebrixTextureState");

@@ -16,9 +16,11 @@ namespace CodeBrix.WebGpu.Graphics.Images;
 internal static class ImageUpload
 {
     /// <summary>
-    /// The decoding configuration: a clone of the default with contiguous image buffers preferred, so a decoded image
-    /// is one block that uploads in a single queue write. (Its format manager is the shared default one, so decoders
-    /// are never replaced in it; JPEG XL goes through <see cref="JxlTextureDecoder" /> instead.)
+    /// The decoding configuration: an independent clone of the default with contiguous image buffers preferred, so a
+    /// decoded image is one block that uploads in a single queue write. The clone owns its format manager (holding the
+    /// default formats), so nothing done to it reaches <see cref="Configuration.Default" /> and the application's own
+    /// registrations on the default do not reach it after the first use. JPEG XL goes through
+    /// <see cref="JxlTextureDecoder" />.
     /// </summary>
     public static readonly Configuration Decoding = CreateDecodingConfiguration();
 
@@ -31,11 +33,11 @@ internal static class ImageUpload
     public static readonly JxlDecoder JxlTextureDecoder = new JxlDecoder { TargetColor = JxlTargetColor.Srgb, TargetDisplayLuminance = 255 };
 
     /// <summary>
-    /// The JPEG XL decoder for high-dynamic-range use (environments): sRGB primaries and the sRGB curve, values outside
-    /// 0..1 kept (no tone mapping), so linearising with <see cref="SrgbToLinearExtended" /> gives linear-light radiance.
-    /// The decoder holds options only and is safe to share.
+    /// The JPEG XL decoder for high-dynamic-range use (environments): linear light with sRGB primaries, values outside
+    /// 0..1 kept (no tone mapping), whatever the file's own encoding (sRGB, linear, PQ, HLG, wide gamut). The decoder
+    /// holds options only and is safe to share.
     /// </summary>
-    public static readonly JxlDecoder JxlHdrDecoder = new JxlDecoder { TargetColor = JxlTargetColor.Srgb };
+    public static readonly JxlDecoder JxlHdrDecoder = new JxlDecoder { TargetColor = JxlTargetColor.LinearSrgb };
 
     private static readonly JxlImageFormatDetector JxlDetector = new JxlImageFormatDetector();
 
@@ -43,18 +45,6 @@ internal static class ImageUpload
     /// <param name="data">The first bytes of a file (12 are enough).</param>
     /// <returns>True for JPEG XL.</returns>
     public static bool IsJpegXl(ReadOnlySpan<byte> data) => JxlDetector.DetectFormat(data) != null;
-
-    /// <summary>
-    /// The inverse sRGB curve extended to every real value (mirrored for negatives, the power segment continued above
-    /// 1), the exact inverse of the encoding CodeBrix.Imaging's JPEG XL decoder applies for sRGB output.
-    /// </summary>
-    /// <param name="value">An sRGB-encoded value (may lie outside 0..1).</param>
-    /// <returns>The linear value.</returns>
-    public static float SrgbToLinearExtended(float value)
-    {
-        float magnitude = Math.Abs(value);
-        return MathF.CopySign(magnitude <= 0.04045f ? magnitude / 12.92f : MathF.Pow((magnitude + 0.055f) / 1.055f, 2.4f), value);
-    }
 
     /// <summary>Decodes an encoded image (any format CodeBrix.Imaging detects) to RGBA.</summary>
     /// <param name="encoded">The file bytes.</param>

@@ -46,18 +46,27 @@ internal static unsafe class WgpuRequests
         return result.Status == (uint)RequestAdapterStatus.Success ? new Adapter(result.Handle) : Adapter.Null;
     }
 
-    /// <summary>Requests a device with default limits and an uncaptured-error callback.</summary>
+    /// <summary>Requests a device with the uncaptured-error and device-lost callbacks pointed at a device object.</summary>
     /// <param name="instance">The instance that owns the adapter.</param>
     /// <param name="adapter">The adapter.</param>
-    /// <param name="errorSink">A <see cref="GCHandle" /> (as a pointer) to the <see cref="WebGpuSkiaDevice" /> that collects uncaptured errors.</param>
+    /// <param name="errorSink">A <see cref="GCHandle" /> (as a pointer) to the <see cref="WebGpuSkiaDevice" /> that collects uncaptured errors and the device loss.</param>
+    /// <param name="features">The required features, or null.</param>
+    /// <param name="featureCount">How many.</param>
+    /// <param name="limits">The required limits, or null for the defaults.</param>
     /// <param name="message">The callback's message (empty when none).</param>
     /// <returns>The device, or null.</returns>
-    public static Device RequestDevice(Instance instance, Adapter adapter, IntPtr errorSink, out string message)
+    public static Device RequestDevice(Instance instance, Adapter adapter, IntPtr errorSink, FeatureName* features, int featureCount, Limits* limits, out string message)
     {
         RequestState result = default;
         DeviceDescriptor descriptor = default;
+        descriptor.RequiredFeatureCount = (nuint)featureCount;
+        descriptor.RequiredFeatures = features;
+        descriptor.RequiredLimits = limits;
         descriptor.UncapturedErrorCallbackInfo.Callback = &OnUncapturedError;
         descriptor.UncapturedErrorCallbackInfo.Userdata1 = (void*)errorSink;
+        descriptor.DeviceLostCallbackInfo.Mode = CallbackMode.AllowSpontaneous;
+        descriptor.DeviceLostCallbackInfo.Callback = &OnDeviceLost;
+        descriptor.DeviceLostCallbackInfo.Userdata1 = (void*)errorSink;
         RequestDeviceCallbackInfo info = new RequestDeviceCallbackInfo
         {
             Mode = CallbackMode.AllowProcessEvents,
@@ -197,6 +206,17 @@ internal static unsafe class WgpuRequests
         if (GCHandle.FromIntPtr((IntPtr)userdata1).Target is WebGpuSkiaDevice owner)
         {
             owner.ReportUncapturedError(type + ": " + WgpuString.ToManaged(message));
+        }
+    }
+
+    // Called while the native library holds the device's error lock: record and return.
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static void OnDeviceLost(Device* device, DeviceLostReason reason, StringView message, void* userdata1, void* userdata2)
+    {
+        if (userdata1 == null) return;
+        if (GCHandle.FromIntPtr((IntPtr)userdata1).Target is WebGpuSkiaDevice owner)
+        {
+            owner.ReportDeviceLost(reason, WgpuString.ToManaged(message));
         }
     }
 
