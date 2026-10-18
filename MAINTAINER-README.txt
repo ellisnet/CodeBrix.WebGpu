@@ -661,10 +661,9 @@ csproj (no shared props file):
   * default, UseLocalNativeProject=false: a PackageReference to the PUBLISHED
     CodeBrix.WebGpu.Native.MitLicenseForever at the version pinned in that
     csproj. This is the only form that may be packed and published; the
-    nuspec then depends on exactly the pinned version. Until the first Native
-    publish the pin is the placeholder 1.0.0 (marked as such in the csproj),
-    and every default build/restore of Skia, Graphics, their tests and the
-    samples fails with
+    nuspec then depends on exactly the pinned version. Before the first Native
+    publish the pin was a placeholder 1.0.0, and every default build/restore
+    of Skia, Graphics, their tests and the samples failed with
       error NU1101: Unable to find package CodeBrix.WebGpu.Native.MitLicenseForever.
       No packages exist with this id in source(s): ..., nuget.org
     (NU1102 "Unable to find package ... with version (>= V)" once some other
