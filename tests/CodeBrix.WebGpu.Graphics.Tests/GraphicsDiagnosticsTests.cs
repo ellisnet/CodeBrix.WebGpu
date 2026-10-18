@@ -80,7 +80,13 @@ public class GraphicsDiagnosticsTests : IClassFixture<GraphicsGpuFixture>
         //Act
         try
         {
-            GraphicsDiagnostics.LogLevel = LogLevel.Info;
+            // Debug, not Info. Creating a context and waiting on it logs NOTHING at Info or above on any backend:
+            // wgpu-core's instance and adapter-selection lines are Debug, wgpu-hal's Direct3D 12 and Metal backends
+            // have no Info line at all, and Vulkan's only one ("Found N cooperative matrix configurations") fires
+            // just for drivers that report VK_KHR_cooperative_matrix. At Info this test therefore passed only on
+            // machines with such a driver (Mesa's llvmpipe) and failed on Windows (2026-10-17). The backend-creation
+            // and adapter-selection lines are Debug on every backend, on every platform.
+            GraphicsDiagnostics.LogLevel = LogLevel.Debug;
             GraphicsDiagnostics.SetLogCallback((level, message) => messages.Enqueue((level, message)));
             using (GraphicsContext context = GraphicsContext.Create())
             {
@@ -95,7 +101,8 @@ public class GraphicsDiagnosticsTests : IClassFixture<GraphicsGpuFixture>
 
         //Assert
         messages.Should().NotBeEmpty();
-        messages.Should().OnlyContain(entry => entry.Level <= LogLevel.Info && entry.Level != LogLevel.Off);
+        messages.Should().Contain(entry => entry.Level == LogLevel.Debug);
+        messages.Should().OnlyContain(entry => entry.Level <= LogLevel.Debug && entry.Level != LogLevel.Off);
     }
 
     [Fact]
