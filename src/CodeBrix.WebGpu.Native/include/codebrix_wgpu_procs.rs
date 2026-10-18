@@ -11,10 +11,16 @@
 // crates: every constant, handle, enum, bitflag, callback and struct (#[repr(C)], C member names), the function
 // table WGPUCodebrixProcTable, the hand-off structs WGPUCodebrixDeviceHandoff / WGPUCodebrixFrameHandoff and,
 // behind `--cfg codebrix_wgpu_direct`, extern declarations of every function for direct dynamic linking.
-// Include it as a module, e.g.:
+// Include it as a module - copied beside the module's source:
 //     #[allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code)]
 //     #[path = "codebrix_wgpu_procs.rs"]
 //     mod wgpu_ffi;
+// or read in place from the package's include/ folder named by an environment variable that build.rs
+// sets (#[path] takes a literal only):
+//     #[allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code)]
+//     mod wgpu_ffi { include!(concat!(env!("CODEBRIX_WGPU_INCLUDE_DIR"), "/codebrix_wgpu_procs.rs")); }
+// For the `direct` module, build.rs prints cargo::rustc-check-cfg=cfg(codebrix_wgpu_direct) and then
+// cargo::rustc-cfg=codebrix_wgpu_direct (the first line avoids cargo's unexpected-cfg warning).
 // See NATIVE MODULES in the CodeBrix.WebGpu.Native package's AGENT-README.txt.
 
 use core::ffi::{c_char, c_void};

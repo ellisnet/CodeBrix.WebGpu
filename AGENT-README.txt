@@ -466,8 +466,15 @@ NuGet copies none of it into applications):
                              every function (module `direct`)
     LICENSE-WgpuNative.txt   the licences of webgpu.h and wgpu.h
   The libraries to link against are the package's runtimes/<rid>/native/ files.
-  Rust: #[allow(non_camel_case_types, non_snake_case, non_upper_case_globals,
-  dead_code)] #[path = "codebrix_wgpu_procs.rs"] mod wgpu_ffi;
+  Rust, with the file copied beside the module's source:
+    #[allow(non_camel_case_types, non_snake_case, non_upper_case_globals,
+    dead_code)] #[path = "codebrix_wgpu_procs.rs"] mod wgpu_ffi;
+  or, reading it in place from the package's include/ folder named by an
+  environment variable that build.rs sets (#[path] takes a literal only, so
+  concat!/env! cannot go there):
+    #[allow(non_camel_case_types, non_snake_case, non_upper_case_globals,
+    dead_code)] mod wgpu_ffi { include!(concat!(env!("CODEBRIX_WGPU_INCLUDE_DIR"),
+    "/codebrix_wgpu_procs.rs")); }
 
 WHICH ROUTE
   1. DIRECT DYNAMIC LINKING (the usual choice). The module declares the
@@ -493,11 +500,18 @@ WHICH ROUTE
      applies to the codebrix_wgpu library itself (never a second copy).
 
 ROUTE 1 - LINKING PER OPERATING SYSTEM
+  Every OS (Rust)  The module's build.rs prints BOTH lines, in this order:
+                     cargo::rustc-check-cfg=cfg(codebrix_wgpu_direct)
+                     cargo::rustc-cfg=codebrix_wgpu_direct
+                   The first declares the cfg, the second sets it; with only
+                   the second, current cargo warns "unexpected `cfg` condition
+                   name: `codebrix_wgpu_direct`" (or declare it once under
+                   [lints.rust] unexpected_cfgs check-cfg instead). The
+                   `direct` module's #[link] then names codebrix_wgpu.
   Linux, Android   Link against the package's libcodebrix_wgpu.so for the
                    target (C: -L<pkg>/runtimes/<rid>/native -lcodebrix_wgpu;
-                   Rust build.rs: cargo:rustc-link-search=native=<that dir>
-                   and cargo:rustc-cfg=codebrix_wgpu_direct - the `direct`
-                   module's #[link] names codebrix_wgpu). Every packaged .so has the SONAME
+                   Rust build.rs: cargo::rustc-link-search=native=<that
+                   dir>). Every packaged .so has the SONAME
                    libcodebrix_wgpu.so, so the module records DT_NEEDED
                    libcodebrix_wgpu.so and the dynamic loader reuses the
                    library .NET already loaded - no rpath or LD_LIBRARY_PATH.
