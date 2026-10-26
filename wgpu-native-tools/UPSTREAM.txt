@@ -16,17 +16,27 @@ wgpu-native/ is an unmodified copy of two official upstream archives:
                                   submodule folder EMPTY, so it is fetched from its
                                   own repository at exactly that commit.
 
+  wgpu-hal/                       wgpu-hal 29.0.3 (gfx-rs) - the crates.io crate
+                                  archive, unpacked unmodified. Vendored because
+                                  patches/0010 changes it (Jeremy's ruling of
+                                  2026-10-26: a crate a patch must change is
+                                  vendored, so the patched code never comes from
+                                  outside the repository); codebrix-wgpu/Cargo.toml
+                                  [patch.crates-io] points cargo at the patched
+                                  scratch copy.
+
 Everything else the build compiles comes from crates.io, pinned by
 codebrix-wgpu/Cargo.lock (version + sha256 checksum of every crate; the
 2026-10-11 ruling: crates.io crates are "NuGet packages for Rust" and are not
-vendored). No git-sourced or out-of-repository crate is in the lock.
+vendored - wgpu-hal above is the one exception, for its patch). No git-sourced
+or out-of-repository crate is in the lock.
 
-No build step downloads either tree. refresh-upstream.sh is the only script
+No build step downloads any of these trees. refresh-upstream.sh is the only script
 that does (to bump or re-verify them); the archives are kept byte for byte in
 upstream-downloads/ so the trees can be re-verified with no network.
 
-This file lives BESIDE the tree, not inside it, so wgpu-native/ stays
-byte-identical to its archives (not even an added file).
+This file lives BESIDE the trees, not inside them, so wgpu-native/ and wgpu-hal/
+stay byte-identical to their archives (not even an added file).
 
 UPSTREAM IDENTITY - wgpu-native
 --------------------------------------------------------------------------------
@@ -53,6 +63,25 @@ SHA-256        : 6754c6c2465c79a954f7c04c7890c9f00b7ecce8addbe01b5056e860ba3933e
 Licence        : BSD-3-Clause (LICENSE) - PART 2 of LICENSE-WgpuNative.txt
 Not used       : gen/ (the Go generator - the C# binding generator replaces it), tests/
 
+UPSTREAM IDENTITY - wgpu-hal
+--------------------------------------------------------------------------------
+Project        : wgpu-hal (part of wgpu) - https://github.com/gfx-rs/wgpu ;
+                 https://crates.io/crates/wgpu-hal
+Version        : 29.0.3 - the version wgpu-native v29.0.1.1's Cargo.lock pins
+Archive        : upstream-downloads/wgpu-hal-29.0.3.crate
+                 (https://static.crates.io/crates/wgpu-hal/wgpu-hal-29.0.3.crate)
+SHA-256        : 31f8e1a9e7a8512f276f7c62e018c7fa8d60954303fed2e5750114332049193f
+                 (= the checksum of wgpu-hal 29.0.3 in wgpu-native's Cargo.lock and in
+                 codebrix-wgpu/Cargo.lock before the [patch.crates-io] entry)
+Licence        : "MIT OR Apache-2.0" (LICENSE.MIT, LICENSE.APACHE) - used under MIT,
+                 as before it was vendored (PART 3 of LICENSE-WgpuNative.txt lists it
+                 with its LICENSE.MIT). No file of the crate carries another notice.
+Not used       : examples/ (never built); its own Cargo.lock (cargo ignores a
+                 dependency's lock - codebrix-wgpu/Cargo.lock decides every version)
+Verified       : 2026-10-26 - downloaded, sha256 equal to the lock's checksum, unpacked
+                 with --strip-components=1; `diff -r` against a fresh extraction: no
+                 difference (84 files).
+
 NOT MODIFIED - VERIFIED 2026-10-11
 --------------------------------------------------------------------------------
   * Both archives match upstream-downloads/SHA256SUMS (sha256sum -c: OK).
@@ -78,6 +107,10 @@ applied to a scratch copy by every script (see patches/README.txt):
        wgpuDevicePoll (CodeBrix)
   0008 surface capability usages (backport of commit 9b52924948 of open PR #630)
   0009 WGPUBool ABI of wgpuDeviceStartGraphicsDebuggerCapture (CodeBrix)
+  0010 opt-in IEEE floating point for WGSL compiled to Metal - the one patch of
+       wgpu-hal/ (CodeBrix; 2026-10-26)
+The same holds for wgpu-hal/: nothing in it is ever edited; patches/0010 is
+applied to the scratch copy.
 
 COMMITTING wgpu-native/: wgpu-native/.gitignore and
 wgpu-native/ffi/webgpu-headers/.gitignore are part of the archives; a nested
@@ -96,5 +129,8 @@ VERIFYING THE SNAPSHOT AGAINST ITS ARCHIVES (no network needed)
     mv /tmp/wv/webgpu-headers-673658bc2bd70ec39fc55ebe6bb0173cf6d0a603 /tmp/wv/wgpu-native-29.0.1.1/ffi/webgpu-headers
     diff -r /tmp/wv/wgpu-native-29.0.1.1 wgpu-native          # expect no output
 
+    mkdir -p /tmp/wh && tar -xzf upstream-downloads/wgpu-hal-29.0.3.crate -C /tmp/wh --strip-components=1
+    diff -r /tmp/wh wgpu-hal                                    # expect no output
+
 Re-checking against upstream (network): ./refresh-upstream.sh v29.0.1.1 --into /tmp/wr
-then diff -r /tmp/wr wgpu-native.
+then diff -r /tmp/wr wgpu-native and diff -r /tmp/wr-wgpu-hal wgpu-hal.

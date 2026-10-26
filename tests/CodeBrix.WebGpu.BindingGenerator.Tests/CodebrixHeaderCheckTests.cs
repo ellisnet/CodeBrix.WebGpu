@@ -49,7 +49,7 @@ public class CodebrixHeaderCheckTests
 
     [Fact]
     public void a_different_api_version_is_reported()
-        => CheckWith("#define WGPU_CODEBRIX_API_VERSION (2)", "#define WGPU_CODEBRIX_API_VERSION (3)")
+        => CheckWith("#define WGPU_CODEBRIX_API_VERSION (3)", "#define WGPU_CODEBRIX_API_VERSION (4)")
             .Should().Contain(problem => problem.Contains("WGPU_CODEBRIX_API_VERSION", StringComparison.Ordinal));
 
     [Fact]

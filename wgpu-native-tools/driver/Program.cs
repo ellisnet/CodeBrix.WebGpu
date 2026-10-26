@@ -52,6 +52,10 @@ namespace WgpuNativeDriver
 {
     internal static class Program
     {
+        // crates.io crates the build takes from a vendored copy (codebrix-wgpu/Cargo.toml [patch.crates-io]):
+        // cargo reports them as local packages, but they are third-party crates compiled into the library.
+        private static readonly HashSet<string> VendoredCratesIoCrates = new(StringComparer.Ordinal) { "wgpu-hal" };
+
         private static async Task<int> Main(string[] args)
         {
             if (args.Length == 0)
@@ -162,7 +166,10 @@ namespace WgpuNativeDriver
                 foreach (var id in closure)
                 {
                     var package = metadata.GetPackage(id);
-                    if (package.IsLocal) { continue; }   // wgpu-native (vendored, its own licence) and codebrix-wgpu (ours)
+                    // wgpu-native (vendored, its own licence) and codebrix-wgpu (ours) are skipped; a crates.io
+                    // crate vendored for a patch ([patch.crates-io], e.g. wgpu-hal for patches/0010) is local
+                    // too but still a crates.io crate compiled into the library, so it stays listed.
+                    if (package.IsLocal && !VendoredCratesIoCrates.Contains(package.Name)) { continue; }
                     var finding = report.GetFinding(package.Name);
                     var key = $"{package.Name}\t{package.Version}";
                     if (!linked.TryGetValue(key, out var entry))

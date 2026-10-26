@@ -1,11 +1,12 @@
 wgpu-native-tools/patches/
 ================================================================================
 Numbered patches, applied by EVERY build script (and refresh-upstream.sh, which
-fails loudly when one stops applying) to a SCRATCH COPY of wgpu-native/ - never
-to the vendored tree, which stays byte-identical to its release archive. Unified
-diffs relative to wgpu-native-tools/ with a/ b/ prefixes: `patch -p1` (bash),
-`git apply -p1` (Windows), in name order. 0001 and 0002 make the build possible;
-0003 onward fix behaviour inside wgpu-native's own source, one concern each, and
+fails loudly when one stops applying) to a SCRATCH COPY of wgpu-native/ and
+wgpu-hal/ - never to the vendored trees, which stay byte-identical to their
+archives. Unified diffs relative to wgpu-native-tools/ with a/ b/ prefixes:
+`patch -p1` (bash), `git apply -p1` (Windows), in name order. 0001 and 0002 make
+the build possible; 0003-0009 fix behaviour inside wgpu-native's own source and
+0010 inside wgpu-hal's (the reason wgpu-hal/ is vendored), one concern each, and
 carry their upstream provenance in the text above the diff (both tools ignore
 it). Every behaviour patch is fenced by a test in tests/CodeBrix.WebGpu.Native.Tests
 that fails on the unpatched engine.
@@ -90,5 +91,23 @@ that fails on the unpatched engine.
     wgpu-native/src/lib.rs: wgpuDeviceStartGraphicsDebuggerCapture returns
     WGPUBool as wgpu.h declares (it returned a one-byte bool, as
     wgpuDevicePoll did). No upstream fix.
+
+0010-wgpu-hal-metal-precise-math.patch
+    wgpu-hal/src/metal/mod.rs + device.rs - the one patch outside wgpu-native,
+    which is why wgpu-hal/ is vendored (UPSTREAM.txt; codebrix-wgpu/Cargo.toml
+    [patch.crates-io]). Adds a process-wide switch,
+    wgpu_hal::metal::CODEBRIX_PRECISE_MATH (off by default), that
+    Device::load_shader reads when it compiles naga's MSL: on, the
+    MTLCompileOptions get MTLMathModeSafe + precise math functions (macOS 15 /
+    iOS 18+) or fastMathEnabled = NO (older systems). codebrix-wgpu's
+    wgpuCodebrixSetMetalPreciseMath sets it. Off, nothing differs from the
+    crates.io crate. Why: Metal's default fast math removes NaN checks,
+    reassociates and approximates transcendentals (measured on an Intel UHD 630:
+    `x != x` false for a NaN, an error-free sum's error term 0, sin/cos 80/29
+    ulps off) - allowed by WGSL, so the default stays, but fatal for kernels
+    that rely on IEEE behaviour (CodeBrix.Graphics3D.Cycles' WGSL device). FMA
+    contraction is not switched off by either setting. Fenced by
+    MetalPreciseMathTests (macOS) and the smoke test's Metal checks. No
+    upstream option.
 
 Record a new patch in UPSTREAM.txt and BUILD-PROVENANCE.txt.

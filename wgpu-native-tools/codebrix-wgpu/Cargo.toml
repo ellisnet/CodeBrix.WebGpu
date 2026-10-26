@@ -14,6 +14,11 @@
 #   0002  pub mod codebrix_bridge        bridge/bridge.rs compiled as a child of wgpu-native's root
 # Building THIS folder in place fails on purpose (../wgpu-native has no rlib target).
 #
+# "wgpu-hal" is the one crates.io crate that is VENDORED as well (../wgpu-hal, the unmodified
+# crates.io archive of the version Cargo.lock pins; UPSTREAM.txt): patches/0010 changes its Metal
+# backend, so [patch.crates-io] below replaces the registry crate with the patched scratch copy.
+# Same version, so every dependent resolves exactly as before; the lock entry has no source/checksum.
+#
 # Versions: every crate resolves to EXACTLY what wgpu-native v29.0.1.1's Cargo.lock pins - Cargo.lock
 # here is that lock plus this package (no `cargo update`, ever, outside a recorded upstream bump).
 # Builds pass --locked. The wgpu crates are pinned with "=" so a lock edit cannot drift them.
@@ -73,6 +78,11 @@ objc2-metal = { version = "0.3", default-features = false, features = [
 ] }
 
 [build-dependencies]
+
+# patches/0010 (opt-in IEEE floating point for WGSL compiled to Metal) edits wgpu-hal: the build
+# uses the vendored, patched copy in place of the crates.io crate. Nothing is fetched for it.
+[patch.crates-io]
+wgpu-hal = { path = "../wgpu-hal" }
 
 # The shipped profile. strip is NOT set: the build scripts keep an unstripped twin (debug = true
 # gives it full symbols) and strip the copy that ships.

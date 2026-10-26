@@ -4,7 +4,7 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   e0a21af4d2a3eeafde38d13a7f0943e3acd2bcd95f736c24b86544b8c4c9fb65  wgpu-native-tools/specs/codebrix.yml
+//   d2ffaba8efc2398b17d17ff452eb5a147cc93f6ca1a33a5cfe85b6e2ed9902fb  wgpu-native-tools/specs/codebrix.yml
 //   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 using System.Collections.Generic;
@@ -23,10 +23,10 @@ namespace CodeBrix.WebGpu.Native;
 public unsafe partial struct CodebrixProcTable
 {
     /// <summary>The number of function pointers (<c>WGPU_CODEBRIX_PROC_TABLE_FUNCTION_COUNT</c>).</summary>
-    public const uint EntryCount = 251u;
+    public const uint EntryCount = 252u;
 
     /// <summary>FNV-1a 64 of every entry's C signature in table order (<c>WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH</c>).</summary>
-    public const ulong ExpectedSignatureHash = 0x8F18F0987BEF9F9FUL;
+    public const ulong ExpectedSignatureHash = 0xA8B6E21BF6D91F71UL;
 
     /// <summary>The byte offset of the first function pointer.</summary>
     public const int HeaderSize = 24;
@@ -79,6 +79,7 @@ public unsafe partial struct CodebrixProcTable
         "wgpuCodebrixInstanceAdoptD3d12Device",
         "wgpuCodebrixInstanceAdoptMetalDevice",
         "wgpuCodebrixInstanceAdoptVulkanDevice",
+        "wgpuCodebrixSetMetalPreciseMath",
         "wgpuCodebrixTextureGetD3d12Info",
         "wgpuCodebrixTextureGetVulkanInfo",
         "wgpuCodebrixVulkanAdoptRequirementsFreeMembers",
@@ -343,6 +344,7 @@ public unsafe partial struct CodebrixProcTable
         CodebrixProcStatus.Implemented,
         CodebrixProcStatus.Implemented,
         CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
         CodebrixProcStatus.AbortsUnimplemented,
         CodebrixProcStatus.Implemented,
         CodebrixProcStatus.Implemented,
@@ -592,6 +594,7 @@ public unsafe partial struct CodebrixProcTable
         BackendType.D3D12,
         BackendType.Metal,
         BackendType.Vulkan,
+        BackendType.Metal,
         BackendType.D3D12,
         BackendType.Vulkan,
         BackendType.Vulkan,
@@ -973,6 +976,9 @@ public unsafe partial struct CodebrixProcTable
     /// <summary><c>wgpuCodebrixInstanceAdoptVulkanDevice</c> - see <see cref="WebGpu.CodebrixInstanceAdoptVulkanDevice" />.</summary>
     /// <remarks>ABORTS on the first uncaptured error: the adopted device has the default uncaptured-error handler (use error scopes).</remarks>
     public delegate* unmanaged[Cdecl]<Instance, CodebrixVulkanAdoptDescriptor*, Adapter*, Device*, Status> CodebrixInstanceAdoptVulkanDevice;
+
+    /// <summary><c>wgpuCodebrixSetMetalPreciseMath</c> - see <see cref="WebGpu.CodebrixSetMetalPreciseMath" />.</summary>
+    public delegate* unmanaged[Cdecl]<uint, Status> CodebrixSetMetalPreciseMath;
 
     /// <summary><c>wgpuCodebrixTextureGetD3d12Info</c> - see <see cref="WebGpu.CodebrixTextureGetD3d12Info" />.</summary>
     public delegate* unmanaged[Cdecl]<Texture, CodebrixD3d12TextureInfo*, Status> CodebrixTextureGetD3d12Info;

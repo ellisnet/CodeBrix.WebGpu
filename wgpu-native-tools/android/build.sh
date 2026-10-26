@@ -19,7 +19,7 @@
 #                             pinned release every shipped RID is built with - never the host's
 #                             stable by accident)
 #
-# What it does, per ABI: copies wgpu-native/ + codebrix-wgpu/ into a fixed scratch folder
+# What it does, per ABI: copies wgpu-native/ + codebrix-wgpu/ + wgpu-hal/ into a fixed scratch folder
 # (patches/*.patch applied to the copy, never to the vendored tree) and DOG-FOODS
 # CodeBrix.RustTools (../driver android-build): RustWorkbench.BuildAndroidAsync with
 # AndroidLinkProfile.ForNdk(NDK, API 33) - the NDK's <triple>33-clang as cargo's linker and C
@@ -248,6 +248,7 @@ build_abi() {
     mkdir -p "$scratch" "$dest/unstripped"
     cp -a "$TOOLS_DIR/$WGPU_NATIVE_DIR" "$scratch/wgpu-native"
     cp -a "$TOOLS_DIR/codebrix-wgpu" "$scratch/codebrix-wgpu"
+    cp -a "$TOOLS_DIR/wgpu-hal" "$scratch/wgpu-hal"
     PATCHES_APPLIED=""
     for p in "$TOOLS_DIR/patches"/*.patch; do
         ( cd "$scratch" && patch -p1 --forward --batch --quiet < "$p" ) || { echo "ERROR: patch $(basename "$p") did not apply." >&2; exit 1; }

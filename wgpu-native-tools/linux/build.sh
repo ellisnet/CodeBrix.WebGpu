@@ -21,7 +21,7 @@
 #      digest-pinned manylinux_2_28_x86_64 image + clang/lld + Rust RUST_TOOLCHAIN + the aarch64 and
 #      riscv64 cross sysroots, which export-sysroot.sh takes from THEIR pinned manylinux images).
 #      Building it is the one container step that installs tools from the network.
-#   2. Stages wgpu-native/ + codebrix-wgpu/ in build-scratch/linux/stage (patches applied there).
+#   2. Stages wgpu-native/ + codebrix-wgpu/ + wgpu-hal/ in build-scratch/linux/stage (patches applied there).
 #   3. DOG-FOODS CodeBrix.RustTools.Docker through ../driver (linux-build): engine check, image,
 #      labelled container, source copy, `cargo fetch` (network on - crates.io only, pinned by
 #      Cargo.lock) into the cargo cache volume, licence audit inside the container, and a full
@@ -123,6 +123,7 @@ stage_source() {
     rm -rf "$stage"; mkdir -p "$stage"
     cp -a "$TOOLS_DIR/$WGPU_NATIVE_DIR" "$stage/wgpu-native"
     cp -a "$TOOLS_DIR/codebrix-wgpu" "$stage/codebrix-wgpu"
+    cp -a "$TOOLS_DIR/wgpu-hal" "$stage/wgpu-hal"           # vendored for patches/0010 ([patch.crates-io])
     PATCHES_APPLIED=""
     for p in "$TOOLS_DIR"/patches/*.patch; do
         ( cd "$stage" && patch -p1 --forward --batch --quiet < "$p" ) || { echo "ERROR: $(basename "$p") did not apply. Patches are never applied best-effort." >&2; exit 1; }
@@ -130,7 +131,7 @@ stage_source() {
     done
     PATCHES_APPLIED="${PATCHES_APPLIED# }"
     mkdir -p "$stage/target"      # mount point for the network-free compile's target folder
-    echo "  staged    : wgpu-native/ + codebrix-wgpu/ -> build-scratch/linux/stage (patches: $PATCHES_APPLIED)"
+    echo "  staged    : wgpu-native/ + codebrix-wgpu/ + wgpu-hal/ -> build-scratch/linux/stage (patches: $PATCHES_APPLIED)"
 }
 
 API_PID=""

@@ -4,7 +4,7 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   e0a21af4d2a3eeafde38d13a7f0943e3acd2bcd95f736c24b86544b8c4c9fb65  wgpu-native-tools/specs/codebrix.yml
+//   d2ffaba8efc2398b17d17ff452eb5a147cc93f6ca1a33a5cfe85b6e2ed9902fb  wgpu-native-tools/specs/codebrix.yml
 //   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 using System.Runtime.InteropServices;
@@ -530,6 +530,29 @@ public static unsafe partial class WebGpu
     /// <returns><c>WGPUStatus_Success</c>, or <c>WGPUStatus_Error</c> (reason through the log callback).</returns>
     [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixInstanceAdoptVulkanDevice")]
     public static partial Status CodebrixInstanceAdoptVulkanDevice(Instance instance, CodebrixVulkanAdoptDescriptor* descriptor, Adapter* adapter, Device* device);
+
+    /// <summary>
+    /// <para>
+    /// Opts the process in to (or back out of) IEEE floating point for every WGSL shader the Metal
+    /// backend compiles: Metal's default fast math lets its compiler assume no NaN or infinity,
+    /// reassociate arithmetic and use approximate transcendental functions (measured on an Intel GPU:
+    /// <c>x != x</c> false for a NaN, sin/cos tens of ulps off). WGSL's accuracy rules allow that, so it stays
+    /// the default; a consumer whose kernels depend on IEEE behaviour (NaN checks, error-free sums,
+    /// correctly rounded math) turns this on. On: <c>MTLMathModeSafe</c> and precise math functions (macOS 15
+    /// / iOS 18 and later), fast math disabled before those systems. The Metal compiler may still fuse
+    /// <c>a * b + c</c> into a fused multiply-add either way.
+    /// </para>
+    /// <para>
+    /// Process-wide and off until called. It applies to pipelines created after the call (each
+    /// pipeline's shaders are compiled to Metal when the pipeline is created), on every device; call it
+    /// once, before creating any pipeline. Passthrough MSL is never changed. Metal only: elsewhere it
+    /// returns <c>WGPUStatus_Error</c> and changes nothing (wgpu-hal patch, wgpu-native-tools/patches/0010).
+    /// </para>
+    /// </summary>
+    /// <param name="enabled">True for IEEE floating point; false for Metal's default fast math.</param>
+    /// <returns><c>WGPUStatus_Success</c> on a build with the Metal backend (macOS); <c>WGPUStatus_Error</c> elsewhere.</returns>
+    [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixSetMetalPreciseMath")]
+    public static partial Status CodebrixSetMetalPreciseMath(uint enabled);
 
     /// <summary>
     /// Fills <see cref="CodebrixD3d12TextureInfo" /> for a texture on the Direct3D 12 backend.

@@ -50,7 +50,20 @@ TSV="$CRATES/crates.tsv"
 NOT_LINKED="$CRATES/not-linked.txt"
 LOCK="$TOOLS_DIR/codebrix-wgpu/Cargo.lock"
 PREFERENCE="MIT Apache-2.0 Zlib ISC BSD-2-Clause BSD-3-Clause Unicode-3.0 CC0-1.0"
+# crates.io crates the build takes from a vendored copy (codebrix-wgpu/Cargo.toml [patch.crates-io]):
+# their lock entries carry no registry source, but they are crates.io crates compiled into the library
+# and are accounted for exactly like the others (driver/Program.cs keeps the same list).
+VENDORED_CRATES="wgpu-hal"
 ALL_TRIPLES="x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu riscv64gc-unknown-linux-gnu aarch64-linux-android x86_64-linux-android x86_64-pc-windows-msvc aarch64-pc-windows-msvc aarch64-apple-darwin x86_64-apple-darwin"
+
+# "name version" of every crates.io package of the lock: registry entries + the vendored crates.io crates.
+lock_crates_io() {
+    awk -v vendored=" $VENDORED_CRATES " '
+        function flush() { if (n != "" && (s || index(vendored, " " n " "))) print n " " v }
+        /^\[\[package\]\]/ { flush(); n = ""; v = ""; s = 0 }
+        /^name = / { n = $3; gsub(/"/, "", n) } /^version = / { v = $3; gsub(/"/, "", v) } /^source = "registry/ { s = 1 }
+        END { flush() }' "$LOCK" | tr -d '"' | LC_ALL=C sort -u
+}
 
 sha256_of() { if command -v sha256sum > /dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
 rule() { printf '%s\n' '--------------------------------------------------------------------------------'; }
@@ -186,7 +199,7 @@ check() {
     #  ../.gitattributes, so no checkout converts the inputs or the output)
     # every crates.io package of the lock: listed (at that version) or recorded as not linked
     local lock_pkgs listed unlisted stale
-    lock_pkgs="$(awk '/^\[\[package\]\]/{n="";v="";s=""} /^name = /{n=$3} /^version = /{v=$3} /^source = "registry/{print n" "v}' "$LOCK" | tr -d '"' | LC_ALL=C sort -u)"
+    lock_pkgs="$(lock_crates_io)"
     listed="$( { grep -v '^#' "$TSV" | awk -F'\t' '{print $1" "$2}'; grep -v '^#' "$NOT_LINKED" | grep . ; } | LC_ALL=C sort -u)"
     unlisted="$(LC_ALL=C comm -23 <(printf '%s\n' "$lock_pkgs") <(printf '%s\n' "$listed"))"
     stale="$(LC_ALL=C comm -13 <(printf '%s\n' "$lock_pkgs") <(printf '%s\n' "$listed"))"
@@ -250,6 +263,7 @@ refresh() {
     mkdir -p "$scratch/src"
     cp -a "$TOOLS_DIR/wgpu-native" "$scratch/src/wgpu-native"
     cp -a "$TOOLS_DIR/codebrix-wgpu" "$scratch/src/codebrix-wgpu"
+    cp -a "$TOOLS_DIR/wgpu-hal" "$scratch/src/wgpu-hal"
     for p in "$TOOLS_DIR"/patches/*.patch; do ( cd "$scratch/src" && patch -p1 --forward --batch --quiet < "$p" ); done
     ( cd "$scratch/src/codebrix-wgpu" && cargo fetch --locked > /dev/null )
 
@@ -294,7 +308,7 @@ refresh() {
         echo "# of features that are off). Written by compose-license-wgpunative.sh --refresh from the RustTools"
         echo "# audit; --check uses it to prove every lock entry is accounted for."
         LC_ALL=C comm -23 \
-            <(awk '/^\[\[package\]\]/{n="";v=""} /^name = /{n=$3} /^version = /{v=$3} /^source = "registry/{print n" "v}' "$LOCK" | tr -d '"' | LC_ALL=C sort -u) \
+            <(lock_crates_io) \
             <(grep -v '^#' "$TSV" | awk -F'\t' '{print $1" "$2}' | LC_ALL=C sort -u)
     } > "$NOT_LINKED"
     # The standard Apache-2.0 text, from a crate of this graph that publishes it verbatim.

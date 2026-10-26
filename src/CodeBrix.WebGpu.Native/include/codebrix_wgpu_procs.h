@@ -4,7 +4,7 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   e0a21af4d2a3eeafde38d13a7f0943e3acd2bcd95f736c24b86544b8c4c9fb65  wgpu-native-tools/specs/codebrix.yml
+//   d2ffaba8efc2398b17d17ff452eb5a147cc93f6ca1a33a5cfe85b6e2ed9902fb  wgpu-native-tools/specs/codebrix.yml
 //   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 /**
@@ -32,9 +32,9 @@
 #include "codebrix_wgpu.h"
 
 /** The number of function pointers in @ref WGPUCodebrixProcTable. */
-#define WGPU_CODEBRIX_PROC_TABLE_FUNCTION_COUNT (251)
+#define WGPU_CODEBRIX_PROC_TABLE_FUNCTION_COUNT (252)
 /** FNV-1a 64 of every entry's C signature ("return name(type, type)", one per line), in table order. */
-#define WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH (UINT64_C(0x8F18F0987BEF9F9F))
+#define WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH (UINT64_C(0xA8B6E21BF6D91F71))
 /** The layout version of @ref WGPUCodebrixDeviceHandoff. */
 #define WGPU_CODEBRIX_DEVICE_HANDOFF_VERSION (1)
 /** Set in flags when the device has an uncaptured-error handler (errors no scope catches are reported, not fatal). */
@@ -150,6 +150,8 @@ typedef struct WGPUCodebrixProcTable {
     WGPUStatus (*codebrixInstanceAdoptMetalDevice)(WGPUInstance instance, WGPUCodebrixMetalAdoptDescriptor const * descriptor, WGPUAdapter * adapter, WGPUDevice * device);
     /** wgpuCodebrixInstanceAdoptVulkanDevice. ABORTS on the first uncaptured error: the adopted device has the default uncaptured-error handler (use error scopes). */
     WGPUStatus (*codebrixInstanceAdoptVulkanDevice)(WGPUInstance instance, WGPUCodebrixVulkanAdoptDescriptor const * descriptor, WGPUAdapter * adapter, WGPUDevice * device);
+    /** wgpuCodebrixSetMetalPreciseMath. */
+    WGPUStatus (*codebrixSetMetalPreciseMath)(WGPUBool enabled);
     /** wgpuCodebrixTextureGetD3d12Info. */
     WGPUStatus (*codebrixTextureGetD3d12Info)(WGPUTexture texture, WGPUCodebrixD3d12TextureInfo * info);
     /** wgpuCodebrixTextureGetVulkanInfo. */
@@ -638,7 +640,7 @@ typedef struct WGPUCodebrixFrameHandoff {
 
 WGPU_CODEBRIX_STATIC_ASSERT((sizeof(WGPUCodebrixProcTable) - offsetof(WGPUCodebrixProcTable, adapterAddRef)) / sizeof(void (*)(void)) == WGPU_CODEBRIX_PROC_TABLE_FUNCTION_COUNT, "function table entry count");
 #if UINTPTR_MAX == UINT64_MAX
-WGPU_CODEBRIX_STATIC_ASSERT(sizeof(WGPUCodebrixProcTable) == 2032, "WGPUCodebrixProcTable size");
+WGPU_CODEBRIX_STATIC_ASSERT(sizeof(WGPUCodebrixProcTable) == 2040, "WGPUCodebrixProcTable size");
 WGPU_CODEBRIX_STATIC_ASSERT(offsetof(WGPUCodebrixProcTable, size) == 0, "WGPUCodebrixProcTable.size offset");
 WGPU_CODEBRIX_STATIC_ASSERT(offsetof(WGPUCodebrixProcTable, apiVersion) == 4, "WGPUCodebrixProcTable.apiVersion offset");
 WGPU_CODEBRIX_STATIC_ASSERT(offsetof(WGPUCodebrixProcTable, functionCount) == 8, "WGPUCodebrixProcTable.functionCount offset");
@@ -723,6 +725,7 @@ WGPU_CODEBRIX_STATIC_ASSERT(offsetof(WGPUCodebrixFrameHandoff, commandEncoder) =
     WGPUCodebrixProcStatus_Unsupported, \
     WGPUCodebrixProcStatus_AbortsOnError, \
     WGPUCodebrixProcStatus_AbortsOnError, \
+    WGPUCodebrixProcStatus_Implemented, \
     WGPUCodebrixProcStatus_Implemented, \
     WGPUCodebrixProcStatus_Implemented, \
     WGPUCodebrixProcStatus_Implemented, \
@@ -976,6 +979,7 @@ WGPU_CODEBRIX_STATIC_ASSERT(offsetof(WGPUCodebrixFrameHandoff, commandEncoder) =
     WGPUBackendType_D3D12, \
     WGPUBackendType_Metal, \
     WGPUBackendType_Vulkan, \
+    WGPUBackendType_Metal, \
     WGPUBackendType_D3D12, \
     WGPUBackendType_Vulkan, \
     WGPUBackendType_Vulkan, \

@@ -27,6 +27,11 @@ are covered below.
      webgpu-headers/ an unmodified copy of webgpu-native/webgpu-headers at the
      commit that release pins (673658bc2bd70ec39fc55ebe6bb0173cf6d0a603). The
      archives and their SHA-256 sums are in wgpu-native-tools/upstream-downloads/.
+     wgpu-native-tools/wgpu-hal/ is an unmodified copy of the wgpu-hal 29.0.3
+     crate (gfx-rs/wgpu, crates.io; "MIT OR Apache-2.0", used under MIT; its
+     LICENSE.MIT is in LICENSE-WgpuNative.txt, as for every crate compiled in),
+     vendored because patches/0010 changes it; its .crate archive is in
+     upstream-downloads/ as well.
      Build-time patches live in wgpu-native-tools/patches/ and are applied to a
      scratch copy only; the vendored trees are never edited.
 

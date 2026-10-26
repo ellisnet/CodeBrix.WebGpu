@@ -22,7 +22,7 @@
 #include "webgpu.h"
 
 /** The version of this contract. Returned by @ref wgpuCodebrixGetApiVersion. */
-#define WGPU_CODEBRIX_API_VERSION (2)
+#define WGPU_CODEBRIX_API_VERSION (3)
 
 /**
  * The state a texture is in, or is to be transitioned to (Vulkan: image layout + access;
@@ -343,6 +343,7 @@ typedef WGPUStatus (*WGPUProcCodebrixVulkanGetAdoptRequirements)(WGPUCodebrixVul
 typedef void (*WGPUProcCodebrixVulkanAdoptRequirementsFreeMembers)(WGPUCodebrixVulkanAdoptRequirements codebrixVulkanAdoptRequirements) WGPU_FUNCTION_ATTRIBUTE;
 typedef uint64_t (*WGPUProcCodebrixDeviceAddFaultListener)(WGPUDevice device, WGPUCodebrixFaultCallbacks const * callbacks) WGPU_FUNCTION_ATTRIBUTE;
 typedef WGPUStatus (*WGPUProcCodebrixDeviceRemoveFaultListener)(WGPUDevice device, uint64_t listenerId) WGPU_FUNCTION_ATTRIBUTE;
+typedef WGPUStatus (*WGPUProcCodebrixSetMetalPreciseMath)(WGPUBool enabled) WGPU_FUNCTION_ATTRIBUTE;
 #endif  /* !defined(WGPU_SKIP_PROCS) */
 
 #if !defined(WGPU_SKIP_DECLARATIONS)
@@ -395,6 +396,11 @@ WGPU_EXPORT void wgpuCodebrixVulkanAdoptRequirementsFreeMembers(WGPUCodebrixVulk
 WGPU_EXPORT uint64_t wgpuCodebrixDeviceAddFaultListener(WGPUDevice device, WGPUCodebrixFaultCallbacks const * callbacks) WGPU_FUNCTION_ATTRIBUTE;
 /** Removes a fault listener; when it returns the listener is not running and is never called again. */
 WGPU_EXPORT WGPUStatus wgpuCodebrixDeviceRemoveFaultListener(WGPUDevice device, uint64_t listenerId) WGPU_FUNCTION_ATTRIBUTE;
+/**
+ * Process-wide opt-in to IEEE floating point (no fast math) for WGSL compiled to Metal; applies to
+ * pipelines created afterwards. Off by default. Metal only (Error elsewhere).
+ */
+WGPU_EXPORT WGPUStatus wgpuCodebrixSetMetalPreciseMath(WGPUBool enabled) WGPU_FUNCTION_ATTRIBUTE;
 #endif  /* !defined(WGPU_SKIP_DECLARATIONS) */
 
 #ifdef __cplusplus

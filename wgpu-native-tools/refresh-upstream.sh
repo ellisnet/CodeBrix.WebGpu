@@ -18,13 +18,16 @@
 #   3. records both sha256s (upstream-downloads/SHA256SUMS; the archives are kept there);
 #   4. assembles the tree: the wgpu-native archive with webgpu-headers unpacked into
 #      ffi/webgpu-headers/ (examples/vendor/glfw stays empty - examples only, never built);
+#   4b. downloads the wgpu-hal crate the new upstream Cargo.lock pins from crates.io
+#      (https://static.crates.io/crates/wgpu-hal/wgpu-hal-<version>.crate), FAILS unless its sha256
+#      equals the lock's checksum, and unpacks it (vendored for patches/0010; README.txt);
 #   5. applies patches/*.patch to a SCRATCH copy and FAILS LOUDLY if one does not apply;
 #   6. prints the delta of the C API between the current and the new trees: functions, structs
 #      and enums of webgpu.h and wgpu.h (the YAML generator's inputs: webgpu.yml changes too);
 #   7. (without --into) replaces wgpu-native/ wholesale - never touching codebrix-wgpu/, patches/,
 #      specs/ or any script - re-derives codebrix-wgpu/Cargo.lock from the new upstream lock (only
-#      our package is added; cargo prunes what no longer links; the script proves no upstream
-#      version changed), moves the "=" pins of wgpu-core / wgpu-types / wgpu-hal in
+#      our package is added and wgpu-hal becomes the vendored path entry; cargo prunes what no
+#      longer links; the script proves no upstream version changed), moves the "=" pins of wgpu-core / wgpu-types / wgpu-hal in
 #      codebrix-wgpu/Cargo.toml to the new lock's versions, updates linux/pins.env, and prints the
 #      remaining steps (the exact bump recipe is in README.txt, "BUMPING WGPU").
 #
@@ -76,9 +79,22 @@ mv "$WORK/a/wgpu-native-$VERSION" "$NEW"
 mv "$WORK/b/webgpu-headers-$COMMIT" "$NEW/ffi/webgpu-headers"
 echo "  $(find "$NEW" -type f | wc -l) files"
 
+echo "--- wgpu-hal (vendored for patches/0010) ---"
+HAL="$(awk '/^name = "wgpu-hal"$/{getline; gsub(/version = |"/, ""); print; exit}' "$NEW/Cargo.lock")"
+HAL_SUM="$(awk '/^name = "wgpu-hal"$/{f=1} f && /^checksum = /{gsub(/checksum = |"/, ""); print; exit}' "$NEW/Cargo.lock")"
+[ -n "$HAL" ] && [ -n "$HAL_SUM" ] || { echo "ERROR: the new upstream Cargo.lock has no crates.io wgpu-hal entry with a checksum." >&2; exit 1; }
+HAL_CRATE="wgpu-hal-$HAL.crate"
+curl -fsSL "https://static.crates.io/crates/wgpu-hal/$HAL_CRATE" -o "$WORK/dl/$HAL_CRATE"
+HAL_SHA="$(sha256sum "$WORK/dl/$HAL_CRATE" | cut -d' ' -f1)"
+[ "$HAL_SHA" = "$HAL_SUM" ] || { echo "ERROR: $HAL_CRATE sha256 $HAL_SHA differs from the lock's checksum $HAL_SUM." >&2; exit 1; }
+mkdir -p "$WORK/wgpu-hal"
+tar -xzf "$WORK/dl/$HAL_CRATE" -C "$WORK/wgpu-hal" --strip-components=1
+echo "  $HAL_CRATE  sha256 $HAL_SHA (= Cargo.lock checksum)  $(find "$WORK/wgpu-hal" -type f | wc -l) files"
+
 echo "--- patches (scratch copy) ---"
 mkdir -p "$WORK/patched"
 cp -a "$NEW" "$WORK/patched/wgpu-native"
+cp -a "$WORK/wgpu-hal" "$WORK/patched/wgpu-hal"
 for p in "$TOOLS_DIR"/patches/*.patch; do
     ( cd "$WORK/patched" && patch -p1 --forward --batch < "$p" ) \
         || { echo "ERROR: $(basename "$p") DOES NOT APPLY to $TAG. Fix the patch (see patches/README.txt) before anything else." >&2; exit 1; }
@@ -115,31 +131,34 @@ fi
 if [ -n "$INTO" ]; then
     rm -rf "$INTO"; mkdir -p "$(dirname "$INTO")"
     cp -a "$NEW" "$INTO"
-    printf '%s  %s\n%s  %s\n' "$HEADERS_SHA" "$HEADERS_TGZ" "$NATIVE_SHA" "$NATIVE_TGZ" > "$INTO.SHA256SUMS"
-    echo "--- --into: the assembled tree is $INTO (nothing in the repository was changed) ---"
+    rm -rf "$INTO-wgpu-hal"; cp -a "$WORK/wgpu-hal" "$INTO-wgpu-hal"
+    printf '%s  %s\n%s  %s\n%s  %s\n' "$HEADERS_SHA" "$HEADERS_TGZ" "$HAL_SHA" "$HAL_CRATE" "$NATIVE_SHA" "$NATIVE_TGZ" > "$INTO.SHA256SUMS"
+    echo "--- --into: the assembled trees are $INTO and $INTO-wgpu-hal (nothing in the repository was changed) ---"
     exit 0
 fi
 
-echo "--- replacing wgpu-native/ and upstream-downloads/ ---"
-rm -rf "$TOOLS_DIR/wgpu-native"
+echo "--- replacing wgpu-native/, wgpu-hal/ and upstream-downloads/ ---"
+rm -rf "$TOOLS_DIR/wgpu-native" "$TOOLS_DIR/wgpu-hal"
 cp -a "$NEW" "$TOOLS_DIR/wgpu-native"
-find "$DL" -maxdepth 1 -type f \( -name 'wgpu-native-*.tar.gz' -o -name 'webgpu-headers-*.tar.gz' \) -delete
-cp "$WORK/dl/$NATIVE_TGZ" "$WORK/dl/$HEADERS_TGZ" "$DL/"
-( cd "$DL" && sha256sum "$HEADERS_TGZ" "$NATIVE_TGZ" > SHA256SUMS )
+cp -a "$WORK/wgpu-hal" "$TOOLS_DIR/wgpu-hal"
+find "$DL" -maxdepth 1 -type f \( -name 'wgpu-native-*.tar.gz' -o -name 'webgpu-headers-*.tar.gz' -o -name 'wgpu-hal-*.crate' \) -delete
+cp "$WORK/dl/$NATIVE_TGZ" "$WORK/dl/$HEADERS_TGZ" "$WORK/dl/$HAL_CRATE" "$DL/"
+( cd "$DL" && sha256sum "$HEADERS_TGZ" "$HAL_CRATE" "$NATIVE_TGZ" > SHA256SUMS )
 
 echo "--- codebrix-wgpu/Cargo.lock from the new upstream lock ---"
 command -v cargo > /dev/null 2>&1 || { echo "ERROR: cargo is needed for the lock step." >&2; exit 1; }
 CORE="$(awk '/^name = "wgpu-core"$/{getline; gsub(/version = |"/, ""); print; exit}' "$NEW/Cargo.lock")"
 TYPES="$(awk '/^name = "wgpu-types"$/{getline; gsub(/version = |"/, ""); print; exit}' "$NEW/Cargo.lock")"
-HAL="$(awk '/^name = "wgpu-hal"$/{getline; gsub(/version = |"/, ""); print; exit}' "$NEW/Cargo.lock")"
 sed -i -E "s/^(wgc = \{ package = \"wgpu-core\", version = \")=[^\"]+/\1=$CORE/; s/^(wgt = \{ package = \"wgpu-types\", version = \")=[^\"]+/\1=$TYPES/; s/^(hal = \{ package = \"wgpu-hal\", version = \")=[^\"]+/\1=$HAL/" \
     "$TOOLS_DIR/codebrix-wgpu/Cargo.toml"
 echo "  codebrix-wgpu/Cargo.toml pins: wgpu-core =$CORE, wgpu-types =$TYPES, wgpu-hal =$HAL"
 mkdir -p "$WORK/lock"
 cp -a "$WORK/patched/wgpu-native" "$WORK/lock/wgpu-native"
 cp -a "$TOOLS_DIR/codebrix-wgpu" "$WORK/lock/codebrix-wgpu"
+cp -a "$WORK/patched/wgpu-hal" "$WORK/lock/wgpu-hal"
 cp "$NEW/Cargo.lock" "$WORK/lock/codebrix-wgpu/Cargo.lock"
-( cd "$WORK/lock/codebrix-wgpu" && cargo metadata --format-version 1 > /dev/null )   # adds our package; no `cargo update`
+# adds our package and turns the wgpu-hal entry into the [patch.crates-io] path entry; no `cargo update`
+( cd "$WORK/lock/codebrix-wgpu" && cargo metadata --format-version 1 > /dev/null )
 ext() { awk '/^name = /{n=$3} /^version = /{print n, $3}' "$1" | LC_ALL=C sort; }
 CHANGED="$(LC_ALL=C comm -13 <(ext "$NEW/Cargo.lock") <(ext "$WORK/lock/codebrix-wgpu/Cargo.lock") | grep -v '"codebrix-wgpu"' || true)"
 [ -z "$CHANGED" ] || { echo "ERROR: resolving codebrix-wgpu changed upstream versions - an extra dependency of ours needs a version upstream does not lock:" >&2; echo "$CHANGED" >&2; exit 1; }

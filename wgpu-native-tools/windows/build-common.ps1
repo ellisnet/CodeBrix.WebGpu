@@ -284,8 +284,8 @@ LIBCLANG_PATH to the folder holding libclang.dll.
 }
 
 # ---------------------------------------------------------------------------------------------
-# Source: wgpu-native\ and codebrix-wgpu\ copied side by side to scratch and built there, so the
-# vendored tree stays unmodified. patches\*.patch apply to the copy, in name order.
+# Source: wgpu-native\, codebrix-wgpu\ and wgpu-hal\ copied side by side to scratch and built there,
+# so the vendored trees stay unmodified. patches\*.patch apply to the copy, in name order.
 # ---------------------------------------------------------------------------------------------
 function Copy-SourceToScratch {
     param(
@@ -297,7 +297,8 @@ function Copy-SourceToScratch {
     New-Item -ItemType Directory -Path $ScratchDir -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $ToolsDir $Pins['WGPU_NATIVE_DIR']) -Destination (Join-Path $ScratchDir 'wgpu-native') -Recurse
     Copy-Item -LiteralPath (Join-Path $ToolsDir 'codebrix-wgpu')          -Destination (Join-Path $ScratchDir 'codebrix-wgpu') -Recurse
-    Write-Host "  copied wgpu-native\ codebrix-wgpu\ -> $ScratchDir"
+    Copy-Item -LiteralPath (Join-Path $ToolsDir 'wgpu-hal')               -Destination (Join-Path $ScratchDir 'wgpu-hal') -Recurse
+    Write-Host "  copied wgpu-native\ codebrix-wgpu\ wgpu-hal\ -> $ScratchDir"
 
     $applied = @()
     $git = Get-Command git -ErrorAction SilentlyContinue

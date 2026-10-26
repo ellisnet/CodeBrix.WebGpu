@@ -4,7 +4,7 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   e0a21af4d2a3eeafde38d13a7f0943e3acd2bcd95f736c24b86544b8c4c9fb65  wgpu-native-tools/specs/codebrix.yml
+//   d2ffaba8efc2398b17d17ff452eb5a147cc93f6ca1a33a5cfe85b6e2ed9902fb  wgpu-native-tools/specs/codebrix.yml
 //   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 namespace CodeBrix.WebGpu.Native;
@@ -81,5 +81,5 @@ public static class Constants
     /// <summary>
     /// The version of this contract. Returned by <see cref="WebGpu.CodebrixGetApiVersion" />.
     /// </summary>
-    public const uint ApiVersion = 2u;
+    public const uint ApiVersion = 3u;
 }

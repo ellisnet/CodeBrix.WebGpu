@@ -6,8 +6,9 @@
  * Loads the library BY PATH (dlopen / LoadLibrary, as .NET does) - it is never linked against it -
  * resolves every entry point it uses by name and, when given the expected-exports list, every
  * symbol in it. Then:
- *   - wgpuCodebrixGetApiVersion == 2, wgpuGetVersion == 29.0.1.1 packed, wgpuCodebrixGetBuildInfo
- *     (with a non-empty `patches` fix-set list);
+ *   - wgpuCodebrixGetApiVersion == WGPU_CODEBRIX_API_VERSION (3), wgpuGetVersion == 29.0.1.1 packed,
+ *     wgpuCodebrixGetBuildInfo (with a non-empty `patches` fix-set list);
+ *   - wgpuCodebrixSetMetalPreciseMath: Success on a macOS build, Error elsewhere (patches/0010);
  *   - with the export list: wgpuCodebrixGetProcStatus by ordinal (WaitAny AbortsUnimplemented,
  *     DeviceCreateBuffer Implemented, the D3D12 getter NotAvailableOnBackend off Windows, past the
  *     end Unknown);
@@ -26,7 +27,9 @@
  *               into a second instance + a compute pass on the adopted device;
  *       D3D12:  GetD3d12Info, TextureGetD3d12Info (DXGI 28), CreateTextureFromD3d12Resource round
  *               trip; AdoptD3d12Device -> Error (not supported by wgpu-hal 29, documented);
- *       Metal:  CreateTextureFromMetalTexture round trip, AdoptMetalDevice + compute;
+ *       Metal:  CreateTextureFromMetalTexture round trip, AdoptMetalDevice + compute, and with
+ *               SetMetalPreciseMath on, a NaN compares unequal to itself in a compute pass (Metal's
+ *               default fast math removes that check; patches/0010);
  *     and the functions of every OTHER backend return Error / NULL;
  *     plus Vulkan: InstanceApiVersion <= 1.3 (the apiVersion vkCreateInstance got), and
  *     VulkanGetAdoptRequirements (non-empty extension list wgpu's own device has, a
@@ -135,7 +138,8 @@ typedef void *(*PFN_wgpuTextureGetNativeMetalTexture)(WGPUTexture);
     X(wgpuCodebrixVulkanGetAdoptRequirements, WGPUProcCodebrixVulkanGetAdoptRequirements) \
     X(wgpuCodebrixVulkanAdoptRequirementsFreeMembers, WGPUProcCodebrixVulkanAdoptRequirementsFreeMembers) \
     X(wgpuCodebrixDeviceAddFaultListener, WGPUProcCodebrixDeviceAddFaultListener) \
-    X(wgpuCodebrixDeviceRemoveFaultListener, WGPUProcCodebrixDeviceRemoveFaultListener)
+    X(wgpuCodebrixDeviceRemoveFaultListener, WGPUProcCodebrixDeviceRemoveFaultListener) \
+    X(wgpuCodebrixSetMetalPreciseMath, WGPUProcCodebrixSetMetalPreciseMath)
 
 #define DECLARE(n, t) static t p_##n;
 FUNCS(DECLARE)
@@ -302,6 +306,67 @@ static int compute_doubling(WGPUDevice device) {
     p_wgpuShaderModuleRelease(module);
     p_wgpuQueueRelease(queue);
     return ok;
+}
+
+/* patches/0010: a NaN made on the GPU (0/0 from a buffer, so nothing folds it) compared with itself.
+   Returns 1 when `x != x` held, 0 when it did not, -1 when the readback failed. */
+static const char *k_wgsl_nan =
+    "@group(0) @binding(0) var<storage, read_write> data: array<u32>;\n"
+    "@compute @workgroup_size(1)\n"
+    "fn main() { let zero = bitcast<f32>(data[0]); let x = zero / zero; data[1] = select(0u, 1u, x != x); }\n";
+
+static int compute_nan_unequal(WGPUDevice device) {
+    uint32_t input[2] = { 0u, 7u };   /* 0.0f, and a sentinel the shader overwrites */
+    WGPUQueue queue = p_wgpuDeviceGetQueue(device);
+    WGPUShaderSourceWGSL wgsl = WGPU_SHADER_SOURCE_WGSL_INIT;
+    wgsl.code = sv(k_wgsl_nan);
+    WGPUShaderModuleDescriptor smd = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+    smd.nextInChain = &wgsl.chain;
+    WGPUShaderModule module = p_wgpuDeviceCreateShaderModule(device, &smd);
+    WGPUComputePipelineDescriptor cpd = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+    cpd.compute.module = module;
+    cpd.compute.entryPoint = sv("main");
+    WGPUComputePipeline pipeline = p_wgpuDeviceCreateComputePipeline(device, &cpd);
+    WGPUBufferDescriptor bd = WGPU_BUFFER_DESCRIPTOR_INIT;
+    bd.size = sizeof input;
+    bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst;
+    WGPUBuffer storage = p_wgpuDeviceCreateBuffer(device, &bd);
+    bd.usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst;
+    WGPUBuffer readback = p_wgpuDeviceCreateBuffer(device, &bd);
+    p_wgpuQueueWriteBuffer(queue, storage, 0, input, sizeof input);
+    WGPUBindGroupLayout bgl = p_wgpuComputePipelineGetBindGroupLayout(pipeline, 0);
+    WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
+    entry.binding = 0;
+    entry.buffer = storage;
+    entry.size = sizeof input;
+    WGPUBindGroupDescriptor bgd = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    bgd.layout = bgl;
+    bgd.entryCount = 1;
+    bgd.entries = &entry;
+    WGPUBindGroup bg = p_wgpuDeviceCreateBindGroup(device, &bgd);
+    WGPUCommandEncoder enc = p_wgpuDeviceCreateCommandEncoder(device, NULL);
+    WGPUComputePassEncoder pass = p_wgpuCommandEncoderBeginComputePass(enc, NULL);
+    p_wgpuComputePassEncoderSetPipeline(pass, pipeline);
+    p_wgpuComputePassEncoderSetBindGroup(pass, 0, bg, 0, NULL);
+    p_wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
+    p_wgpuComputePassEncoderEnd(pass);
+    p_wgpuComputePassEncoderRelease(pass);
+    p_wgpuCommandEncoderCopyBufferToBuffer(enc, storage, 0, readback, 0, sizeof input);
+    submit(device, queue, enc);
+    int result = -1;
+    if (map_and_wait(device, readback, sizeof input)) {
+        const uint32_t *out = (const uint32_t *)p_wgpuBufferGetConstMappedRange(readback, 0, sizeof input);
+        if (out && out[1] <= 1u) result = (int)out[1];
+        p_wgpuBufferUnmap(readback);
+    }
+    p_wgpuBindGroupRelease(bg);
+    p_wgpuBindGroupLayoutRelease(bgl);
+    p_wgpuBufferRelease(readback);
+    p_wgpuBufferRelease(storage);
+    p_wgpuComputePipelineRelease(pipeline);
+    p_wgpuShaderModuleRelease(module);
+    p_wgpuQueueRelease(queue);
+    return result;
 }
 
 static WGPUTextureDescriptor rt_descriptor(void) {
@@ -484,6 +549,11 @@ int main(int argc, char **argv) {
     /* versions + build info */
     snprintf(line, sizeof line, "wgpuCodebrixGetApiVersion() == %d (got %u)", WGPU_CODEBRIX_API_VERSION, p_wgpuCodebrixGetApiVersion());
     check(p_wgpuCodebrixGetApiVersion() == WGPU_CODEBRIX_API_VERSION, line);
+#if defined(__APPLE__)
+    check(p_wgpuCodebrixSetMetalPreciseMath(0) == WGPUStatus_Success, "SetMetalPreciseMath(false) == Success (a Metal build)");
+#else
+    check(p_wgpuCodebrixSetMetalPreciseMath(1) == WGPUStatus_Error, "SetMetalPreciseMath == Error (no Metal backend in this build)");
+#endif
     snprintf(line, sizeof line, "wgpuGetVersion() == 0x1D000101 (29.0.1.1) (got 0x%08X)", p_wgpuGetVersion());
     check(p_wgpuGetVersion() == 0x1D000101u, line);
     WGPUCodebrixBuildInfo bi;
@@ -779,6 +849,12 @@ int main(int argc, char **argv) {
         }
         if (adopted_adapter) p_wgpuAdapterRelease(adopted_adapter);
         p_wgpuInstanceRelease(other);
+        /* patches/0010: with precise math on, pipelines created afterwards keep IEEE NaN semantics. */
+        check(p_wgpuCodebrixSetMetalPreciseMath(1) == WGPUStatus_Success, "SetMetalPreciseMath(true) == Success");
+        int nan_unequal = compute_nan_unequal(device);
+        snprintf(line, sizeof line, "precise math: a NaN compares unequal to itself in a compute pass (got %d)", nan_unequal);
+        check(nan_unequal == 1, line);
+        check(p_wgpuCodebrixSetMetalPreciseMath(0) == WGPUStatus_Success, "SetMetalPreciseMath(false) == Success (back to the default)");
     } else {
         printf("  backend %d: no native-object checks for it\n", (int)backend);
         check(vk_status == WGPUStatus_Error && dx_status == WGPUStatus_Error, "GetVulkanInfo / GetD3d12Info on a GL device -> Error");

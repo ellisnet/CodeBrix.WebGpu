@@ -378,6 +378,18 @@ Fault listeners (a host-owned fault dispatcher on a device someone else owns):
     (raw: ulong CodebrixDeviceAddFaultListener(Device, CodebrixFaultCallbacks*)
         -> listener id, 0 on failure; Status CodebrixDeviceRemoveFaultListener(Device, ulong))
 
+IEEE floating point for WGSL on Metal (macOS; opt-in, OFF by default):
+
+    Status WebGpu.CodebrixSetMetalPreciseMath(uint enabled);   // C wgpuCodebrixSetMetalPreciseMath
+        // Metal compiles WGSL with fast math by default: NaN checks (x != x)
+        // can vanish, arithmetic is reassociated, sin/cos/exp/pow are
+        // approximate. WGSL allows that. Call with 1 to compile every pipeline
+        // created AFTERWARDS (process-wide, every device) with IEEE semantics
+        // (MTLMathModeSafe + precise functions on macOS 15+, fast math off
+        // before); 0 restores the default. Call once, before creating
+        // pipelines. Success on macOS; Error elsewhere (no effect). The Metal
+        // compiler may still fuse a*b+c into an FMA either way.
+
 Contract/diagnostics: CodebrixGetApiVersion, CodebrixGetBuildInfo,
 CodebrixGetStructLayout, CodebrixGetProcStatus (all wrapped by
 CodeBrixWebGpuNative).

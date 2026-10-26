@@ -1,0 +1,60 @@
+CodeBrix patch 0010 - opt-in IEEE floating point for WGSL compiled to Metal
+(wgpu-hal/src/metal/mod.rs, wgpu-hal/src/metal/device.rs)
+
+WHAT: a process-wide switch, wgpu_hal::metal::CODEBRIX_PRECISE_MATH (off by default), read where the
+Metal backend compiles naga's MSL for a pipeline stage (Device::load_shader). When it is on, the
+MTLCompileOptions get mathMode = MTLMathModeSafe and mathFloatingPointFunctions =
+MTLMathFloatingPointFunctionsPrecise (macOS 15 / iOS 18 and later), or fastMathEnabled = NO before
+those systems. codebrix-wgpu's wgpuCodebrixSetMetalPreciseMath sets it (specs/codebrix.yml).
+Passthrough MSL (ShaderInput::Msl / Metallib) is never changed. With the switch off, nothing differs
+from the unpatched crate.
+WHY: wgpu-hal sets only the language version and preserveInvariance, so every WGSL kernel compiles
+with Metal's default fast math. Measured on an Intel UHD 630 (macOS 15.8, 2026-10-26, through this
+library's osx-x64 build): `x != x` is false for a NaN (NaN checks are removed), the error term of an
+error-free sum folds to 0 (reassociation), sin/cos are 80/29 ulps from the correctly rounded value.
+WGSL's accuracy rules allow that, so the default stays; a consumer whose kernels depend on IEEE
+behaviour (CodeBrix.Graphics3D.Cycles' WGSL device) opts in. Neither setting stops the Metal
+compiler from contracting a*b+c into an FMA (measured: still fused).
+UPSTREAM: wgpu 29.0.3 has no option for this. CodeBrix's own change. wgpu-hal is vendored for it
+(wgpu-hal/, the unmodified crates.io archive; UPSTREAM.txt) and replaces the crates.io crate
+through [patch.crates-io] in codebrix-wgpu/Cargo.toml.
+
+--- a/wgpu-hal/src/metal/mod.rs
++++ b/wgpu-hal/src/metal/mod.rs
+@@ -26,6 +26,14 @@
+ mod surface;
+ mod time;
+ 
++/// CodeBrix (patches/0010): when `true`, every WGSL shader this process compiles to MSL is compiled
++/// with IEEE floating-point semantics (`MTLMathMode::Safe` and precise math functions; on systems
++/// before macOS 15 / iOS 18, fast math disabled) instead of Metal's default fast math, which lets
++/// the compiler assume no NaN or infinity, reassociate and use approximate transcendental functions.
++/// Process-wide, off by default, read when each pipeline's shader is compiled; set by
++/// `wgpuCodebrixSetMetalPreciseMath`. Passthrough MSL is never affected.
++pub static CODEBRIX_PRECISE_MATH: atomic::AtomicBool = atomic::AtomicBool::new(false);
++
+ use alloc::{
+     string::{String, ToString as _},
+     sync::Arc,
+--- a/wgpu-hal/src/metal/device.rs
++++ b/wgpu-hal/src/metal/device.rs
+@@ -232,6 +232,19 @@
+                     options.setPreserveInvariance(true);
+                 }
+ 
++                // CodeBrix (patches/0010): opt-in IEEE floating point (super::CODEBRIX_PRECISE_MATH).
++                if super::CODEBRIX_PRECISE_MATH.load(atomic::Ordering::Relaxed) {
++                    if available!(macos = 15.0, ios = 18.0, tvos = 18.0, visionos = 2.0) {
++                        options.setMathMode(objc2_metal::MTLMathMode::Safe);
++                        options.setMathFloatingPointFunctions(
++                            objc2_metal::MTLMathFloatingPointFunctions::Precise,
++                        );
++                    } else {
++                        #[allow(deprecated)]
++                        options.setFastMathEnabled(false);
++                    }
++                }
++
+                 let library = self
+                     .shared
+                     .device

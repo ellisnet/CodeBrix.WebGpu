@@ -45,7 +45,7 @@ doc: |
 
 constants:
   - name: api_version
-    value: 2
+    value: 3
     doc: |
       The version of this contract. Returned by @ref wgpuCodebrixGetApiVersion.
 
@@ -1205,5 +1205,30 @@ functions:
         doc: |
           The id @ref wgpuCodebrixDeviceAddFaultListener returned.
         type: uint64
+
+  - name: codebrix_set_metal_precise_math
+    doc: |
+      Opts the process in to (or back out of) IEEE floating point for every WGSL shader the Metal
+      backend compiles: Metal's default fast math lets its compiler assume no NaN or infinity,
+      reassociate arithmetic and use approximate transcendental functions (measured on an Intel GPU:
+      `x != x` false for a NaN, sin/cos tens of ulps off). WGSL's accuracy rules allow that, so it stays
+      the default; a consumer whose kernels depend on IEEE behaviour (NaN checks, error-free sums,
+      correctly rounded math) turns this on. On: `MTLMathModeSafe` and precise math functions (macOS 15
+      / iOS 18 and later), fast math disabled before those systems. The Metal compiler may still fuse
+      `a * b + c` into a fused multiply-add either way.
+
+      Process-wide and off until called. It applies to pipelines created after the call (each
+      pipeline's shaders are compiled to Metal when the pipeline is created), on every device; call it
+      once, before creating any pipeline. Passthrough MSL is never changed. Metal only: elsewhere it
+      returns `WGPUStatus_Error` and changes nothing (wgpu-hal patch, wgpu-native-tools/patches/0010).
+    returns:
+      doc: |
+        `WGPUStatus_Success` on a build with the Metal backend (macOS); `WGPUStatus_Error` elsewhere.
+      type: enum.status
+    args:
+      - name: enabled
+        doc: |
+          True for IEEE floating point; false for Metal's default fast math.
+        type: bool
 
 objects: []

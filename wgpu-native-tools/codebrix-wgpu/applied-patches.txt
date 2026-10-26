@@ -11,3 +11,4 @@
 0007-wgpu-native-nonfatal-poll
 0008-wgpu-native-surface-usage-flags
 0009-wgpu-native-debugger-capture-wgpubool
+0010-wgpu-hal-metal-precise-math

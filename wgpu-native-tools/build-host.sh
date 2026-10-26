@@ -43,6 +43,7 @@ rm -rf "$SRC"
 mkdir -p "$SRC" "$OUT"
 cp -a "$TOOLS_DIR/$WGPU_NATIVE_DIR" "$SRC/wgpu-native"
 cp -a "$TOOLS_DIR/codebrix-wgpu" "$SRC/codebrix-wgpu"
+cp -a "$TOOLS_DIR/wgpu-hal" "$SRC/wgpu-hal"
 for p in "$TOOLS_DIR"/patches/*.patch; do
     ( cd "$SRC" && patch -p1 --forward --batch --quiet < "$p" ) || { echo "ERROR: $(basename "$p") did not apply." >&2; exit 1; }
 done

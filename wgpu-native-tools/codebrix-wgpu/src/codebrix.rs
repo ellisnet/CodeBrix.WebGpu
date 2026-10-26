@@ -49,7 +49,7 @@ use wgpu_native::codebrix_bridge as bridge;
 use wgpu_native::native;
 
 /// The `api_version` constant of codebrix.yml.
-pub const WGPU_CODEBRIX_API_VERSION: u32 = 2;
+pub const WGPU_CODEBRIX_API_VERSION: u32 = 3;
 
 // --- enum codebrix_texture_state (enum_prefix 0x000C) ---------------------------------------------
 pub type WGPUCodebrixTextureState = u32;
@@ -1519,4 +1519,21 @@ unsafe fn fault_listeners_poll_lost(device: native::WGPUDevice) {
     let _guard = DispatchGuard::enter();
     let message = "the device is lost (observed by wgpuCodebrixDevicePoll)";
     unsafe { hub.fan_out_lost(&device, native::WGPUDeviceLostReason_Unknown, static_view(message)) };
+}
+
+// --- Metal floating point (patches/0010) ---------------------------------------------------------------
+
+#[no_mangle]
+pub extern "C" fn wgpuCodebrixSetMetalPreciseMath(enabled: native::WGPUBool) -> native::WGPUStatus {
+    #[cfg(codebrix_metal)]
+    {
+        // Read by the patched wgpu-hal where each pipeline stage's MSL is compiled.
+        hal::metal::CODEBRIX_PRECISE_MATH.store(enabled != 0, Ordering::Relaxed);
+        return STATUS_OK;
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = enabled;
+        STATUS_ERROR
+    }
 }

@@ -155,7 +155,8 @@ check_common_prerequisites() {
     export LIBCLANG_PATH="$LIBCLANG_DIR"
     for f in "$TOOLS_DIR/$WGPU_NATIVE_DIR/src/lib.rs" "$TOOLS_DIR/$WGPU_NATIVE_DIR/ffi/webgpu-headers/webgpu.h" \
              "$TOOLS_DIR/codebrix-wgpu/Cargo.toml" "$TOOLS_DIR/codebrix-wgpu/Cargo.lock" "$TOOLS_DIR/codebrix-wgpu/src/codebrix.rs" \
-             "$TOOLS_DIR/codebrix-wgpu/bridge/bridge.rs" "$TOOLS_DIR/smoke-test.c" "$EXPECTED_EXPORTS" \
+             "$TOOLS_DIR/codebrix-wgpu/bridge/bridge.rs" "$TOOLS_DIR/wgpu-hal/src/metal/device.rs" \
+             "$TOOLS_DIR/smoke-test.c" "$EXPECTED_EXPORTS" \
              "$TOOLS_DIR/licenses/$LICENSE_NAME" "$TOOLS_DIR/licenses/compose-license-wgpunative.sh"; do
         [ -f "$f" ] || {
             echo "ERROR: $f is missing. It is part of the repository and is not downloaded -" >&2
@@ -165,8 +166,8 @@ check_common_prerequisites() {
 }
 
 # ----------------------------------------------------------------------------------------------
-# wgpu-native/ + codebrix-wgpu/ are copied side by side to scratch and built there; the vendored
-# tree is never written. patches/*.patch are applied to the copy, in name order.
+# wgpu-native/ + codebrix-wgpu/ + wgpu-hal/ are copied side by side to scratch and built there; the
+# vendored trees are never written. patches/*.patch are applied to the copy, in name order.
 # ----------------------------------------------------------------------------------------------
 copy_source_to_scratch() {
     local scratch="$1"
@@ -174,7 +175,8 @@ copy_source_to_scratch() {
     mkdir -p "$scratch"
     cp -a "$TOOLS_DIR/$WGPU_NATIVE_DIR" "$scratch/wgpu-native"
     cp -a "$TOOLS_DIR/codebrix-wgpu" "$scratch/codebrix-wgpu"
-    echo "  copied wgpu-native/ codebrix-wgpu/ -> $scratch"
+    cp -a "$TOOLS_DIR/wgpu-hal" "$scratch/wgpu-hal"
+    echo "  copied wgpu-native/ codebrix-wgpu/ wgpu-hal/ -> $scratch"
     PATCHES_APPLIED=""
     for p in "$PATCH_DIR"/*.patch; do
         echo "  applying $(basename "$p")"

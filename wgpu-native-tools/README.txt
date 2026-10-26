@@ -11,7 +11,7 @@ which links wgpu-native (wgpu 29.0.3 via wgpu-native v29.0.1.1) and exports:
 
   (a) every function of webgpu.h  } wgpu-native's own 228 #[no_mangle] functions,
   (b) every function of wgpu.h    } re-exported from its rlib (see patches/)
-  (c) the 23 wgpuCodebrix* functions of specs/codebrix.yml - codebrix-wgpu/src/
+  (c) the 24 wgpuCodebrix* functions of specs/codebrix.yml - codebrix-wgpu/src/
       codebrix.rs, C header codebrix-wgpu/include/codebrix_wgpu.h:
       api version + build info (with the native fix set: the applied patch
       names, codebrix-wgpu/applied-patches.txt, generated) + struct layouts
@@ -25,10 +25,11 @@ which links wgpu-native (wgpu 29.0.3 via wgpu-native v29.0.1.1) and exports:
       wrapping an application's VkImage / ID3D12Resource / MTLTexture as a
       WGPUTexture, the Vulkan adopt requirements (extensions + feature chain),
       adopting an application's VkDevice / MTLDevice as a WGPUAdapter +
-      WGPUDevice, and an explicit texture state transition.
+      WGPUDevice, an explicit texture state transition, and the opt-in IEEE
+      floating point for WGSL compiled to Metal (patches/0010).
 
 Nothing else is exported (no Rust std / crate symbol); every gate checks the
-exact set against specs/expected-exports.txt (251 functions; written by the
+exact set against specs/expected-exports.txt (252 functions; written by the
 binding generator from the three YAMLs). The export set is identical on all
 nine RIDs: a function for a backend the platform lacks returns
 WGPUStatus_Error / NULL.
@@ -61,14 +62,24 @@ The approach of the plan WON for the exports and needed one addition:
     fields are private, and only a child module can read them or build new
     handles (patches/README.txt has the details).
 Both patches - and the behaviour fixes 0003 onward (patches/README.txt) - are
-applied to a SCRATCH copy (wgpu-native/ + codebrix-wgpu/ side by side) by every
-script; the vendored tree is never built in place.
+applied to a SCRATCH copy (wgpu-native/ + codebrix-wgpu/ + wgpu-hal/ side by
+side) by every script; the vendored trees are never built in place.
+  * wgpu-hal/ (vendored for patches/0010, the one patch outside wgpu-native):
+    the unmodified crates.io archive of the wgpu-hal version Cargo.lock pins.
+    codebrix-wgpu/Cargo.toml's [patch.crates-io] makes cargo use the patched
+    scratch copy instead of the registry crate - same version, so every
+    dependent resolves as before; its lock entry has no source / checksum.
 
 THE RULE: NOTHING BUT CRATES.IO IS FETCHED AT BUILD TIME
 --------------------------------------------------------------------------------
   * wgpu-native/ is the unmodified release archive with webgpu-headers at the
     pinned submodule commit (UPSTREAM.txt); the archives are in
     upstream-downloads/. Never edit that tree: changes go in patches/.
+  * wgpu-hal/ is the unmodified crates.io archive (upstream-downloads/
+    wgpu-hal-<version>.crate, its sha256 equal to Cargo.lock's checksum). A
+    crate is vendored ONLY when a patch must change it (Jeremy's ruling of
+    2026-10-26, for patches/0010): the patched code then never comes from
+    outside the repository. Never edit that tree either.
   * crates.io crates are "NuGet packages for Rust" (ruling of 2026-10-11):
     codebrix-wgpu/Cargo.lock pins every one (version + checksum); every build
     passes --locked; `cargo update` is never run - a lock change is a recorded
@@ -227,7 +238,7 @@ Then update the two Windows blocks of BUILD-PROVENANCE.txt from
 output\<rid>\BUILD-INFO.txt and the two win-* lines of output/SHA256SUMS (the
 Windows PDBs are not committed, so unstripped/SHA256SUMS has no Windows lines).
 
-Every script: copies wgpu-native/ + codebrix-wgpu/ to scratch (patches applied
+Every script: copies wgpu-native/ + codebrix-wgpu/ + wgpu-hal/ to scratch (patches applied
 there), builds the release cdylib (fat LTO; WGPU_NATIVE_VERSION from
 linux/pins.env, which wgpuGetVersion() reports), keeps an unstripped twin
 (debug info; zlib-compressed on ELF; .pdb / .dSYM elsewhere), strips, writes
@@ -263,11 +274,12 @@ resolves every entry point it uses and every symbol of specs/expected-exports.tx
 by name, then checks: wgpuCodebrixGetProcStatus at the export list's ordinals
 (WaitAny AbortsUnimplemented, DeviceCreateBuffer Implemented, the D3D12 getter
 NotAvailableOnBackend off Windows, past the end Unknown);
-wgpuCodebrixGetApiVersion == 2; wgpuGetVersion == 29.0.1.1 packed;
+wgpuCodebrixGetApiVersion == 3; wgpuCodebrixSetMetalPreciseMath (Success on a
+macOS build, Error elsewhere); wgpuGetVersion == 29.0.1.1 packed;
 wgpuCodebrixGetBuildInfo (+ a non-empty `patches` fix set); struct layouts (19
 structs, C sizeof / alignof == the native's) and an unknown name -> Error;
 instance + wgpuInstanceEnumerateAdapters; request adapter + device. With NO
-adapter it prints "SKIPPED: no adapter", releases and exits 0 (31 checks). With one: a
+adapter it prints "SKIPPED: no adapter", releases and exits 0 (32 checks). With one: a
 compute pass doubling 256 u32 with readback; a render-pass clear of an RGBA8
 texture + CopyTextureToBuffer + map + pixel check; a map with WGPU_WHOLE_MAP_SIZE
 from offset 8 (patches/0006); wgpuDevicePoll on a second device with the first
@@ -288,9 +300,10 @@ descriptor -> Error), TextureGetVulkanInfo
 read back through the ORIGINAL, and AdoptVulkanDevice of the same VkDevice into
 a second instance with a compute pass on it; D3D12: the same with
 GetD3d12Info / ID3D12Resource, AdoptD3d12Device -> Error; Metal: the same with
-wgpu.h's Metal getters and AdoptMetalDevice; every OTHER backend's functions
+wgpu.h's Metal getters and AdoptMetalDevice, then SetMetalPreciseMath(true) and a
+compute pass in which a NaN compares unequal to itself (patches/0010); every OTHER backend's functions
 return Error / NULL; no uncaptured device errors; everything released and
-wgpuGenerateReport shows 0 live objects (77 checks on Vulkan). "SMOKE TEST PASSED", exit 0.
+wgpuGenerateReport shows 0 live objects (78 checks on Vulkan, 77 on Metal). "SMOKE TEST PASSED", exit 0.
 
 THE LICENCE FILE (identical on all nine RIDs)
 --------------------------------------------------------------------------------
@@ -347,12 +360,13 @@ BUMPING WGPU (the exact recipe)
 FILES
 --------------------------------------------------------------------------------
   wgpu-native/            unmodified wgpu-native v29.0.1.1 + webgpu-headers (UPSTREAM.txt)
-  upstream-downloads/     the two archives + SHA256SUMS
+  wgpu-hal/               unmodified wgpu-hal 29.0.3 crate, vendored for patches/0010 (UPSTREAM.txt)
+  upstream-downloads/     the three archives + SHA256SUMS
   codebrix-wgpu/          OUR crate: Cargo.toml, Cargo.lock, build.rs, src/{lib,codebrix,
                           layouts,vk_format,proc_status}.rs, bridge/bridge.rs,
                           include/codebrix_wgpu.h, applied-patches.txt (proc_status.rs and
                           applied-patches.txt are written by the binding generator)
-  patches/                0001 rlib, 0002 bridge module (+ README.txt)
+  patches/                0001 rlib, 0002 bridge module, 0003-0010 behaviour fixes (+ README.txt)
   specs/                  codebrix.yml (the contract), wgpu.yml, expected-exports.txt,
                           proc-table-notes.txt (per-function notes for the native-module
                           function table; read by the binding generator only)

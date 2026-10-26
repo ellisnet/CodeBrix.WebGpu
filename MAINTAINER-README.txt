@@ -156,6 +156,7 @@ REPOSITORY LAYOUT
   wgpu-native-tools/         everything native - see wgpu-native-tools/README.txt
       wgpu-native/           vendored, unmodified wgpu-native release
       wgpu-native/ffi/webgpu-headers/  vendored, unmodified webgpu-headers
+      wgpu-hal/              vendored, unmodified wgpu-hal crate (patches/0010)
       specs/wgpu.yml         hand-maintained transcription of wgpu.h (below)
       specs/codebrix.yml     the CodeBrix extras contract
       specs/expected-exports.txt  GENERATED export list (the symbol gate)
@@ -594,7 +595,11 @@ crates.io RULING: crates on crates.io are treated like NuGet packages -
 Cargo.lock IS the pin (version + checksum per crate). Builds run `cargo fetch`
 with the network on, then compile offline. `cargo update` is never run
 casually: a lock change is a deliberate, recorded upstream bump. Anything NOT
-on crates.io (wgpu-native itself, webgpu-headers) is vendored unmodified.
+on crates.io (wgpu-native itself, webgpu-headers) is vendored unmodified. A
+crates.io crate that a patch must change is vendored too (ruling of 2026-10-26),
+so the patched code never comes from outside the repository: today only
+wgpu-hal (patches/0010), as its unmodified crate archive, with
+codebrix-wgpu/Cargo.toml [patch.crates-io] pointing cargo at the patched copy.
 
 
 BUMPING WGPU
@@ -1087,7 +1092,8 @@ PROVENANCE / VENDORED SOURCES
 =============================
 
 wgpu-native-tools/wgpu-native/ (wgpu-native release, MIT OR Apache-2.0, used
-as MIT) and its ffi/webgpu-headers/ (BSD-3-Clause) are vendored unmodified;
+as MIT), its ffi/webgpu-headers/ (BSD-3-Clause) and wgpu-native-tools/wgpu-hal/
+(the wgpu-hal 29.0.3 crate, MIT OR Apache-2.0, used as MIT) are vendored unmodified;
 specs/wgpu.yml is a transcription of wgpu.h; the generator re-implements the
 rules of webgpu-headers' Go generator. Details and licence texts:
 THIRD-PARTY-NOTICES.txt and LICENSE-WgpuNative.txt.
