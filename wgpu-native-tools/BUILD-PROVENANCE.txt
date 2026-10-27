@@ -48,21 +48,22 @@ Common to every entry below
                     BuildInfo_patches_are_the_patches_folder_in_apply_order compares
                     it with the patches folder). CURRENT: the two osx-* entries,
                     rebuilt 2026-10-27 UTC (the evening of 2026-10-26 local) on
-                    Jeremy's Apple Silicon Mac. MUST BE REBUILT before the next
-                    publish: the five Linux / Android entries (API version 4,
-                    patches 0001-0011, built 2026-10-26) and win-x64 / win-arm64
-                    (API version 2, patches 0001-0009 - the managed side refuses a v2
-                    native; the export set gained 6 functions).
+                    Jeremy's Apple Silicon Mac, and win-x64 / win-arm64, rebuilt
+                    2026-10-27 02:48 UTC (the same evening) on Jeremy's x64
+                    Windows machine. MUST BE REBUILT before the next publish: the
+                    five Linux / Android entries (API version 4, patches
+                    0001-0011, built 2026-10-26).
   Profile         : release - opt-level 3, lto "fat", codegen-units 1, panic "abort",
                     debug true (stripped by the scripts, never by cargo)
   Features        : wgpu-native's defaults (wgsl, spirv, glsl, dx12, metal, vulkan,
                     gles); compiled backends per OS (wgpu-core's own cfg rules):
                     Linux / Android "vulkan,gles"; Windows "dx12,vulkan,gles";
                     macOS "metal" (wgpuCodebrixGetBuildInfo reports it).
-  Exports         : EXACTLY specs/expected-exports.txt - 251 functions: the 228
+  Exports         : EXACTLY specs/expected-exports.txt - 257 functions: the 228
                     #[no_mangle] functions of wgpu-native (webgpu.h + wgpu.h,
                     re-exported from its rlib by our cdylib - proven by nm on every
-                    RID) + the 23 wgpuCodebrix* functions. Nothing else: no Rust std
+                    RID) + the 29 wgpuCodebrix* functions (251 / 23 before
+                    contract v4). Nothing else: no Rust std
                     or crate symbol leaks (rustc's own cdylib export list). Checked
                     by every gate (missing AND extra).
   ELF link args   : (codebrix-wgpu/build.rs) -soname libcodebrix_wgpu.so,
@@ -82,17 +83,20 @@ Common to every entry below
                     plus the queue getter's proc status and two Metal queue checks
                     (non-null and stable; its -device is the device's MTLDevice).
                     Off Metal 0012-0013 add the proc status and "NULL off Metal":
-                    99 expected with a Vulkan adapter, 35 without one, until the
-                    next Linux build measures them.
+                    99 checks with a Vulkan adapter - MEASURED on win-x64
+                    (2026-10-27, the host's Intel UHD 770 Vulkan driver) - and
+                    35 expected without one, until a build without an adapter
+                    measures it.
                     Contract v4 (patches 0001-0011): 97 checks with a Vulkan
                     adapter, 85 on Metal (the Metal wrap + adopt and the 0010
                     precise-math NaN pass in place of the Vulkan-object and
                     pipeline-cache GROWTH checks; the cache's missing-feature
                     error path runs everywhere); without an adapter (most
                     containers) the GPU part prints SKIPPED and 34 checks run.
-                    Contract v2 (still the two win-* blocks): 77 on Vulkan, 69 on
-                    GL only, 73 on Metal, 31 without an adapter; the count on a
-                    D3D12 adapter is not yet recorded - see the win-x64 known gap.
+                    Contract v2 (superseded on every RID): 77 on Vulkan, 69 on
+                    GL only, 73 on Metal, 31 without an adapter. The count on a
+                    D3D12 adapter is still not recorded - see the win-x64 known
+                    gap.
                     The API version 1 binaries (45-check smoke test on macOS, 47
                     on Windows) shipped in 1.0.287.301 and are superseded.
 
@@ -287,8 +291,9 @@ Windows (the two win-* entries)
   Scripts         : written on Linux 2026-10-11 from the FlacWriter / Av1 scripts
                     (which ran on Jeremy's x64 Windows 11 machine).
   Build host      : Jeremy's x64 desktop - Windows 11 Pro 10.0.26300 (AMD64),
-                    Visual Studio Professional 2026 18.11.0 [18.11.12306.390]
-                    (18.10.3 at the first run; the MSVC toolset is the same),
+                    Visual Studio Professional 2026 18.11.1 [18.11.12315.225]
+                    (18.10.3 at the first run, 18.11.0 at the second; the MSVC
+                    toolset is the same),
                     MSVC toolset 14.51.36231 (cl / link 19.51.36260), Windows SDK
                     10.0.26100.0, PowerShell 7.6.7 (7.6.6 at the first run).
                     Scripts run as pwsh -NoProfile -ExecutionPolicy Bypass -File
@@ -305,8 +310,13 @@ Windows (the two win-* entries)
                     process through LIBCLANG_PATH (the script's own fallback is
                     C:\Program Files\LLVM\bin, which does not exist on this
                     machine; nothing was installed). bindgen ran with it on both
-                    RIDs, both rounds. THE RECOMMENDED PATH since 2026-10-17
+                    RIDs, every round. THE RECOMMENDED PATH since 2026-10-17
                     (Jeremy's ruling): README.txt "WINDOWS: THE RECOMMENDED RUN".
+                    Found with vswhere -requires
+                    Microsoft.VisualStudio.Component.VC.Llvm.Clang since the
+                    third run: SQL Server Management Studio 22 now registers
+                    with vswhere too, and the README's former "-latest -products
+                    *" picked it (it has no LLVM).
   Rulings         : 2026-10-17, Jeremy, for every Windows round from now on (all
                     four written into README.txt "WINDOWS: THE RECOMMENDED RUN"
                     and the scripts' headers):
@@ -372,6 +382,19 @@ Windows (the two win-* entries)
                     Also this round, comment / message-only edits recording the
                     rulings: build-common.ps1's header, the libclang error text,
                     the two architecture scripts' headers, README.txt.
+  Third run       : 2026-10-27 02:48 UTC (the evening of 2026-10-26 local), both
+                    RIDs concurrently, contract v4 + patches 0010-0013 + the
+                    vendored wgpu-hal\, run by the agent on Jeremy's machine with
+                    the rulings above. NO script change: build-common.ps1 already
+                    copied wgpu-hal\ to scratch. It was the first Windows compile
+                    of patches 0010-0013 and of the pipeline-cache code
+                    (0011 + codebrix.rs); 0 warnings on both RIDs, both
+                    byte-identical twice, win-x64 the 99-check smoke test on
+                    Vulkan (incl. the pipeline-cache growth / warm / fallback
+                    checks) - adopted. The one change was in README.txt's recipe
+                    (vswhere -requires for the LLVM component; see libclang
+                    above). strings check repeated: 0 hits for the build root,
+                    AppData or the user name in either DLL.
   PDB twins       : NOT COMMITTED for win-x64 / win-arm64. A full-debug-info PDB of
                     the whole wgpu stack (profile.release debug = true) is 67 MB
                     per RID; Jeremy ruled on 2026-10-10 that files that large are
@@ -406,12 +429,12 @@ Windows (the two win-* entries)
 ================================================================================
 win-x64                                                           BUILT + PASSED
 ================================================================================
-Built            : 2026-10-17 22:38:21 UTC (275 s including the reproducibility rebuild)
+Built            : 2026-10-27 02:48:09 UTC (308 s including the reproducibility rebuild)
 Built by         : windows\build-win-x64.ps1 -CheckReproducible (route: native, x64
-                   host; vcvarsall x64) - the second run; replaces the 2026-10-11
-                   build (sha256 699c06e3..., API version 1, 243 exports, patches
-                   0001-0002 only, shipped in 1.0.287.301)
-Contract / fixes : API version 2; patches 0001-0009; 251 exports (== specs/expected-exports.txt)
+                   host; vcvarsall x64) - the third run; replaces the 2026-10-17
+                   build (sha256 61c6f4d8..., API version 2, 251 exports, patches
+                   0001-0009)
+Contract / fixes : API version 4; patches 0001-0013; 257 exports (== specs/expected-exports.txt)
 Toolchain        : rustc 1.93.1 / cargo 1.93.1 (toolchain 1.93), MSVC link 14.51,
                    libclang = Visual Studio 2026's (see above); 0 cargo warnings
 cargo            : cargo +1.93 build --release --locked --target x86_64-pc-windows-msvc
@@ -419,92 +442,93 @@ cargo            : cargo +1.93 build --release --locked --target x86_64-pc-windo
                    --remap-path-prefix (scratch -> wgpu-native-tools, cargo home ->
                    cargo-home, target -> cargo-target); WGPU_NATIVE_VERSION=v29.0.1.1
 File             : codebrix_wgpu.dll - PE32+ x64 (machine 0x8664), linker 14.51,
-                   OS/subsystem version 6.00, /Brepro timestamp 0x74B020A7
-Size             : 6525952 bytes
-SHA256           : 61c6f4d8d529240ab531e17f9aab7845b9dda04a45848674c1af463f346b6afa
-PDB              : codebrix_wgpu.pdb, 70889472 bytes (67.6 MB) - NOT committed (over the
+                   OS/subsystem version 6.00, /Brepro timestamp 0x10C11AC4
+Size             : 6536704 bytes
+SHA256           : 88be16eb071943d97bc679a87811f738c5bc0d447f05ee30af2aa8bfeebbc7ce
+PDB              : codebrix_wgpu.pdb, 71069696 bytes (67.8 MB) - NOT committed (over the
                    50 MB adopt limit); output\win-x64\ on the build machine only
-                   sha256 dabaf42c1d3049902cd063ab5ff2f61b77c43d7c5120e581ce096f11db3ce8c1
-                   RSDS GUID {40C1676E-E45B-978D-8A9A-DD9BEA9EBAFF} age 1
-Exports          : 251 == specs\expected-exports.txt
+                   sha256 15cd0bb0788dc308f232633249a0f03ae2d35228834e04f6f8a393200f7ea1a8
+                   RSDS GUID {8FAC6153-C0A2-8C08-DED8-F6380CB4F771} age 1
+Exports          : 257 == specs\expected-exports.txt
 Dependents       : see "Dependents" above (static CRT; no redistributable)
 Reproducible     : YES - a second build into a fresh target folder at the same path
-                   gave identical DLL bytes (the first Windows build so proven)
-Smoke test       : PASSED on the build host - 77 checks, 0 failed, exit 0
-                   (output\win-x64\smoke-test.exe, sha256 7273556035ef6418...a10295380).
-                   wgpuInstanceEnumerateAdapters saw 4 adapters: Intel UHD Graphics
-                   770 on Vulkan (6), Intel UHD Graphics + Microsoft Basic Render
-                   Driver on D3D12 (4), Intel UHD Graphics 770 on GL (7). The
-                   default adapter was the VULKAN one (instance api 0x00403000,
-                   device api 0x00404143, 5 device extensions incl.
-                   VK_KHR_external_memory_win32), so the run covered: the proc
-                   status table (WaitAny AbortsUnimplemented, DeviceCreateBuffer
-                   Implemented, the D3D12 getter Implemented - Direct3D 12 is
-                   compiled in - past the end Unknown), API version 2, build info
-                   with the nine-patch fix set, 19 struct layouts, compute + render
-                   + readback, the 0006 WHOLE_MAP_SIZE map at offset 8, the 0007
-                   foreign-index wgpuDevicePoll -> false in a Validation scope,
-                   downlevel capabilities + RGBA8Unorm format features, the bounded
-                   poll (QueueEmpty / WaitSucceeded / InvalidSubmissionIndex / NULL
-                   -> Error), fault listeners on a second device, transitions,
-                   GetVulkanInfo + VulkanGetAdoptRequirements (5 extensions, all
-                   enabled on wgpu's own device), TextureGetVulkanInfo (VK_FORMAT
-                   37), CreateTextureFromVulkanImage round trip, AdoptVulkanDevice
-                   + a compute pass on the adopted device, AdoptD3d12Device ->
-                   Error (by design), the D3D12 / Metal getters' ERROR paths on a
-                   non-D3D12 device, 0 live objects.
+                   gave identical DLL bytes
+Smoke test       : PASSED on the build host - 99 checks, 0 failed, exit 0
+                   (output\win-x64\smoke-test.exe, sha256 8a237bded0da4358...cd93c58f).
+                   wgpuInstanceEnumerateAdapters saw the same 4 adapters as the
+                   second run: Intel UHD Graphics 770 on Vulkan (6), Intel UHD
+                   Graphics + Microsoft Basic Render Driver on D3D12 (4), Intel UHD
+                   Graphics 770 on GL (7). The default adapter was again the VULKAN
+                   one (instance api 0x00403000, device api 0x00404143, the same 5
+                   device extensions), so the run covered everything the second
+                   run did - now with API version 4 and the thirteen-patch fix set
+                   - plus: the proc status of DeviceCreatePipelineCache
+                   (Implemented, Vulkan compiled in), PipelineCacheRelease
+                   (Implemented) and QueueGetNativeMetalCommandQueue
+                   (NotAvailableOnBackend); SetMetalPreciseMath -> Error; the
+                   pipeline caches of patches/0011 - the missing-feature
+                   Validation error, the NULL paths, the cache key
+                   "wgpu_pipeline_cache_vulkan_32902_18056", the PipelineCache
+                   feature offered and enabled, a chained cache GROWING 116 ->
+                   1652 bytes, a warm cache from the saved bytes without fallback,
+                   foreign bytes (fallback: no error; without: Validation), exact
+                   readbacks throughout; and QueueGetNativeMetalCommandQueue on a
+                   non-Metal queue -> NULL; 0 live objects. (Its "GetBuildInfo:
+                   api 2" line is a stale LABEL in smoke-test.c; the check
+                   compares against WGPU_CODEBRIX_API_VERSION, 4.)
                    KNOWN GAP (unchanged): the D3D12 SUCCESS paths (GetD3d12Info,
                    TextureGetD3d12Info, CreateTextureFromD3d12Resource) are compiled
                    but NOT exercised - the smoke test takes whatever adapter wgpu
                    picks and has no backend switch.
-Managed proof    : the solution-wide run (dotnet test --solution CodeBrix.WebGpu.slnx
-                   -p:UseLocalNativeProject=true) could NOT build on 2026-10-17: the
-                   work-in-progress Skia project fails to compile at HEAD
-                   (WebGpuSkiaTarget.cs: ReleaseReadbackSlots does not exist), which
-                   also blocks the Graphics tests. So the proof is what the first
-                   round recorded - the two projects that do not depend on Skia,
-                   Debug (the default), 2026-10-17 22:55 UTC on the build host:
-                   CodeBrix.WebGpu.Native.Tests: 131 tests, 112 passed, 0 failed,
-                   19 skipped - every skip by design and Linux-only ("The Vulkan
-                   extras are exercised on Linux" x16, "Linux builds enable Vulkan",
-                   "The Linux natives compile Vulkan and GL, not Direct3D 12 or
-                   Metal", "Needs Linux with an X display"); the binding, every
-                   struct layout (wgpuCodebrixGetStructLayout), the export list,
-                   the generated-files drift guard, the nine-patch fix set
+Managed proof    : the solution-wide run, as ruled: dotnet test --solution
+                   CodeBrix.WebGpu.slnx -p:UseLocalNativeProject=true, Debug (the
+                   default), 2026-10-27 right after the build, on the build host - the first
+                   Windows round in which the whole solution built (the Skia
+                   project no longer blocks it). 772 tests, 731 passed, 0 failed,
+                   41 skipped, every skip by design:
+                   CodeBrix.WebGpu.Native.Tests: 166 tests, 144 passed, 22 skipped
+                   ("The Vulkan extras are exercised on Linux" x16, "Linux builds
+                   enable Vulkan", "The Linux natives compile Vulkan and GL, not
+                   Direct3D 12 or Metal", "Needs Linux with an X display", the
+                   Linux library-name check, "Metal exists on macOS only", "Metal
+                   only" for the patches/0010 NaN test). The binding, every
+                   struct layout, the 257-function export list, the
+                   generated-files drift guard, the thirteen-patch fix set
                    (BuildInfo_patches_are_the_patches_folder_in_apply_order), the
-                   PackageContent identity checks and the GPU round trips on the
-                   host's Vulkan adapter - including the fences of patches 0003
-                   (ErrorScopeTests), 0004 (PipelineLayoutTests), 0005
-                   (WorkgroupMemoryTests), 0006 (BufferMapTests), 0007
-                   (DevicePollTests), 0008 (SurfaceCapabilitiesTests) and the fault
-                   listeners - ran against this exact file, loaded through the
-                   library's own resolver from runtimes/win-x64/native/.
-                   CodeBrix.WebGpu.BindingGenerator.Tests: 96 tests, 96 passed, 0
-                   failed, 0 skipped.
+                   PackageContent identity checks, PipelineCacheTests and the GPU
+                   round trips ran against this exact file from
+                   runtimes/win-x64/native/.
+                   CodeBrix.WebGpu.BindingGenerator.Tests: 98 tests, 98 passed.
+                   CodeBrix.WebGpu.Skia.Tests: 90 tests, 84 passed, 6 skipped
+                   (5 package checks - local mode builds no package; AdoptMetal
+                   - macOS only).
+                   CodeBrix.WebGpu.Graphics.Tests: 418 tests, 405 passed, 13
+                   skipped (5 package checks - local mode; 8 opt-in render /
+                   timing / corpus tests behind CODEBRIX_WEBGPU_* variables).
 
 ================================================================================
 win-arm64                       BUILT (cross) - STATIC GATE PASSED, SMOKE UNRUN
 ================================================================================
-Built            : 2026-10-17 22:38:26 UTC (285 s including the reproducibility rebuild)
+Built            : 2026-10-27 02:48:11 UTC (316 s including the reproducibility rebuild)
 Built by         : windows\build-win-arm64.ps1 -AdoptCrossBuild -CheckReproducible
                    (route: CrossFromX64 - x64 host, vcvarsall x64_arm64,
-                   --target aarch64-pc-windows-msvc) - the second run; replaces the
-                   2026-10-11 build (sha256 c579e75d..., API version 1, 243
-                   exports, patches 0001-0002 only, shipped in 1.0.287.301)
-Contract / fixes : API version 2; patches 0001-0009; 251 exports (== specs/expected-exports.txt)
+                   --target aarch64-pc-windows-msvc) - the third run; replaces the
+                   2026-10-17 build (sha256 5c93319a..., API version 2, 251
+                   exports, patches 0001-0009)
+Contract / fixes : API version 4; patches 0001-0013; 257 exports (== specs/expected-exports.txt)
 Toolchain        : rustc 1.93.1 / cargo 1.93.1 (toolchain 1.93, target
                    aarch64-pc-windows-msvc), MSVC ARM64 link 14.51, libclang =
                    Visual Studio 2026's; 0 cargo warnings
 cargo            : as win-x64 with --target aarch64-pc-windows-msvc
 File             : codebrix_wgpu.dll - PE32+ ARM64 (machine 0xAA64), linker 14.51,
-                   OS/subsystem version 6.02, /Brepro timestamp 0xC38B9278
-Size             : 5600256 bytes
-SHA256           : 5c93319aaefae2d531922f98283f0d3eda6336b8380d245c11aad63263bcf531
-PDB              : codebrix_wgpu.pdb, 70488064 bytes (67.2 MB) - NOT committed (over the
+                   OS/subsystem version 6.02, /Brepro timestamp 0x839F7358
+Size             : 5609472 bytes
+SHA256           : 40eb07e06c3ef61d97f9142a23a9094b8104d1ea9913cad790678533b1f43206
+PDB              : codebrix_wgpu.pdb, 70660096 bytes (67.4 MB) - NOT committed (over the
                    50 MB adopt limit); output\win-arm64\ on the build machine only
-                   sha256 bf9f43116664b7d5a4b342c899e9bb07c4bad7897a6b6dbe8b4778dfa20bd6b7
-                   RSDS GUID {7600A1C4-35EE-D284-6740-F51E0BF6EDD5} age 1
-Exports          : 251 == specs\expected-exports.txt
+                   sha256 8cad8cd596903ed1a6a9df80788209f07044fcb0915611359e4afcd94b489b6d
+                   RSDS GUID {0B3208E0-27D5-F532-6C69-5BB89DB132B1} age 1
+Exports          : 257 == specs\expected-exports.txt
 Dependents       : see "Dependents" above (static CRT; no redistributable)
 Reproducible     : YES - a second build into a fresh target folder at the same path
                    gave identical DLL bytes
@@ -514,21 +538,21 @@ Smoke test       : NOT RUN - an x64 Windows host cannot execute ARM64 code. The
                    -AdoptCrossBuild on purpose - Jeremy's standing plan of
                    2026-10-17 for every Windows round until an ARM64 device is at
                    hand (see Rulings above). Gate status in BUILD-INFO.txt:
-                   INCOMPLETE. (The 2026-10-11 ARM64 build's smoke test was never
-                   run either; that binary is superseded.)
+                   INCOMPLETE. (No earlier ARM64 build's smoke test was run
+                   either; those binaries are superseded.)
 To finish the gate: on an ARM64 Windows device (Jeremy's Surface Pro X), copy
                    output\win-arm64\codebrix_wgpu.dll (sha256 above),
                    output\win-arm64\smoke-test.exe (the ARM64 build of
-                   ..\smoke-test.c, sha256 629b688f4720a8e4...b924671889) and
+                   ..\smoke-test.c, sha256 96620b1c8d30b959...e20f6840) and
                    specs\expected-exports.txt into one folder and run
                        smoke-test.exe <full path>\codebrix_wgpu.dll <full path>\expected-exports.txt
-                   Expect "SMOKE TEST PASSED", exit 0: 77 checks on a Vulkan
-                   adapter, 69 on GL; the count on a D3D12 adapter (what a Surface
-                   Pro X normally offers) is not yet recorded anywhere - it would
-                   be the first exercise of the D3D12 SUCCESS paths, see the
-                   win-x64 known gap; 31 checks + "SKIPPED: no adapter" without a
-                   usable adapter. Then replace this line with the device, date
-                   and result.
+                   Expect "SMOKE TEST PASSED", exit 0: 99 checks on a Vulkan
+                   adapter; the count on a D3D12 adapter (what a Surface Pro X
+                   normally offers) is not yet recorded anywhere - it would be the
+                   first exercise of the D3D12 SUCCESS paths, see the win-x64
+                   known gap; 35 checks + "SKIPPED: no adapter" without a usable
+                   adapter. Then replace this line with the device, date and
+                   result.
 
 macOS (the two osx-* entries)
 --------------------------------------------------------------------------------

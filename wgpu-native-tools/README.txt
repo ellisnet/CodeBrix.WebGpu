@@ -108,9 +108,9 @@ WHAT BUILDS WHERE
   android-arm64  android/build.sh arm64          Linux/macOS + NDK 30          built here
   android-x64    android/build.sh x64            Linux/macOS + NDK 30          built here
   win-x64        windows/build-win-x64.ps1       x64 Windows + VS C++ + Rust   built (Jeremy's x64 box,
-                                                                               2026-10-17, reproducible)
-  win-arm64      windows/build-win-arm64.ps1     ARM64 Windows, or x64 cross   cross-built there 2026-10-17
-                                                 (smoke test then UNRUN)       (reproducible); smoke UNRUN
+                                                                               2026-10-27 UTC, v4, reproducible)
+  win-arm64      windows/build-win-arm64.ps1     ARM64 Windows, or x64 cross   cross-built there 2026-10-27 UTC
+                                                 (smoke test then UNRUN)       (v4, reproducible); smoke UNRUN
   osx-arm64      macos/build-osx-arm64.sh        Apple Silicon Mac             built (Jeremy's Apple Silicon Mac,
                                                                                2026-10-27 UTC, v4, reproducible)
   osx-x64        macos/build-osx-x64.sh          Intel Mac, or Apple Silicon   built there (cross, verified
@@ -165,9 +165,14 @@ the 85-check smoke test on Metal (including the precise-math NaN pass), and
 were adopted. A fourth round the same evening added patches/0012-0013 (the
 Metal command queue, so Skia's Metal GRContext can share the WebGPU device):
 again no script change, 0 warnings, byte-identical twice, 88 smoke-test checks
-on Metal, adopted. All nine RIDs are built; the seven non-macOS RIDs do not
-yet carry 0012-0013 in their fix set, and win-x64 / win-arm64 still carry
-contract v2 (BUILD-PROVENANCE.txt, STALE ENTRIES).
+on Metal, adopted. The third Windows round (2026-10-27 UTC, the same evening:
+contract v4 + patches 0010-0013 + the vendored wgpu-hal/) needed no script
+change either: both RIDs built with 0 warnings and were byte-identical twice,
+win-x64 passed the 99-check smoke test on Vulkan (the first measurement of
+that count) and the whole solution's managed tests, and both were adopted
+(win-arm64 smoke UNRUN, as ruled). All nine RIDs are built; the five Linux /
+Android RIDs do not yet carry 0012-0013 in their fix set (BUILD-PROVENANCE.txt,
+STALE ENTRIES).
 If a script breaks, fix it in the script and record it in BUILD-PROVENANCE.txt.
 
 PREREQUISITES PER MACHINE
@@ -221,14 +226,16 @@ WINDOWS: THE RECOMMENDED RUN (Jeremy's rulings of 2026-10-17, the second round)
 From a PowerShell 7 prompt on the x64 Windows machine, both RIDs (the two
 scripts may run at the same time in two prompts - separate scratch folders):
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-    $vs = & $vswhere -latest -products * -property installationPath
+    $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath
     $env:LIBCLANG_PATH = "$vs\VC\Tools\Llvm\x64\bin"
     cd wgpu-native-tools\windows
     pwsh -NoProfile -ExecutionPolicy Bypass -File .\build-win-x64.ps1 -CheckReproducible
     pwsh -NoProfile -ExecutionPolicy Bypass -File .\build-win-arm64.ps1 -AdoptCrossBuild -CheckReproducible
     cd ..\.. ; dotnet test --solution CodeBrix.WebGpu.slnx -p:UseLocalNativeProject=true
   * libclang: Visual Studio's own LLVM through LIBCLANG_PATH, as above - no LLVM
-    installer on the build machine (PREREQUISITES PER MACHINE).
+    installer on the build machine (PREREQUISITES PER MACHINE). Keep the
+    -requires: other products register with vswhere too (2026-10-26: SQL Server
+    Management Studio 22 was "-latest -products *", and has no LLVM).
   * -CheckReproducible on BOTH RIDs: a second build into a fresh target folder
     at the same path must give identical DLL bytes (both RIDs did on
     2026-10-17). Linux and Android prove this on every run; on Windows it is
@@ -334,9 +341,9 @@ saved bytes start a warm cache without fallback (no error, exact compute), and
 damaged bytes give an empty cache with fallback and a Validation error without;
 off Vulkan the key query returns Error; no uncaptured device errors; everything
 released and wgpuGenerateReport shows 0 live objects (88 checks on Metal,
-measured 2026-10-27; the patches/0012-0013 checks add 2 to the 97 last measured
-on Vulkan - 99 expected until the next Linux build measures it - and 1 to the
-no-adapter run). "SMOKE TEST PASSED", exit 0.
+measured 2026-10-27; the patches/0012-0013 checks add 2 to the 97 measured on
+Vulkan before them - 99 on Vulkan, measured on win-x64 on 2026-10-27 - and 1 to
+the no-adapter run). "SMOKE TEST PASSED", exit 0.
 
 THE LICENCE FILE (identical on all nine RIDs)
 --------------------------------------------------------------------------------
