@@ -92,15 +92,14 @@
 
   <ItemGroup Condition="'$(UseLocalNativeProject)' != 'true'">
     <!-- The PUBLISHED CodeBrix.WebGpu.Native.MitLicenseForever version this package depends on; moves with every Native publish (MAINTAINER-README.txt, HOW SKIA AND GRAPHICS REFERENCE NATIVE). -->
-    <PackageReference Include="CodeBrix.WebGpu.Native.MitLicenseForever" Version="1.0.290.1433" />
+    <PackageReference Include="CodeBrix.WebGpu.Native.MitLicenseForever" Version="1.0.300.210" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(UseLocalNativeProject)' == 'true'">
     <ProjectReference Include="..\CodeBrix.WebGpu.Native\CodeBrix.WebGpu.Native.csproj" />
   </ItemGroup>
 
-  <Target Name="_BlockPackWithLocalNativeProject" BeforeTargets="GenerateNuspec;Pack"
-          Condition="'$(UseLocalNativeProject)' == 'true'">
+  <Target Name="_BlockPackWithLocalNativeProject" BeforeTargets="GenerateNuspec;Pack" Condition="'$(UseLocalNativeProject)' == 'true'">
     <Error Text="UseLocalNativeProject=true is for local development only. The resulting package would depend on a CodeBrix.WebGpu.Native version that was never published. Publish CodeBrix.WebGpu.Native first, then flip the UseLocalNativeProject default in this project to false and pin the published Native version." />
   </Target>
 
@@ -112,7 +111,7 @@
   -->
   <Target Name="_StampNativeReference" BeforeTargets="GetAssemblyAttributes">
     <ItemGroup>
-      <_PinnedWebGpuNative Include="@(PackageReference->WithMetadataValue('Identity', 'CodeBrix.WebGpu.Native.MitLicenseForever'))" />
+      <_PinnedWebGpuNative Include="@(PackageReference-&gt;WithMetadataValue('Identity', 'CodeBrix.WebGpu.Native.MitLicenseForever'))" />
       <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
         <_Parameter1>CodeBrix.WebGpu.Native.Reference</_Parameter1>
         <_Parameter2 Condition="'$(UseLocalNativeProject)' == 'true'">Project</_Parameter2>
