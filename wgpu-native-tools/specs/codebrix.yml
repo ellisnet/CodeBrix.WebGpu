@@ -45,7 +45,7 @@ doc: |
 
 constants:
   - name: api_version
-    value: 3
+    value: 4
     doc: |
       The version of this contract. Returned by @ref wgpuCodebrixGetApiVersion.
 
@@ -159,6 +159,17 @@ enums:
       - name: sm5
         doc: |
           Everything WebGPU requires.
+
+  - name: s_type
+    doc: |
+      Struct type identifiers (@ref WGPUSType values) of the CodeBrix extension structs, in the
+      `0x000CXXXX` block of this file.
+    extended: true
+    entries:
+      - name: codebrix_pipeline_descriptor_extras
+        doc: |
+          Identifies @ref WGPUCodebrixPipelineDescriptorExtras.
+        value: 1
 
 bitflags:
   - name: codebrix_downlevel_flags
@@ -700,6 +711,59 @@ structs:
           @ref wgpuCodebrixDevicePoll first observes the device lost.
         type: callback.device_lost
 
+  - name: codebrix_pipeline_cache_descriptor
+    doc: |
+      Describes a @ref WGPUCodebrixPipelineCache for @ref wgpuCodebrixDeviceCreatePipelineCache. The
+      shape of wgpu-native's (unmerged) upstream pipeline-cache proposal, gfx-rs/wgpu-native PR #618,
+      under CodeBrix names.
+    type: extensible
+    members:
+      - name: label
+        doc: |
+          A debug label.
+        type: string_with_default_empty
+      - name: data
+        doc: |
+          The bytes to start the cache from: what an earlier @ref wgpuCodebrixPipelineCacheGetData
+          returned. NULL (or `dataSize` 0) starts an empty cache. Cache data is specific to the
+          adapter, driver version and wgpu version that produced it: wgpu-core checks the header it puts
+          in front of the driver's data (and the driver checks its own). Data made on a DIFFERENT
+          adapter (another GPU or backend) is always a validation error, whatever `fallback` says - so
+          keep one cache per @ref wgpuCodebrixAdapterGetPipelineCacheKey. The bytes are copied during
+          the call.
+        type: c_void
+        pointer: immutable
+        optional: true
+      - name: data_size
+        doc: |
+          The number of bytes at `data`.
+        type: usize
+      - name: fallback
+        doc: |
+          True (recommended): data that is truncated, corrupt, outdated (made before a driver or wgpu
+          update) or from a newer wgpu gives an EMPTY cache instead of an error. False: such data is a
+          validation error and the cache is invalid. Data from another adapter is an error either way.
+        type: bool
+
+  - name: codebrix_pipeline_descriptor_extras
+    doc: |
+      Chained onto a @ref WGPURenderPipelineDescriptor or @ref WGPUComputePipelineDescriptor (sType
+      @ref WGPUSType_CodebrixPipelineDescriptorExtras) to compile the pipeline through a pipeline cache:
+      the driver reuses what the cache already holds for the pipeline's shaders and adds what it
+      compiles. One struct for both descriptor types, as in gfx-rs/wgpu-native PR #618.
+    type: extension
+    extends:
+      - render_pipeline_descriptor
+      - compute_pipeline_descriptor
+    members:
+      - name: pipeline_cache
+        doc: |
+          The cache, created on the same device; NULL compiles without one (as if the struct were not
+          chained). An INVALID cache (one whose creation reported an error) makes the pipeline creation
+          a validation error.
+        type: object.codebrix_pipeline_cache
+        optional: true
+
 callbacks: []
 
 functions:
@@ -1231,4 +1295,93 @@ functions:
           True for IEEE floating point; false for Metal's default fast math.
         type: bool
 
-objects: []
+  - name: codebrix_device_create_pipeline_cache
+    doc: |
+      Creates a pipeline cache: the driver's store of compiled shader code, which a pipeline created
+      with @ref WGPUCodebrixPipelineDescriptorExtras reads from and adds to, and which
+      @ref wgpuCodebrixPipelineCacheGetData hands out for the host to save (to disk, per adapter: see
+      @ref wgpuCodebrixAdapterGetPipelineCacheKey) and pass back here on a later run. On a device with a
+      warm cache, creating a pipeline skips the driver's shader compilation (seconds per pipeline on
+      some mobile drivers).
+
+      Requires @ref WGPUNativeFeature_PipelineCache on the device, which only Vulkan adapters offer
+      (wgpu-core 29): on Metal, Direct3D 12 and OpenGL the feature is absent, and creation reports a
+      validation error through the device's error path and returns an invalid cache (never ends the
+      process). Data from another adapter is a validation error; so is outdated or damaged data
+      without `fallback`. An invalid cache is safe to release and to query (no data); chaining it makes pipeline
+      creation fail validation.
+    returns:
+      doc: |
+        The cache (never NULL for a valid device and descriptor; possibly invalid, see above). Release
+        it with @ref wgpuCodebrixPipelineCacheRelease; pipelines created through it keep no reference.
+      type: object.codebrix_pipeline_cache
+    args:
+      - name: device
+        doc: |
+          The device.
+        type: object.device
+      - name: descriptor
+        doc: |
+          The description.
+        type: struct.codebrix_pipeline_cache_descriptor
+        pointer: immutable
+
+  - name: codebrix_adapter_get_pipeline_cache_key
+    doc: |
+      wgpu's name for an adapter's pipeline cache (Rust wgpu's `wgpu::util::pipeline_cache_key`):
+      `wgpu_pipeline_cache_vulkan_<vendor>_<device>` with the decimal PCI vendor and device ids of the
+      adapter. A host keeps one cache file per key (plus whatever identity of its own it adds, such as
+      the library's build info), so a machine with two GPUs never feeds one GPU's data to the other.
+      The driver version is not part of the key: it is checked inside the data (a cache saved before a
+      driver update is replaced by an empty one when created with `fallback`).
+    returns:
+      doc: |
+        `WGPUStatus_Success`; `WGPUStatus_Error` for a null adapter or output, or an adapter on a
+        backend without pipeline caches (anything but Vulkan), and then `key` is not written.
+      type: enum.status
+    args:
+      - name: adapter
+        doc: |
+          The adapter.
+        type: object.adapter
+      - name: key
+        doc: |
+          Receives the key, ASCII. The string is owned by the library and valid for the life of the
+          process; never free it.
+        type: out_string
+        pointer: mutable
+
+objects:
+  - name: codebrix_pipeline_cache
+    doc: |
+      A pipeline cache (@ref wgpuCodebrixDeviceCreatePipelineCache): compiled shader code a device
+      reuses between pipelines and, through @ref wgpuCodebrixPipelineCacheGetData, between runs of the
+      program. Requires @ref WGPUNativeFeature_PipelineCache.
+    methods:
+      - name: get_data
+        doc: |
+          Copies out the cache's data, to persist and pass back to
+          @ref wgpuCodebrixDeviceCreatePipelineCache on a later run: wgpu-core's header (adapter
+          identity and a checksum) followed by the driver's own data. The usual two-call convention:
+          call it with `data` NULL to learn the size, then with a buffer of at least that size. Each
+          call asks the driver afresh, so pipelines created between the two calls can make the second
+          answer larger than the first; when it is larger than `dataSize`, only `dataSize` bytes are
+          written - repeat the size query rather than save a truncated blob. Thread-safe; save it after
+          the pipelines a run needs have been created (off the render thread if it is large).
+        returns:
+          doc: |
+            The full size of the data in bytes (the bytes written are the smaller of it and
+            `dataSize`); 0 when the cache has no data to give: an invalid cache, a lost device or a
+            backend without pipeline caches.
+          type: usize
+        args:
+          - name: data
+            doc: |
+              Receives the data, or NULL to query the size only.
+            type: c_void
+            pointer: mutable
+            optional: true
+          - name: data_size
+            doc: |
+              The size of the buffer at `data` in bytes; ignored when `data` is NULL.
+            type: usize

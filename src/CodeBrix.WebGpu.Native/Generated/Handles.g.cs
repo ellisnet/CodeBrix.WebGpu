@@ -4,7 +4,7 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   d2ffaba8efc2398b17d17ff452eb5a147cc93f6ca1a33a5cfe85b6e2ed9902fb  wgpu-native-tools/specs/codebrix.yml
+//   2784405e2cfa2600e8b0382ad2b80a4da3e0abc1a075dcae076408488c4ce4cb  wgpu-native-tools/specs/codebrix.yml
 //   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 using System;
@@ -227,6 +227,62 @@ public readonly struct Buffer : IEquatable<Buffer>
     /// <param name="right">The second handle.</param>
     /// <returns>True when the pointers differ.</returns>
     public static bool operator !=(Buffer left, Buffer right) => left.Handle != right.Handle;
+}
+
+/// <summary>
+/// A pipeline cache (<see cref="WebGpu.CodebrixDeviceCreatePipelineCache" />): compiled shader code a device
+/// reuses between pipelines and, through <see cref="WebGpu.CodebrixPipelineCacheGetData" />, between runs of the
+/// program. Requires <see cref="NativeFeature.PipelineCache" />.
+/// </summary>
+/// <remarks>C type: <c>WGPUCodebrixPipelineCache</c> (an opaque pointer).</remarks>
+[StructLayout(LayoutKind.Sequential)]
+public readonly struct CodebrixPipelineCache : IEquatable<CodebrixPipelineCache>
+{
+    /// <summary>The native <c>WGPUCodebrixPipelineCache</c> pointer; zero for none.</summary>
+    public readonly IntPtr Handle;
+
+    /// <summary>Wraps a native <c>WGPUCodebrixPipelineCache</c> pointer.</summary>
+    /// <param name="handle">The pointer (zero for none).</param>
+    public CodebrixPipelineCache(IntPtr handle)
+    {
+        Handle = handle;
+    }
+
+    /// <summary>The null handle.</summary>
+    public static CodebrixPipelineCache Null => default;
+
+    /// <summary>True when the handle is null.</summary>
+    public bool IsNull => Handle == IntPtr.Zero;
+
+    /// <summary>Compares the native pointers.</summary>
+    /// <param name="other">The other handle.</param>
+    /// <returns>True when both wrap the same pointer.</returns>
+    public bool Equals(CodebrixPipelineCache other) => Handle == other.Handle;
+
+    /// <summary>Compares the native pointers.</summary>
+    /// <param name="obj">The other object.</param>
+    /// <returns>True when <paramref name="obj" /> is a <see cref="CodebrixPipelineCache" /> wrapping the same pointer.</returns>
+    public override bool Equals(object obj) => obj is CodebrixPipelineCache other && Equals(other);
+
+    /// <summary>The hash of the native pointer.</summary>
+    /// <returns>The hash code.</returns>
+    public override int GetHashCode() => Handle.GetHashCode();
+
+    /// <summary>The type name and the native pointer in hexadecimal.</summary>
+    /// <returns>For example <c>CodebrixPipelineCache(0x7F0012345678)</c>.</returns>
+    public override string ToString() => "CodebrixPipelineCache(0x" + Handle.ToString("X", CultureInfo.InvariantCulture) + ")";
+
+    /// <summary>Compares the native pointers.</summary>
+    /// <param name="left">The first handle.</param>
+    /// <param name="right">The second handle.</param>
+    /// <returns>True when both wrap the same pointer.</returns>
+    public static bool operator ==(CodebrixPipelineCache left, CodebrixPipelineCache right) => left.Handle == right.Handle;
+
+    /// <summary>Compares the native pointers.</summary>
+    /// <param name="left">The first handle.</param>
+    /// <param name="right">The second handle.</param>
+    /// <returns>True when the pointers differ.</returns>
+    public static bool operator !=(CodebrixPipelineCache left, CodebrixPipelineCache right) => left.Handle != right.Handle;
 }
 
 /// <summary>

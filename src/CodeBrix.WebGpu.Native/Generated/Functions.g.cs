@@ -4,7 +4,7 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   d2ffaba8efc2398b17d17ff452eb5a147cc93f6ca1a33a5cfe85b6e2ed9902fb  wgpu-native-tools/specs/codebrix.yml
+//   2784405e2cfa2600e8b0382ad2b80a4da3e0abc1a075dcae076408488c4ce4cb  wgpu-native-tools/specs/codebrix.yml
 //   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 using System.Runtime.InteropServices;
@@ -300,6 +300,26 @@ public static unsafe partial class WebGpu
     public static partial Status CodebrixAdapterGetDownlevelCapabilities(Adapter adapter, CodebrixDownlevelCapabilities* capabilities);
 
     /// <summary>
+    /// wgpu's name for an adapter's pipeline cache (Rust wgpu's <c>wgpu::util::pipeline_cache_key</c>):
+    /// <c>wgpu_pipeline_cache_vulkan_&lt;vendor&gt;_&lt;device&gt;</c> with the decimal PCI vendor and device ids of the
+    /// adapter. A host keeps one cache file per key (plus whatever identity of its own it adds, such as
+    /// the library's build info), so a machine with two GPUs never feeds one GPU's data to the other.
+    /// The driver version is not part of the key: it is checked inside the data (a cache saved before a
+    /// driver update is replaced by an empty one when created with <c>fallback</c>).
+    /// </summary>
+    /// <param name="adapter">The adapter.</param>
+    /// <param name="key">
+    /// Receives the key, ASCII. The string is owned by the library and valid for the life of the
+    /// process; never free it.
+    /// </param>
+    /// <returns>
+    /// <c>WGPUStatus_Success</c>; <c>WGPUStatus_Error</c> for a null adapter or output, or an adapter on a
+    /// backend without pipeline caches (anything but Vulkan), and then <c>key</c> is not written.
+    /// </returns>
+    [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixAdapterGetPipelineCacheKey")]
+    public static partial Status CodebrixAdapterGetPipelineCacheKey(Adapter adapter, StringView* key);
+
+    /// <summary>
     /// Fills <see cref="CodebrixTextureFormatFeatures" /> for one format on an adapter. Works for every format
     /// the library knows, including ones whose feature (e.g. a compressed family) the adapter lacks - then
     /// the usages are empty.
@@ -342,6 +362,33 @@ public static unsafe partial class WebGpu
     /// </returns>
     [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixDeviceAddFaultListener")]
     public static partial ulong CodebrixDeviceAddFaultListener(Device device, CodebrixFaultCallbacks* callbacks);
+
+    /// <summary>
+    /// <para>
+    /// Creates a pipeline cache: the driver's store of compiled shader code, which a pipeline created
+    /// with <see cref="CodebrixPipelineDescriptorExtras" /> reads from and adds to, and which
+    /// <see cref="WebGpu.CodebrixPipelineCacheGetData" /> hands out for the host to save (to disk, per adapter: see
+    /// <see cref="WebGpu.CodebrixAdapterGetPipelineCacheKey" />) and pass back here on a later run. On a device with a
+    /// warm cache, creating a pipeline skips the driver's shader compilation (seconds per pipeline on
+    /// some mobile drivers).
+    /// </para>
+    /// <para>
+    /// Requires <see cref="NativeFeature.PipelineCache" /> on the device, which only Vulkan adapters offer
+    /// (wgpu-core 29): on Metal, Direct3D 12 and OpenGL the feature is absent, and creation reports a
+    /// validation error through the device's error path and returns an invalid cache (never ends the
+    /// process). Data from another adapter is a validation error; so is outdated or damaged data
+    /// without <c>fallback</c>. An invalid cache is safe to release and to query (no data); chaining it makes pipeline
+    /// creation fail validation.
+    /// </para>
+    /// </summary>
+    /// <param name="device">The device.</param>
+    /// <param name="descriptor">The description.</param>
+    /// <returns>
+    /// The cache (never NULL for a valid device and descriptor; possibly invalid, see above). Release
+    /// it with <see cref="WebGpu.CodebrixPipelineCacheRelease" />; pipelines created through it keep no reference.
+    /// </returns>
+    [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixDeviceCreatePipelineCache")]
+    public static partial CodebrixPipelineCache CodebrixDeviceCreatePipelineCache(Device device, CodebrixPipelineCacheDescriptor* descriptor);
 
     /// <summary>
     /// Wraps an application-owned <c>ID3D12Resource</c> as a wgpu texture. Same rules as
@@ -530,6 +577,41 @@ public static unsafe partial class WebGpu
     /// <returns><c>WGPUStatus_Success</c>, or <c>WGPUStatus_Error</c> (reason through the log callback).</returns>
     [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixInstanceAdoptVulkanDevice")]
     public static partial Status CodebrixInstanceAdoptVulkanDevice(Instance instance, CodebrixVulkanAdoptDescriptor* descriptor, Adapter* adapter, Device* device);
+
+    /// <summary>
+    /// Adds one reference to the <see cref="CodebrixPipelineCache" /> (<c>wgpuCodebrixPipelineCacheAddRef</c>).
+    /// </summary>
+    /// <param name="codebrixPipelineCache">The object.</param>
+    [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixPipelineCacheAddRef")]
+    public static partial void CodebrixPipelineCacheAddRef(CodebrixPipelineCache codebrixPipelineCache);
+
+    /// <summary>
+    /// Copies out the cache's data, to persist and pass back to
+    /// <see cref="WebGpu.CodebrixDeviceCreatePipelineCache" /> on a later run: wgpu-core's header (adapter
+    /// identity and a checksum) followed by the driver's own data. The usual two-call convention:
+    /// call it with <c>data</c> NULL to learn the size, then with a buffer of at least that size. Each
+    /// call asks the driver afresh, so pipelines created between the two calls can make the second
+    /// answer larger than the first; when it is larger than <c>dataSize</c>, only <c>dataSize</c> bytes are
+    /// written - repeat the size query rather than save a truncated blob. Thread-safe; save it after
+    /// the pipelines a run needs have been created (off the render thread if it is large).
+    /// </summary>
+    /// <param name="codebrixPipelineCache">The object.</param>
+    /// <param name="data">Receives the data, or NULL to query the size only.</param>
+    /// <param name="dataSize">The size of the buffer at <c>data</c> in bytes; ignored when <c>data</c> is NULL.</param>
+    /// <returns>
+    /// The full size of the data in bytes (the bytes written are the smaller of it and
+    /// <c>dataSize</c>); 0 when the cache has no data to give: an invalid cache, a lost device or a
+    /// backend without pipeline caches.
+    /// </returns>
+    [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixPipelineCacheGetData")]
+    public static partial nuint CodebrixPipelineCacheGetData(CodebrixPipelineCache codebrixPipelineCache, void* data, nuint dataSize);
+
+    /// <summary>
+    /// Releases one reference to the <see cref="CodebrixPipelineCache" />; the object is destroyed when its last reference is released (<c>wgpuCodebrixPipelineCacheRelease</c>).
+    /// </summary>
+    /// <param name="codebrixPipelineCache">The object.</param>
+    [LibraryImport("codebrix_wgpu", EntryPoint = "wgpuCodebrixPipelineCacheRelease")]
+    public static partial void CodebrixPipelineCacheRelease(CodebrixPipelineCache codebrixPipelineCache);
 
     /// <summary>
     /// <para>

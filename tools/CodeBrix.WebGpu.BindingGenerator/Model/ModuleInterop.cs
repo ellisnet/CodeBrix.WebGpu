@@ -75,7 +75,11 @@ public sealed class ProcEntry
 /// <summary>
 /// The backend a function needs to do anything: a symbol containing <c>Vulkan</c>, <c>D3d12</c> or <c>Metal</c>
 /// works only in a library built with that backend (elsewhere it returns <c>WGPUStatus_Error</c> / NULL).
-/// The values are the ones the native's generated status table uses.
+/// The pipeline-cache functions (<c>PipelineCache</c> in the symbol) need Vulkan too: wgpu-core 29 offers
+/// <c>WGPUNativeFeature_PipelineCache</c> on Vulkan adapters only - except the cache's AddRef / Release, which
+/// work on every build (a cache created without the feature is an invalid object that still has to be
+/// released). The values are the ones the native's generated
+/// status table uses.
 /// </summary>
 public enum ProcBackend
 {
@@ -218,6 +222,12 @@ public sealed class ModuleInterop
     public static ProcBackend BackendOf(string symbol)
     {
         if (symbol.Contains("Vulkan", StringComparison.Ordinal)) return ProcBackend.Vulkan;
+        if (symbol.Contains("PipelineCache", StringComparison.Ordinal)
+            && !symbol.EndsWith("AddRef", StringComparison.Ordinal)
+            && !symbol.EndsWith("Release", StringComparison.Ordinal))
+        {
+            return ProcBackend.Vulkan;
+        }
         if (symbol.Contains("D3d12", StringComparison.Ordinal)) return ProcBackend.D3d12;
         if (symbol.Contains("Metal", StringComparison.Ordinal)) return ProcBackend.Metal;
         return ProcBackend.None;

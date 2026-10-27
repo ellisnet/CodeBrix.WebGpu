@@ -390,6 +390,38 @@ IEEE floating point for WGSL on Metal (macOS; opt-in, OFF by default):
         // pipelines. Success on macOS; Error elsewhere (no effect). The Metal
         // compiler may still fuse a*b+c into an FMA either way.
 
+Pipeline caches (skip the driver's shader compilation on later runs; Vulkan
+adapters only - the only ones that offer NativeFeature.PipelineCache):
+
+    // 1. Request the device with (FeatureName)NativeFeature.PipelineCache
+    //    (check WebGpu.AdapterHasFeature first).
+    // 2. Name the cache file per adapter:
+    Status WebGpu.CodebrixAdapterGetPipelineCacheKey(Adapter, StringView* key);
+        // "wgpu_pipeline_cache_vulkan_<vendor>_<device>" (Rust wgpu's
+        // pipeline_cache_key); a process-lifetime string. Error off Vulkan.
+        // Add your own identity (e.g. CodeBrixWebGpuNative.BuildInfo) if you want.
+    // 3. Create the cache from the saved bytes (or none):
+    CodebrixPipelineCache WebGpu.CodebrixDeviceCreatePipelineCache(Device,
+        CodebrixPipelineCacheDescriptor*);
+        // Label, Data (void*, null = empty), DataSize, Fallback (1 recommended:
+        // truncated / corrupt / outdated data -> an EMPTY cache, not an error).
+        // Data from ANOTHER adapter is a Validation error even with Fallback.
+        // Without the feature: a Validation error + an invalid cache (never ends
+        // the process; release it as usual).
+    // 4. Chain it onto every ComputePipelineDescriptor / RenderPipelineDescriptor:
+    CodebrixPipelineDescriptorExtras extras = new() { PipelineCache = cache };
+    extras.Chain.SType = CodebrixPipelineDescriptorExtras.StructType;
+    descriptor.NextInChain = &extras.Chain;
+    // 5. After creating the pipelines, save the data (two calls):
+    nuint WebGpu.CodebrixPipelineCacheGetData(CodebrixPipelineCache, void* data, nuint dataSize);
+        // data null -> the size; then fill. Returns the FULL size and writes at
+        // most dataSize bytes, so re-query rather than save a short blob.
+        // 0 = nothing to save (invalid cache, lost device, non-Vulkan).
+    void WebGpu.CodebrixPipelineCacheAddRef / CodebrixPipelineCacheRelease(CodebrixPipelineCache);
+        // pipelines keep no reference: release the cache whenever you are done.
+    // Write the file atomically (temp file + rename). No managed wrapper; the
+    // raw functions above are the API.
+
 Contract/diagnostics: CodebrixGetApiVersion, CodebrixGetBuildInfo,
 CodebrixGetStructLayout, CodebrixGetProcStatus (all wrapped by
 CodeBrixWebGpuNative).

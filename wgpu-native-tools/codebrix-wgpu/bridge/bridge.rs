@@ -272,3 +272,73 @@ pub unsafe fn device_fault_hook(
     };
     Some(FaultHook::Installed(SinkRef(Arc::downgrade(&d.error_sink)), userdata))
 }
+
+// --- pipeline caches (wgpuCodebrixDeviceCreatePipelineCache) --------------------------------------
+//
+// A cache handle needs nothing private, but wgpu-native's pipeline creation must find it: patches/0011
+// makes wgpuDeviceCreateComputePipeline / wgpuDeviceCreateRenderPipeline call pipeline_cache_of_chain,
+// and this crate cannot see codebrix-wgpu's types, so the handle and the chained struct are declared
+// here (src/codebrix.rs exports the functions). Creation reports through the device's error sink,
+// exactly as wgpu-native's own create functions do.
+
+/// `WGPUSType_CodebrixPipelineDescriptorExtras` (codebrix.yml: s_type, block 0x000C).
+pub const STYPE_CODEBRIX_PIPELINE_DESCRIPTOR_EXTRAS: native::WGPUSType = 0x000C0001;
+
+/// The object behind a `WGPUCodebrixPipelineCache`.
+pub struct PipelineCacheImpl {
+    context: Arc<Context>,
+    id: id::PipelineCacheId,
+}
+
+impl Drop for PipelineCacheImpl {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            self.context.pipeline_cache_drop(self.id);
+        }
+    }
+}
+
+/// `WGPUCodebrixPipelineDescriptorExtras` (field order and types exactly as codebrix_wgpu.h).
+#[repr(C)]
+#[allow(non_snake_case)]
+pub struct PipelineDescriptorExtras {
+    pub chain: native::WGPUChainedStruct,
+    pub pipelineCache: *const PipelineCacheImpl,
+}
+
+/// Creates a pipeline cache on `device` (None for a null device); a creation error goes to the
+/// device's error sink and the returned handle is then invalid, as for every WebGPU create call.
+pub unsafe fn new_pipeline_cache(
+    device: native::WGPUDevice,
+    descriptor: &wgc::pipeline::PipelineCacheDescriptor,
+    fn_ident: &'static str,
+) -> Option<*const PipelineCacheImpl> {
+    let d = unsafe { device.as_ref() }?;
+    let (id, error) = unsafe { d.context.device_create_pipeline_cache(d.id, descriptor, None) };
+    if let Some(cause) = error {
+        crate::handle_error(&d.error_sink, cause, descriptor.label.clone(), fn_ident);
+    }
+    Some(Arc::into_raw(Arc::new(PipelineCacheImpl { context: d.context.clone(), id })))
+}
+
+/// The data of a pipeline cache (wgpu-core's header + the driver's data); None for a null or invalid
+/// cache, a lost device or a backend without pipeline caches.
+pub unsafe fn pipeline_cache_data(cache: *const PipelineCacheImpl) -> Option<Vec<u8>> {
+    let c = unsafe { cache.as_ref() }?;
+    c.context.pipeline_cache_get_data(c.id)
+}
+
+/// The cache of the first `WGPUCodebrixPipelineDescriptorExtras` in a pipeline descriptor's chain
+/// (patches/0011); None when there is none or its cache is NULL. Other chained structs are skipped.
+pub unsafe fn pipeline_cache_of_chain(
+    mut next: *const native::WGPUChainedStruct,
+) -> Option<id::PipelineCacheId> {
+    while let Some(link) = unsafe { next.as_ref() } {
+        if link.sType == STYPE_CODEBRIX_PIPELINE_DESCRIPTOR_EXTRAS {
+            let extras = unsafe { &*(next as *const PipelineDescriptorExtras) };
+            return unsafe { extras.pipelineCache.as_ref() }.map(|c| c.id);
+        }
+        next = link.next;
+    }
+    None
+}

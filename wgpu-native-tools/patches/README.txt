@@ -5,8 +5,8 @@ fails loudly when one stops applying) to a SCRATCH COPY of wgpu-native/ and
 wgpu-hal/ - never to the vendored trees, which stay byte-identical to their
 archives. Unified diffs relative to wgpu-native-tools/ with a/ b/ prefixes:
 `patch -p1` (bash), `git apply -p1` (Windows), in name order. 0001 and 0002 make
-the build possible; 0003-0009 fix behaviour inside wgpu-native's own source and
-0010 inside wgpu-hal's (the reason wgpu-hal/ is vendored), one concern each, and
+the build possible; 0003-0009 and 0011 fix behaviour inside wgpu-native's own
+source and 0010 inside wgpu-hal's (the reason wgpu-hal/ is vendored), one concern each, and
 carry their upstream provenance in the text above the diff (both tools ignore
 it). Every behaviour patch is fenced by a test in tests/CodeBrix.WebGpu.Native.Tests
 that fails on the unpatched engine.
@@ -109,5 +109,27 @@ that fails on the unpatched engine.
     contraction is not switched off by either setting. Fenced by
     MetalPreciseMathTests (macOS) and the smoke test's Metal checks. No
     upstream option.
+
+0011-wgpu-native-pipeline-cache-chain.patch
+    wgpu-native/src/lib.rs: wgpuDeviceCreateComputePipeline and
+    wgpuDeviceCreateRenderPipeline pass wgpu-core the pipeline cache of a chained
+    WGPUCodebrixPipelineDescriptorExtras (codebrix_wgpu.h; sType
+    WGPUSType_CodebrixPipelineDescriptorExtras = 0x000C0001) instead of the
+    hard-coded `cache: None` behind upstream's `// TODO(wgpu.h)`. Two lines; the
+    chain walk and the cache handle live in codebrix-wgpu/bridge/bridge.rs
+    (pipeline_cache_of_chain, PipelineCacheImpl), the exports
+    (wgpuCodebrixDeviceCreatePipelineCache, wgpuCodebrixPipelineCacheGetData /
+    AddRef / Release, wgpuCodebrixAdapterGetPipelineCacheKey) in
+    src/codebrix.rs. wgpu.h's C API is unchanged. Without it the Vulkan driver
+    never sees a cache, so every first run recompiles every pipeline (worst on
+    Android, where no driver disk cache hides it). Fenced by PipelineCacheTests
+    (a_compute_ / a_render_pipeline_compiled_through_a_cache_fills_it: the
+    cache's data stays at its empty size on the unpatched engine - verified
+    2026-10-26) and the smoke test's "the chained cache grew" check. UPSTREAM:
+    open draft PR gfx-rs/wgpu-native #618 (2026-07-11, unmerged) does the same
+    with wgpu.h types (WGPUPipelineCache, WGPUPipelineDescriptorExtras, sType
+    0x0003000C); the CodeBrix contract copies its shapes under CodeBrix names.
+    When a vendored release contains it, drop this patch and move the binding to
+    upstream's names.
 
 Record a new patch in UPSTREAM.txt and BUILD-PROVENANCE.txt.

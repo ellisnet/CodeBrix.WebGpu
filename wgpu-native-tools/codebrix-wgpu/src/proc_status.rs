@@ -4,7 +4,7 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   d2ffaba8efc2398b17d17ff452eb5a147cc93f6ca1a33a5cfe85b6e2ed9902fb  wgpu-native-tools/specs/codebrix.yml
+//   2784405e2cfa2600e8b0382ad2b80a4da3e0abc1a075dcae076408488c4ce4cb  wgpu-native-tools/specs/codebrix.yml
 //   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 //
 // The static half of wgpuCodebrixGetProcStatus: one (WGPUCodebrixProcStatus, required backend) pair per
@@ -12,10 +12,10 @@
 // specs/proc-table-notes.txt. Backend: 0 none, 1 Vulkan, 2 Direct3D 12, 3 Metal (by symbol name); src/codebrix.rs
 // turns a backend this build lacks into WGPUCodebrixProcStatus_NotAvailableOnBackend.
 
-// It belongs to the function table with WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH 0xA8B6E21BF6D91F71.
+// It belongs to the function table with WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH 0x801E39810F77EFD8.
 
 /// (status, required backend) per function-table ordinal.
-pub static PROC_STATUS: [(u32, u8); 252] = [
+pub static PROC_STATUS: [(u32, u8); 257] = [
     (0x000C0001, 0), // wgpuAdapterAddRef
     (0x000C0001, 0), // wgpuAdapterGetFeatures
     (0x000C0001, 0), // wgpuAdapterGetInfo
@@ -44,9 +44,11 @@ pub static PROC_STATUS: [(u32, u8); 252] = [
     (0x000C0001, 0), // wgpuBufferUnmap
     (0x000C0002, 0), // wgpuBufferWriteMappedRange
     (0x000C0001, 0), // wgpuCodebrixAdapterGetDownlevelCapabilities
+    (0x000C0001, 1), // wgpuCodebrixAdapterGetPipelineCacheKey
     (0x000C0001, 0), // wgpuCodebrixAdapterGetTextureFormatFeatures
     (0x000C0001, 0), // wgpuCodebrixCommandEncoderTransitionTexture
     (0x000C0001, 0), // wgpuCodebrixDeviceAddFaultListener
+    (0x000C0001, 1), // wgpuCodebrixDeviceCreatePipelineCache
     (0x000C0001, 2), // wgpuCodebrixDeviceCreateTextureFromD3d12Resource
     (0x000C0001, 3), // wgpuCodebrixDeviceCreateTextureFromMetalTexture
     (0x000C0001, 1), // wgpuCodebrixDeviceCreateTextureFromVulkanImage
@@ -62,6 +64,9 @@ pub static PROC_STATUS: [(u32, u8); 252] = [
     (0x000C0004, 2), // wgpuCodebrixInstanceAdoptD3d12Device
     (0x000C0003, 3), // wgpuCodebrixInstanceAdoptMetalDevice
     (0x000C0003, 1), // wgpuCodebrixInstanceAdoptVulkanDevice
+    (0x000C0001, 0), // wgpuCodebrixPipelineCacheAddRef
+    (0x000C0001, 1), // wgpuCodebrixPipelineCacheGetData
+    (0x000C0001, 0), // wgpuCodebrixPipelineCacheRelease
     (0x000C0001, 3), // wgpuCodebrixSetMetalPreciseMath
     (0x000C0001, 2), // wgpuCodebrixTextureGetD3d12Info
     (0x000C0001, 1), // wgpuCodebrixTextureGetVulkanInfo

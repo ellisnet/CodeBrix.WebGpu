@@ -18,7 +18,7 @@ public sealed unsafe class GpuSession : IDisposable
     private readonly CallbackState* state;
     private GCHandle self;
 
-    private GpuSession(InstanceBackend backends)
+    private GpuSession(InstanceBackend backends, FeatureName[] requiredFeatures = null)
     {
         CodeBrixWebGpuNative.EnsureLoaded();
         state = (CallbackState*)NativeMemory.AllocZeroed((nuint)sizeof(CallbackState));
@@ -49,7 +49,24 @@ public sealed unsafe class GpuSession : IDisposable
         deviceDescriptor.UncapturedErrorCallbackInfo.Callback = &OnUncapturedError;
         deviceDescriptor.UncapturedErrorCallbackInfo.Userdata1 = state;
         deviceDescriptor.UncapturedErrorCallbackInfo.Userdata2 = (void*)GCHandle.ToIntPtr(self);
-        Device = RequestDevice(Instance, Adapter, &deviceDescriptor, out string deviceMessage);
+        requiredFeatures ??= Array.Empty<FeatureName>();
+        foreach (FeatureName feature in requiredFeatures)
+        {
+            if (WebGpu.AdapterHasFeature(Adapter, feature) == 0)
+            {
+                SkipReason = "The adapter does not offer the required feature " + feature + ".";
+                return;
+            }
+        }
+
+        string deviceMessage;
+        fixed (FeatureName* features = requiredFeatures)
+        {
+            deviceDescriptor.RequiredFeatureCount = (nuint)requiredFeatures.Length;
+            deviceDescriptor.RequiredFeatures = features;
+            Device = RequestDevice(Instance, Adapter, &deviceDescriptor, out deviceMessage);
+        }
+
         if (Device.IsNull)
         {
             SkipReason = "The adapter refused to create a device (" + deviceMessage + ").";
@@ -101,6 +118,14 @@ public sealed unsafe class GpuSession : IDisposable
     /// <param name="backends">The instance backends.</param>
     /// <returns>The session (check <see cref="SkipReason" />).</returns>
     public static GpuSession CreateFor(InstanceBackend backends) => new GpuSession(backends);
+
+    /// <summary>
+    /// Creates a session on this platform's backend whose device enables <paramref name="requiredFeatures" />;
+    /// <see cref="SkipReason" /> says so when the adapter does not offer one of them.
+    /// </summary>
+    /// <param name="requiredFeatures">The features the device must enable.</param>
+    /// <returns>The session (check <see cref="SkipReason" />).</returns>
+    public static GpuSession CreateWithFeatures(params FeatureName[] requiredFeatures) => new GpuSession(PlatformBackend, requiredFeatures);
 
     /// <summary>Empties <see cref="UncapturedErrors" />.</summary>
     public void ClearUncapturedErrors()

@@ -4,7 +4,7 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   d2ffaba8efc2398b17d17ff452eb5a147cc93f6ca1a33a5cfe85b6e2ed9902fb  wgpu-native-tools/specs/codebrix.yml
+//   2784405e2cfa2600e8b0382ad2b80a4da3e0abc1a075dcae076408488c4ce4cb  wgpu-native-tools/specs/codebrix.yml
 //   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 using System.Collections.Generic;
@@ -23,10 +23,10 @@ namespace CodeBrix.WebGpu.Native;
 public unsafe partial struct CodebrixProcTable
 {
     /// <summary>The number of function pointers (<c>WGPU_CODEBRIX_PROC_TABLE_FUNCTION_COUNT</c>).</summary>
-    public const uint EntryCount = 252u;
+    public const uint EntryCount = 257u;
 
     /// <summary>FNV-1a 64 of every entry's C signature in table order (<c>WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH</c>).</summary>
-    public const ulong ExpectedSignatureHash = 0xA8B6E21BF6D91F71UL;
+    public const ulong ExpectedSignatureHash = 0x801E39810F77EFD8UL;
 
     /// <summary>The byte offset of the first function pointer.</summary>
     public const int HeaderSize = 24;
@@ -61,9 +61,11 @@ public unsafe partial struct CodebrixProcTable
         "wgpuBufferUnmap",
         "wgpuBufferWriteMappedRange",
         "wgpuCodebrixAdapterGetDownlevelCapabilities",
+        "wgpuCodebrixAdapterGetPipelineCacheKey",
         "wgpuCodebrixAdapterGetTextureFormatFeatures",
         "wgpuCodebrixCommandEncoderTransitionTexture",
         "wgpuCodebrixDeviceAddFaultListener",
+        "wgpuCodebrixDeviceCreatePipelineCache",
         "wgpuCodebrixDeviceCreateTextureFromD3d12Resource",
         "wgpuCodebrixDeviceCreateTextureFromMetalTexture",
         "wgpuCodebrixDeviceCreateTextureFromVulkanImage",
@@ -79,6 +81,9 @@ public unsafe partial struct CodebrixProcTable
         "wgpuCodebrixInstanceAdoptD3d12Device",
         "wgpuCodebrixInstanceAdoptMetalDevice",
         "wgpuCodebrixInstanceAdoptVulkanDevice",
+        "wgpuCodebrixPipelineCacheAddRef",
+        "wgpuCodebrixPipelineCacheGetData",
+        "wgpuCodebrixPipelineCacheRelease",
         "wgpuCodebrixSetMetalPreciseMath",
         "wgpuCodebrixTextureGetD3d12Info",
         "wgpuCodebrixTextureGetVulkanInfo",
@@ -335,9 +340,14 @@ public unsafe partial struct CodebrixProcTable
         CodebrixProcStatus.Implemented,
         CodebrixProcStatus.Implemented,
         CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
         CodebrixProcStatus.Unsupported,
         CodebrixProcStatus.AbortsOnError,
         CodebrixProcStatus.AbortsOnError,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
+        CodebrixProcStatus.Implemented,
         CodebrixProcStatus.Implemented,
         CodebrixProcStatus.Implemented,
         CodebrixProcStatus.Implemented,
@@ -576,9 +586,11 @@ public unsafe partial struct CodebrixProcTable
         BackendType.Undefined,
         BackendType.Undefined,
         BackendType.Undefined,
+        BackendType.Vulkan,
         BackendType.Undefined,
         BackendType.Undefined,
         BackendType.Undefined,
+        BackendType.Vulkan,
         BackendType.D3D12,
         BackendType.Metal,
         BackendType.Vulkan,
@@ -594,6 +606,9 @@ public unsafe partial struct CodebrixProcTable
         BackendType.D3D12,
         BackendType.Metal,
         BackendType.Vulkan,
+        BackendType.Undefined,
+        BackendType.Vulkan,
+        BackendType.Undefined,
         BackendType.Metal,
         BackendType.D3D12,
         BackendType.Vulkan,
@@ -920,6 +935,9 @@ public unsafe partial struct CodebrixProcTable
     /// <summary><c>wgpuCodebrixAdapterGetDownlevelCapabilities</c> - see <see cref="WebGpu.CodebrixAdapterGetDownlevelCapabilities" />.</summary>
     public delegate* unmanaged[Cdecl]<Adapter, CodebrixDownlevelCapabilities*, Status> CodebrixAdapterGetDownlevelCapabilities;
 
+    /// <summary><c>wgpuCodebrixAdapterGetPipelineCacheKey</c> - see <see cref="WebGpu.CodebrixAdapterGetPipelineCacheKey" />.</summary>
+    public delegate* unmanaged[Cdecl]<Adapter, StringView*, Status> CodebrixAdapterGetPipelineCacheKey;
+
     /// <summary><c>wgpuCodebrixAdapterGetTextureFormatFeatures</c> - see <see cref="WebGpu.CodebrixAdapterGetTextureFormatFeatures" />.</summary>
     public delegate* unmanaged[Cdecl]<Adapter, TextureFormat, CodebrixTextureFormatFeatures*, Status> CodebrixAdapterGetTextureFormatFeatures;
 
@@ -928,6 +946,9 @@ public unsafe partial struct CodebrixProcTable
 
     /// <summary><c>wgpuCodebrixDeviceAddFaultListener</c> - see <see cref="WebGpu.CodebrixDeviceAddFaultListener" />.</summary>
     public delegate* unmanaged[Cdecl]<Device, CodebrixFaultCallbacks*, ulong> CodebrixDeviceAddFaultListener;
+
+    /// <summary><c>wgpuCodebrixDeviceCreatePipelineCache</c> - see <see cref="WebGpu.CodebrixDeviceCreatePipelineCache" />.</summary>
+    public delegate* unmanaged[Cdecl]<Device, CodebrixPipelineCacheDescriptor*, CodebrixPipelineCache> CodebrixDeviceCreatePipelineCache;
 
     /// <summary><c>wgpuCodebrixDeviceCreateTextureFromD3d12Resource</c> - see <see cref="WebGpu.CodebrixDeviceCreateTextureFromD3d12Resource" />.</summary>
     public delegate* unmanaged[Cdecl]<Device, void*, TextureDescriptor*, CodebrixTextureState, Texture> CodebrixDeviceCreateTextureFromD3d12Resource;
@@ -976,6 +997,15 @@ public unsafe partial struct CodebrixProcTable
     /// <summary><c>wgpuCodebrixInstanceAdoptVulkanDevice</c> - see <see cref="WebGpu.CodebrixInstanceAdoptVulkanDevice" />.</summary>
     /// <remarks>ABORTS on the first uncaptured error: the adopted device has the default uncaptured-error handler (use error scopes).</remarks>
     public delegate* unmanaged[Cdecl]<Instance, CodebrixVulkanAdoptDescriptor*, Adapter*, Device*, Status> CodebrixInstanceAdoptVulkanDevice;
+
+    /// <summary><c>wgpuCodebrixPipelineCacheAddRef</c> - see <see cref="WebGpu.CodebrixPipelineCacheAddRef" />.</summary>
+    public delegate* unmanaged[Cdecl]<CodebrixPipelineCache, void> CodebrixPipelineCacheAddRef;
+
+    /// <summary><c>wgpuCodebrixPipelineCacheGetData</c> - see <see cref="WebGpu.CodebrixPipelineCacheGetData" />.</summary>
+    public delegate* unmanaged[Cdecl]<CodebrixPipelineCache, void*, nuint, nuint> CodebrixPipelineCacheGetData;
+
+    /// <summary><c>wgpuCodebrixPipelineCacheRelease</c> - see <see cref="WebGpu.CodebrixPipelineCacheRelease" />.</summary>
+    public delegate* unmanaged[Cdecl]<CodebrixPipelineCache, void> CodebrixPipelineCacheRelease;
 
     /// <summary><c>wgpuCodebrixSetMetalPreciseMath</c> - see <see cref="WebGpu.CodebrixSetMetalPreciseMath" />.</summary>
     public delegate* unmanaged[Cdecl]<uint, Status> CodebrixSetMetalPreciseMath;

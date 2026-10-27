@@ -366,7 +366,7 @@ public sealed class ApiModelBuilder
     {
         foreach (SpecObject value in objects.Values)
         {
-            model.Handles.Add(new ApiHandle { CName = "WGPU" + Names.Pascal(value.Name), CsName = Names.Pascal(value.Name), Doc = value.Doc });
+            model.Handles.Add(new ApiHandle { CName = "WGPU" + Names.Pascal(value.Name), CsName = Names.Pascal(value.Name), Doc = value.Doc, SpecName = value.Source.Name });
         }
 
         model.Handles.Sort((a, b) => string.CompareOrdinal(a.CsName, b.CsName));

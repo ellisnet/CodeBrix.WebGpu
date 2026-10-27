@@ -49,7 +49,7 @@ use wgpu_native::codebrix_bridge as bridge;
 use wgpu_native::native;
 
 /// The `api_version` constant of codebrix.yml.
-pub const WGPU_CODEBRIX_API_VERSION: u32 = 3;
+pub const WGPU_CODEBRIX_API_VERSION: u32 = 4;
 
 // --- enum codebrix_texture_state (enum_prefix 0x000C) ---------------------------------------------
 pub type WGPUCodebrixTextureState = u32;
@@ -212,6 +212,21 @@ pub struct WGPUCodebrixVulkanAdoptRequirements {
     pub requiredDeviceExtensions: *const WGPUCodebrixName,
     pub physicalDeviceFeatures2: *mut c_void,
     pub physicalDeviceApiVersion: u32,
+}
+
+/// `WGPUCodebrixPipelineCache`: the handle is bridge.rs's (wgpu-native's pipeline creation reads it,
+/// patches/0011), as is `WGPUCodebrixPipelineDescriptorExtras` (bridge::PipelineDescriptorExtras).
+pub type WGPUCodebrixPipelineCache = *const bridge::PipelineCacheImpl;
+pub type WGPUCodebrixPipelineDescriptorExtras = bridge::PipelineDescriptorExtras;
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct WGPUCodebrixPipelineCacheDescriptor {
+    pub nextInChain: *mut native::WGPUChainedStruct,
+    pub label: native::WGPUStringView,
+    pub data: *const c_void,
+    pub dataSize: usize,
+    pub fallback: native::WGPUBool,
 }
 
 #[repr(C)]
@@ -1536,4 +1551,90 @@ pub extern "C" fn wgpuCodebrixSetMetalPreciseMath(enabled: native::WGPUBool) -> 
         let _ = enabled;
         STATUS_ERROR
     }
+}
+
+// --- pipeline caches ---------------------------------------------------------------------------------
+//
+// wgpu-core's pipeline caches (Device::create_pipeline_cache, Global::pipeline_cache_get_data) under the
+// shapes of upstream's draft gfx-rs/wgpu-native PR #618. wgpu-core 29 offers the PipelineCache feature on
+// Vulkan adapters only and requires it, so elsewhere creation is a validation error (an invalid cache) and
+// the data is empty - nothing here ends the process. Pipelines find the cache through patches/0011.
+
+#[no_mangle]
+pub unsafe extern "C" fn wgpuCodebrixDeviceCreatePipelineCache(
+    device: native::WGPUDevice,
+    descriptor: *const WGPUCodebrixPipelineCacheDescriptor,
+) -> WGPUCodebrixPipelineCache {
+    let Some(d) = (unsafe { descriptor.as_ref() }) else { return std::ptr::null() };
+    let label = unsafe { view_str(d.label) }.filter(|l| !l.is_empty()).map(std::borrow::Cow::Borrowed);
+    // No data (NULL or zero bytes) is an empty cache, with or without fallback (wgpu-core would call a
+    // zero-length blob truncated: an error without fallback).
+    let data = if d.data.is_null() || d.dataSize == 0 {
+        None
+    } else {
+        Some(std::borrow::Cow::Borrowed(unsafe { std::slice::from_raw_parts(d.data as *const u8, d.dataSize) }))
+    };
+    let desc = wgc::pipeline::PipelineCacheDescriptor { label, data, fallback: d.fallback != 0 };
+    unsafe { bridge::new_pipeline_cache(device, &desc, "wgpuCodebrixDeviceCreatePipelineCache") }
+        .unwrap_or(std::ptr::null())
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wgpuCodebrixPipelineCacheGetData(
+    codebrixPipelineCache: WGPUCodebrixPipelineCache,
+    data: *mut c_void,
+    dataSize: usize,
+) -> usize {
+    let Some(bytes) = (unsafe { bridge::pipeline_cache_data(codebrixPipelineCache) }) else { return 0 };
+    if !data.is_null() {
+        let count = bytes.len().min(dataSize);
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), data as *mut u8, count) };
+    }
+    bytes.len()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wgpuCodebrixPipelineCacheAddRef(codebrixPipelineCache: WGPUCodebrixPipelineCache) {
+    if !codebrixPipelineCache.is_null() {
+        unsafe { std::sync::Arc::increment_strong_count(codebrixPipelineCache) };
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wgpuCodebrixPipelineCacheRelease(codebrixPipelineCache: WGPUCodebrixPipelineCache) {
+    if !codebrixPipelineCache.is_null() {
+        unsafe { std::sync::Arc::decrement_strong_count(codebrixPipelineCache) };
+    }
+}
+
+/// Keys handed out by wgpuCodebrixAdapterGetPipelineCacheKey: one leaked string per distinct key, so
+/// "valid for the life of the process" holds (a process sees a handful of adapters).
+static CACHE_KEYS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
+#[no_mangle]
+pub unsafe extern "C" fn wgpuCodebrixAdapterGetPipelineCacheKey(
+    adapter: native::WGPUAdapter,
+    key: *mut native::WGPUStringView,
+) -> native::WGPUStatus {
+    if key.is_null() {
+        return STATUS_ERROR;
+    }
+    let Some((ctx, adapter_id)) = (unsafe { bridge::adapter_parts(adapter) }) else { return STATUS_ERROR };
+    let info = ctx.adapter_get_info(adapter_id);
+    // Rust wgpu's wgpu::util::pipeline_cache_key, verbatim (that crate is not linked here).
+    let text = match info.backend {
+        wgt::Backend::Vulkan => format!("wgpu_pipeline_cache_vulkan_{}_{}", info.vendor, info.device),
+        _ => return STATUS_ERROR,
+    };
+    let mut keys = CACHE_KEYS.lock().unwrap_or_else(|e| e.into_inner());
+    let interned = match keys.iter().find(|k| **k == text) {
+        Some(k) => *k,
+        None => {
+            let leaked: &'static str = Box::leak(text.into_boxed_str());
+            keys.push(leaked);
+            leaked
+        }
+    };
+    unsafe { *key = static_view(interned) };
+    STATUS_OK
 }

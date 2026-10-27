@@ -27,7 +27,7 @@ public class CodeBrixWebGpuNativeTests
         uint version = CodeBrixWebGpuNative.ApiVersion;
 
         //Assert
-        version.Should().Be(3u);
+        version.Should().Be(4u);
         version.Should().Be(CodeBrixWebGpuNative.ExpectedApiVersion);
     }
 
@@ -53,7 +53,7 @@ public class CodeBrixWebGpuNativeTests
         WgpuBuildInfo info = CodeBrixWebGpuNative.BuildInfo;
 
         //Assert
-        info.ApiVersion.Should().Be(3u);
+        info.ApiVersion.Should().Be(4u);
         info.WgpuNativeVersion.Should().StartWith("29.0.1");
         info.WgpuCoreVersion.Should().StartWith("29.");
         info.Backends.Should().NotBeNullOrEmpty();

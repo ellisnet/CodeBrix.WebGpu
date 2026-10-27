@@ -109,6 +109,9 @@ applied to a scratch copy by every script (see patches/README.txt):
   0009 WGPUBool ABI of wgpuDeviceStartGraphicsDebuggerCapture (CodeBrix)
   0010 opt-in IEEE floating point for WGSL compiled to Metal - the one patch of
        wgpu-hal/ (CodeBrix; 2026-10-26)
+  0011 pipeline caches for compute / render pipeline creation, through the chained
+       WGPUCodebrixPipelineDescriptorExtras (CodeBrix, after the shapes of open draft
+       PR #618; 2026-10-26)
 The same holds for wgpu-hal/: nothing in it is ever edited; patches/0010 is
 applied to the scratch copy.
 

@@ -22,7 +22,7 @@
 #include "webgpu.h"
 
 /** The version of this contract. Returned by @ref wgpuCodebrixGetApiVersion. */
-#define WGPU_CODEBRIX_API_VERSION (3)
+#define WGPU_CODEBRIX_API_VERSION (4)
 
 /**
  * The state a texture is in, or is to be transitioned to (Vulkan: image layout + access;
@@ -96,6 +96,23 @@ typedef enum WGPUCodebrixShaderModel {
     WGPUCodebrixShaderModel_Sm5 = 0x000C0002,
     WGPUCodebrixShaderModel_Force32 = 0x7FFFFFFF
 } WGPUCodebrixShaderModel WGPU_ENUM_ATTRIBUTE;
+
+/**
+ * Struct type identifiers (WGPUSType values) of the CodeBrix extension structs, in this header's
+ * 0x000CXXXX block. Declared as their own enum, as wgpu.h declares WGPUNativeSType.
+ */
+typedef enum WGPUCodebrixSType {
+    /** Identifies @ref WGPUCodebrixPipelineDescriptorExtras. */
+    WGPUSType_CodebrixPipelineDescriptorExtras = 0x000C0001,
+    WGPUCodebrixSType_Force32 = 0x7FFFFFFF
+} WGPUCodebrixSType WGPU_ENUM_ATTRIBUTE;
+
+/**
+ * A pipeline cache (@ref wgpuCodebrixDeviceCreatePipelineCache): compiled shader code a device reuses
+ * between pipelines and, through @ref wgpuCodebrixPipelineCacheGetData, between runs of the program.
+ * Requires WGPUNativeFeature_PipelineCache (Vulkan adapters only).
+ */
+typedef struct WGPUCodebrixPipelineCacheImpl* WGPUCodebrixPipelineCache WGPU_OBJECT_ATTRIBUTE;
 
 /** Capabilities an adapter may lack compared with WebGPU (wgpu-types DownlevelFlags, same bits). */
 typedef WGPUFlags WGPUCodebrixDownlevelFlags;
@@ -315,6 +332,36 @@ typedef struct WGPUCodebrixFaultCallbacks {
     WGPUDeviceLostCallbackInfo deviceLostCallbackInfo;
 } WGPUCodebrixFaultCallbacks WGPU_STRUCTURE_ATTRIBUTE;
 
+/**
+ * Describes a pipeline cache (@ref wgpuCodebrixDeviceCreatePipelineCache). The shape of the unmerged
+ * upstream proposal gfx-rs/wgpu-native PR #618, under CodeBrix names.
+ */
+typedef struct WGPUCodebrixPipelineCacheDescriptor {
+    WGPUChainedStruct * nextInChain;
+    /** A debug label. */
+    WGPUStringView label;
+    /**
+     * Bytes from an earlier wgpuCodebrixPipelineCacheGetData, or NULL (dataSize 0) for an empty cache.
+     * Specific to the adapter, driver version and wgpu version that produced them; data from ANOTHER
+     * adapter is always a validation error (keep one cache per adapter key). Copied during the call.
+     */
+    WGPU_NULLABLE void const * data;
+    /** The number of bytes at data. */
+    size_t dataSize;
+    /** True (recommended): truncated, corrupt, outdated or newer-wgpu data gives an EMPTY cache, not an error. */
+    WGPUBool fallback;
+} WGPUCodebrixPipelineCacheDescriptor WGPU_STRUCTURE_ATTRIBUTE;
+
+/**
+ * Chained onto a WGPURenderPipelineDescriptor or WGPUComputePipelineDescriptor (sType
+ * WGPUSType_CodebrixPipelineDescriptorExtras) to compile the pipeline through a pipeline cache.
+ */
+typedef struct WGPUCodebrixPipelineDescriptorExtras {
+    WGPUChainedStruct chain;
+    /** The cache, created on the same device; NULL compiles without one. */
+    WGPU_NULLABLE WGPUCodebrixPipelineCache pipelineCache;
+} WGPUCodebrixPipelineDescriptorExtras WGPU_STRUCTURE_ATTRIBUTE;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -344,6 +391,11 @@ typedef void (*WGPUProcCodebrixVulkanAdoptRequirementsFreeMembers)(WGPUCodebrixV
 typedef uint64_t (*WGPUProcCodebrixDeviceAddFaultListener)(WGPUDevice device, WGPUCodebrixFaultCallbacks const * callbacks) WGPU_FUNCTION_ATTRIBUTE;
 typedef WGPUStatus (*WGPUProcCodebrixDeviceRemoveFaultListener)(WGPUDevice device, uint64_t listenerId) WGPU_FUNCTION_ATTRIBUTE;
 typedef WGPUStatus (*WGPUProcCodebrixSetMetalPreciseMath)(WGPUBool enabled) WGPU_FUNCTION_ATTRIBUTE;
+typedef WGPUCodebrixPipelineCache (*WGPUProcCodebrixDeviceCreatePipelineCache)(WGPUDevice device, WGPUCodebrixPipelineCacheDescriptor const * descriptor) WGPU_FUNCTION_ATTRIBUTE;
+typedef WGPUStatus (*WGPUProcCodebrixAdapterGetPipelineCacheKey)(WGPUAdapter adapter, WGPUStringView * key) WGPU_FUNCTION_ATTRIBUTE;
+typedef size_t (*WGPUProcCodebrixPipelineCacheGetData)(WGPUCodebrixPipelineCache codebrixPipelineCache, void * data, size_t dataSize) WGPU_FUNCTION_ATTRIBUTE;
+typedef void (*WGPUProcCodebrixPipelineCacheAddRef)(WGPUCodebrixPipelineCache codebrixPipelineCache) WGPU_FUNCTION_ATTRIBUTE;
+typedef void (*WGPUProcCodebrixPipelineCacheRelease)(WGPUCodebrixPipelineCache codebrixPipelineCache) WGPU_FUNCTION_ATTRIBUTE;
 #endif  /* !defined(WGPU_SKIP_PROCS) */
 
 #if !defined(WGPU_SKIP_DECLARATIONS)
@@ -401,6 +453,25 @@ WGPU_EXPORT WGPUStatus wgpuCodebrixDeviceRemoveFaultListener(WGPUDevice device, 
  * pipelines created afterwards. Off by default. Metal only (Error elsewhere).
  */
 WGPU_EXPORT WGPUStatus wgpuCodebrixSetMetalPreciseMath(WGPUBool enabled) WGPU_FUNCTION_ATTRIBUTE;
+/**
+ * Creates a pipeline cache. Requires WGPUNativeFeature_PipelineCache (Vulkan adapters only); without it,
+ * for another adapter's data, or for damaged / outdated data without fallback, a validation error is
+ * reported and the returned cache is invalid
+ * (safe to release and query; chaining it fails pipeline creation). Never ends the process.
+ */
+WGPU_EXPORT WGPUCodebrixPipelineCache wgpuCodebrixDeviceCreatePipelineCache(WGPUDevice device, WGPUCodebrixPipelineCacheDescriptor const * descriptor) WGPU_FUNCTION_ATTRIBUTE;
+/**
+ * wgpu's name for the adapter's pipeline cache (Rust wgpu::util::pipeline_cache_key):
+ * "wgpu_pipeline_cache_vulkan_<vendor>_<device>"; a process-lifetime string. Error off Vulkan.
+ */
+WGPU_EXPORT WGPUStatus wgpuCodebrixAdapterGetPipelineCacheKey(WGPUAdapter adapter, WGPUStringView * key) WGPU_FUNCTION_ATTRIBUTE;
+/**
+ * Copies out the cache data (two calls: data NULL for the size, then a buffer). Returns the full size;
+ * writes min(size, dataSize) bytes; 0 when the cache has no data (invalid cache, lost device, non-Vulkan).
+ */
+WGPU_EXPORT size_t wgpuCodebrixPipelineCacheGetData(WGPUCodebrixPipelineCache codebrixPipelineCache, void * data, size_t dataSize) WGPU_FUNCTION_ATTRIBUTE;
+WGPU_EXPORT void wgpuCodebrixPipelineCacheAddRef(WGPUCodebrixPipelineCache codebrixPipelineCache) WGPU_FUNCTION_ATTRIBUTE;
+WGPU_EXPORT void wgpuCodebrixPipelineCacheRelease(WGPUCodebrixPipelineCache codebrixPipelineCache) WGPU_FUNCTION_ATTRIBUTE;
 #endif  /* !defined(WGPU_SKIP_DECLARATIONS) */
 
 #ifdef __cplusplus

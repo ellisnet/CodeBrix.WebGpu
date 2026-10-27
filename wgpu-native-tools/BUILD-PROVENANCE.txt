@@ -18,7 +18,8 @@ Common to every entry below
                     in ffi/webgpu-headers/ (upstream-downloads/; see UPSTREAM.txt),
                     plus OUR crate codebrix-wgpu/ (the wgpuCodebrix* functions of
                     specs/codebrix.yml, C header codebrix-wgpu/include/codebrix_wgpu.h,
-                    API version 2). wgpu 29.0.3 (wgpu-core / wgpu-types / wgpu-hal /
+                    API version 4 since 2026-10-26: pipeline caches; see the note on
+                    stale entries below). wgpu 29.0.3 (wgpu-core / wgpu-types / wgpu-hal /
                     naga) via wgpu-native v29.0.1.1.
   Crates          : codebrix-wgpu/Cargo.lock = wgpu-native's own lock + the
                     codebrix-wgpu package (cargo pruned 5 entries nothing links:
@@ -33,9 +34,18 @@ Common to every entry below
                     0006-wgpu-native-map-async-whole-map-size,
                     0007-wgpu-native-nonfatal-poll,
                     0008-wgpu-native-surface-usage-flags,
-                    0009-wgpu-native-debugger-capture-wgpubool - to a SCRATCH copy
+                    0009-wgpu-native-debugger-capture-wgpubool,
+                    0010-wgpu-hal-metal-precise-math (wgpu-hal),
+                    0011-wgpu-native-pipeline-cache-chain - to a SCRATCH copy
                     only; see patches/README.txt. Every built library reports the
                     list in wgpuCodebrixGetBuildInfo's `patches`.
+  STALE ENTRIES    : the contract is API version 4 (patches 0001-0011) since
+                    2026-10-26. The five Linux / Android entries below were rebuilt for
+                    it that day; an entry whose "Contract / fixes" line still says API
+                    version 2 / patches 0001-0009 (win-x64, win-arm64, osx-arm64,
+                    osx-x64) describes the binary that is committed but MUST BE
+                    REBUILT before the next publish (the managed side refuses a v2
+                    native; the export set gained 6 functions).
   Profile         : release - opt-level 3, lto "fat", codegen-units 1, panic "abort",
                     debug true (stripped by the scripts, never by cargo)
   Features        : wgpu-native's defaults (wgsl, spirv, glsl, dx12, metal, vulkan,
@@ -101,6 +111,7 @@ Linux (the three linux-* entries)
                     needed, not built; Containerfile.aarch64 / .riscv64 are not part
                     of this route - see README.txt.)
   Build host      : Dell Precision 7770, LMDE 7, x86_64, podman 5.4.2; 2026-10-17 UTC
+                    (v2 round) and 2026-10-26 UTC (v4 round)
   Compiler        : rustc 1.93.1 on all five built RIDs (readelf -p .comment of each
                     unstripped twin says "rustc version 1.93.1").
   Reproducibility : all three: the RustTools.Docker build and the --network none
@@ -117,64 +128,68 @@ Linux (the three linux-* entries)
 ================================================================================
 linux-x64                                                         BUILT + PASSED
 ================================================================================
-Compiled         : 2026-10-17 21:21:28 UTC (67 s, --network none, native x86_64)
-Contract / fixes : API version 2; patches 0001-0009; 251 exports (== specs/expected-exports.txt)
+Compiled         : 2026-10-26 23:48:47 UTC (65 s, --network none, native x86_64)
+Contract / fixes : API version 4; patches 0001-0011; 257 exports (== specs/expected-exports.txt)
 File             : libcodebrix_wgpu.so (SONAME libcodebrix_wgpu.so)
-Build-id         : 909b5f9497034fc6a1c12a5f10ee7404a9db6dc0
-Size (stripped)  : 6173232 bytes
-Size (unstripped): 23954944 bytes (zlib-compressed DWARF) -> unstripped/linux-x64/
-SHA256           : a2cf8b752085fcce0328b83e8eeaaa2080efac0ecb05213a185ec2caa11e3b14
-SHA256 unstripped: 4dd65c92d0f713f245d287443931c304aa88c5feb51d65691bdf64e82dadb1f0
+Build-id         : eb35bd2bb9c7f9b18340bff28d44114d6c1d9337
+Size (stripped)  : 6185656 bytes
+Size (unstripped): 24027560 bytes (zlib-compressed DWARF) -> unstripped/linux-x64/
+SHA256           : 0a23c06e03bbc362e07644cdba4c6f644978dc4fb20b6f7739f11136ca5c7b7e
+SHA256 unstripped: c8d1c3f375155e188df55fbcdb5864187fc942d5d4d4db8caf542147f1f64a76
 glibc floor      : 2.28 (allowed <= 2.28)
 Dynamic deps     : ld-linux-x86-64.so.2 libc.so.6 libdl.so.2 libgcc_s.so.1 libm.so.6 libpthread.so.0
-Reproducible     : YES (RustTools.Docker twin byte-identical)
+Reproducible     : YES (RustTools.Docker twin byte-identical; also byte-identical to the
+                   first build of the same sources 7 minutes earlier, re-run only so the
+                   gate ran the final smoke-test.c)
 Warnings         : 0
-Smoke test       : PASSED in the gate container (31 checks; GPU part SKIPPED - the
+Smoke test       : PASSED in the gate container (34 checks; GPU part SKIPPED - the
                    AlmaLinux 8 image has no GPU driver) AND on the build host
-                   (77 checks: Intel UHD Vulkan - compute, render, WHOLE_MAP_SIZE map
-                   at offset 8, foreign-index wgpuDevicePoll -> false + Validation
-                   scope, capabilities, bounded poll, fault listeners, Vulkan info +
-                   adopt requirements, VkImage wrap, AdoptVulkanDevice, transitions,
-                   0 live objects)
+                   (97 checks: Intel UHD 770 Vulkan - everything of the v2 round plus
+                   the pipeline caches of patches/0011: missing feature -> Validation
+                   error with the process alive, the adapter key, a chained cache that
+                   GROWS, a warm cache from the saved bytes, fallback / no-fallback on
+                   damaged bytes; 0 live objects)
+Managed proof    : dotnet test --solution CodeBrix.WebGpu.slnx -p:UseLocalNativeProject=true,
+                   Debug AND Release: 769 tests, 746 passed, 0 failed, 23 skipped (platform-
+                   only, opt-in and local-mode package tests), incl. the 9 PipelineCacheTests
 
 ================================================================================
 linux-arm64                                                       BUILT + PASSED
 ================================================================================
-Compiled         : 2026-10-17 21:24:03 UTC (71 s, --network none, CROSS from x86_64)
-Contract / fixes : API version 2; patches 0001-0009; 251 exports (== specs/expected-exports.txt)
+Compiled         : 2026-10-26 23:42:08 UTC (72 s, --network none, CROSS from x86_64)
+Contract / fixes : API version 4; patches 0001-0011; 257 exports (== specs/expected-exports.txt)
 File             : libcodebrix_wgpu.so (SONAME libcodebrix_wgpu.so)
-Build-id         : 3d679824b701bd699375d61c8f1ebfacd023c9d8
-Size (stripped)  : 5451368 bytes
-Size (unstripped): 23860784 bytes -> unstripped/linux-arm64/
-SHA256           : 512fed0c5a4b5260f3c423a027997219b45a8fa96caa285c9b2e018f571b1e27
-SHA256 unstripped: 93b49e801b647ff4935dbd6c411acdf29c8adb2ec6630cecb4160bc70219da18
+Build-id         : b1c160cede4fafea58d5f6f6adcef4ff68ab1d95
+Size (stripped)  : 5462832 bytes
+Size (unstripped): 23939368 bytes -> unstripped/linux-arm64/
+SHA256           : 374bccc09f75bd850283926b46aaf406c698b4a89c7cc86ce43f0ead208e8d6f
+SHA256 unstripped: f7f3a7f79509d0d16c4f59e80cc401d3d07e0c6045eaafcea85eaca913e10b30
 glibc floor      : 2.28 (allowed <= 2.28)
 Dynamic deps     : libc.so.6 libdl.so.2 libgcc_s.so.1 libm.so.6 libpthread.so.0
 Reproducible     : YES (RustTools.Docker twin byte-identical)
 Warnings         : 0
-Smoke test       : PASSED in manylinux_2_28_aarch64 under qemu-aarch64 (31 checks;
+Smoke test       : PASSED in manylinux_2_28_aarch64 under qemu-aarch64 (34 checks;
                    GPU part SKIPPED - no driver in the image)
 
 ================================================================================
 linux-riscv64                                                     BUILT + PASSED
 ================================================================================
-Compiled         : 2026-10-17 21:27:17 UTC (67 s, --network none, CROSS from x86_64)
-Contract / fixes : API version 2; patches 0001-0009; 251 exports (== specs/expected-exports.txt)
+Compiled         : 2026-10-26 23:45:22 UTC (71 s, --network none, CROSS from x86_64)
+Contract / fixes : API version 4; patches 0001-0011; 257 exports (== specs/expected-exports.txt)
 File             : libcodebrix_wgpu.so (SONAME libcodebrix_wgpu.so)
-Build-id         : 53abfdab136fece6b65047e900e63051f4523c9e
-Size (stripped)  : 5442904 bytes
-Size (unstripped): 23973144 bytes -> unstripped/linux-riscv64/
-SHA256           : 0a8912c26ff9901189f3b86d746ff089862fec2d8d7cb424144957524baab4a3
-SHA256 unstripped: cb62bfb1af13f6a7019c21a576c020bfe71a5ad11ffe5cd97fe2d0d0c4677cf9
+Build-id         : 6799c1d28fbab3e1c06048b6b654e40bad7d3f77
+Size (stripped)  : 5454528 bytes
+Size (unstripped): 24027176 bytes -> unstripped/linux-riscv64/
+SHA256           : 636d14d22a36ff4d1fd35928aa7ea571f24403c0faf65160cee30ae7cd1b9723
+SHA256 unstripped: 6925ec59e0690f9c0355b40fb4a6b00e82b31634c8f98362f32380e89ba765fe
 glibc floor      : 2.34 (allowed <= 2.39)
 Dynamic deps     : ld-linux-riscv64-lp64d.so.1 libc.so.6 libgcc_s.so.1 libm.so.6
 Reproducible     : YES (RustTools.Docker twin byte-identical)
 Warnings         : 0
-Smoke test       : PASSED in manylinux_2_39_riscv64 under qemu-riscv64 - 69 checks
-                   INCLUDING the GPU part: the Rocky 10 image carries Mesa, so wgpu
-                   found llvmpipe (LLVM 21.1.8) on its GL backend and ran everything
-                   but the Vulkan native-object checks (incl. the 0006 map and the
-                   0007 foreign-index poll).
+Smoke test       : PASSED in manylinux_2_39_riscv64 under qemu-riscv64 - 78 checks
+                   INCLUDING the GPU part on llvmpipe (LLVM 21.1.8, wgpu's GL backend):
+                   everything but the Vulkan native-object checks, and the non-Vulkan
+                   pipeline-cache path (creation a Validation error, key query Error)
 
 Android (the two android-* entries)
 --------------------------------------------------------------------------------
@@ -202,45 +217,48 @@ Android (the two android-* entries)
 ================================================================================
 android-arm64                                                     BUILT + PASSED
 ================================================================================
-Built            : 2026-10-17 21:35 UTC (android/build.sh CHECK_REPRODUCIBLE=1, rustc 1.93.1,
+Built            : 2026-10-26 23:52:16 UTC (android/build.sh CHECK_REPRODUCIBLE=1, rustc 1.93.1,
                    NDK 30.0.16248370)
-Contract / fixes : API version 2; patches 0001-0009; 251 exports (== specs/expected-exports.txt)
+Contract / fixes : API version 4; patches 0001-0011; 257 exports (== specs/expected-exports.txt)
 ABI / API        : arm64-v8a / 33
 File             : libcodebrix_wgpu.so (SONAME libcodebrix_wgpu.so)
-Build-id         : 098c8b59e3c8c28c14ead96a7c1529d9bb7ef293
-Size (stripped)  : 5316304 bytes
-Size (unstripped): 23510864 bytes -> unstripped/android-arm64/
-SHA256           : 8113cbfa287b5ffc3d9b3c092ddc5ce543b8390abf05eefdde86cf69792fed52
-SHA256 unstripped: 1baeec5b0c99fd28cf397a4849cdfe290a4a97e0b493d1a8e08cfb438e27cc95
+Build-id         : 1a84e98f40a097c14c352508319658537ee6894e
+Size (stripped)  : 5327464 bytes
+Size (unstripped): 23567992 bytes -> unstripped/android-arm64/
+SHA256           : addda46d3dd439014969033b4b33343fb20c317e61dbc1e54926f26958dd645c
+SHA256 unstripped: adf75ce154288e91c30d1b2c816dc16d61992f6c48165b9713f04ea41ecd1a79
 PT_LOAD align    : 0x4000 x4 (16 KB page-size ready)
 NEEDED           : libandroid.so libc.so libdl.so libm.so
-Layout check     : layout-check.c static asserts (v2 structs) passed
-Reproducible     : YES (a second build into a fresh target folder byte-identical; the
-                   same bytes as the run before it)
-Device smoke test: PASSED on 98271FFBA0048D (Pixel 4 XL, arm64-v8a, Adreno 640 Vulkan),
-                   77 checks incl. the 0006 map, the 0007 foreign-index poll,
-                   AdoptVulkanDevice + VkImage wrap; files removed after
+Layout check     : layout-check.c static asserts (v4 structs, incl. the two pipeline-cache
+                   structs) passed
+Reproducible     : YES (a second build into a fresh target folder byte-identical)
+Device smoke test: PASSED on 98271FFBA0048D (Pixel 4 XL, Adreno 640 Vulkan) and on
+                   R52W207XQ1V (Galaxy Tab S8 SM-X700, Adreno 730 Vulkan), 97 checks each
+                   incl. the pipeline caches (a chained cache grows, warm cache from the
+                   saved bytes, fallback); run 2026-10-27 01:12-01:15 UTC with ADOPT=0 -
+                   the rebuilt file was byte-identical to the adopted one; files removed after
 
 ================================================================================
 android-x64                                                       BUILT + PASSED
 ================================================================================
-Built            : 2026-10-17 21:40 UTC (android/build.sh CHECK_REPRODUCIBLE=1, rustc 1.93.1,
+Built            : 2026-10-26 23:54:31 UTC (android/build.sh CHECK_REPRODUCIBLE=1, rustc 1.93.1,
                    NDK 30.0.16248370)
-Contract / fixes : API version 2; patches 0001-0009; 251 exports (== specs/expected-exports.txt)
+Contract / fixes : API version 4; patches 0001-0011; 257 exports (== specs/expected-exports.txt)
 ABI / API        : x86_64 / 33
 File             : libcodebrix_wgpu.so (SONAME libcodebrix_wgpu.so)
-Build-id         : 081caa371eb3f9a4571431e65c48da2b692c6741
-Size (stripped)  : 6016160 bytes
-Size (unstripped): 23498336 bytes -> unstripped/android-x64/
-SHA256           : c2b0105f28ba01068cd9b6af6d560315af90b4b2cab6c40fcb78813bd9bb4380
-SHA256 unstripped: 48d0f84b58b55d7eb1c2f049aa87f35afc84e9a502eb690e78b1df905fa7895f
+Build-id         : 09356721e547a3c393d676c6edfe559aa0381010
+Size (stripped)  : 6028168 bytes
+Size (unstripped): 23560752 bytes -> unstripped/android-x64/
+SHA256           : e4e6980ccebfa0e75ba5b9e52870781790079220085dd287c67c7211e7f084ec
+SHA256 unstripped: d21d482f084981bd2dac58d0f6e749ea5c5b4e9832cd5e026ec4bb20ab149464
 PT_LOAD align    : 0x4000 x4 (16 KB page-size ready)
 NEEDED           : libandroid.so libc.so libdl.so libm.so
-Layout check     : layout-check.c static asserts (v2 structs) passed
-Reproducible     : YES (a second build into a fresh target folder byte-identical; the
-                   same bytes as the run before it)
+Layout check     : layout-check.c static asserts (v4 structs) passed
+Reproducible     : YES (a second build into a fresh target folder byte-identical)
 Device smoke test: PASSED on 192.168.86.225:5555 (HP laptop, model 87FE, x86_64,
-                   Intel Xe Graphics (TGL GT2) Vulkan), 77 checks; files removed after
+                   Intel Xe Graphics (TGL GT2) Vulkan), 97 checks incl. the pipeline
+                   caches; run with ADOPT=0 - the rebuilt file was byte-identical to the
+                   adopted one; files removed after
 
 Windows (the two win-* entries)
 --------------------------------------------------------------------------------

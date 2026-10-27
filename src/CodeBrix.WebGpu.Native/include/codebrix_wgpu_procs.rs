@@ -4,7 +4,7 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   d2ffaba8efc2398b17d17ff452eb5a147cc93f6ca1a33a5cfe85b6e2ed9902fb  wgpu-native-tools/specs/codebrix.yml
+//   2784405e2cfa2600e8b0382ad2b80a4da3e0abc1a075dcae076408488c4ce4cb  wgpu-native-tools/specs/codebrix.yml
 //   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 //
 // The C ABI of the codebrix_wgpu library (webgpu.h + wgpu.h + codebrix_wgpu.h) for Rust native modules, with no
@@ -42,7 +42,7 @@ pub const WGPU_QUERY_SET_INDEX_UNDEFINED: u32 = u32::MAX;
 pub const WGPU_STRLEN: usize = usize::MAX;
 pub const WGPU_WHOLE_MAP_SIZE: usize = usize::MAX;
 pub const WGPU_WHOLE_SIZE: u64 = u64::MAX;
-pub const WGPU_CODEBRIX_API_VERSION: u32 = 3;
+pub const WGPU_CODEBRIX_API_VERSION: u32 = 4;
 
 // ---------------------------------------------------------------- object handles
 
@@ -66,6 +66,11 @@ pub struct WGPUBufferImpl {
     _unused: [u8; 0],
 }
 pub type WGPUBuffer = *mut WGPUBufferImpl;
+#[repr(C)]
+pub struct WGPUCodebrixPipelineCacheImpl {
+    _unused: [u8; 0],
+}
+pub type WGPUCodebrixPipelineCache = *mut WGPUCodebrixPipelineCacheImpl;
 #[repr(C)]
 pub struct WGPUCommandBufferImpl {
     _unused: [u8; 0],
@@ -607,6 +612,7 @@ pub const WGPUSType_SurfaceConfigurationExtras: WGPUSType = 0x00030008;
 pub const WGPUSType_SurfaceSourceSwapChainPanel: WGPUSType = 0x00030009;
 pub const WGPUSType_PrimitiveStateExtras: WGPUSType = 0x0003000A;
 pub const WGPUSType_SamplerDescriptorExtras: WGPUSType = 0x0003000B;
+pub const WGPUSType_CodebrixPipelineDescriptorExtras: WGPUSType = 0x000C0001;
 
 pub type WGPUSamplerBindingType = u32;
 pub const WGPUSamplerBindingType_BindingNotUsed: WGPUSamplerBindingType = 0x00000000;
@@ -1209,6 +1215,25 @@ pub struct WGPUCodebrixMetalAdoptDescriptor {
 #[derive(Clone, Copy)]
 pub struct WGPUCodebrixName {
     pub name: WGPUStringView,
+}
+
+/// Describes a @ref WGPUCodebrixPipelineCache for @ref wgpuCodebrixDeviceCreatePipelineCache. The
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct WGPUCodebrixPipelineCacheDescriptor {
+    pub nextInChain: *mut WGPUChainedStruct,
+    pub label: WGPUStringView,
+    pub data: *const c_void,
+    pub dataSize: usize,
+    pub fallback: WGPUBool,
+}
+
+/// Chained onto a @ref WGPURenderPipelineDescriptor or @ref WGPUComputePipelineDescriptor (sType
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct WGPUCodebrixPipelineDescriptorExtras {
+    pub chain: WGPUChainedStruct,
+    pub pipelineCache: WGPUCodebrixPipelineCache,
 }
 
 /// What an adapter allows for one texture format (wgpu-core `adapter_get_texture_format_features`).
@@ -2276,9 +2301,9 @@ pub struct WGPUXlibDisplayHandle {
 // ---------------------------------------------------------------- native-module interop
 
 /// The number of function pointers in WGPUCodebrixProcTable.
-pub const WGPU_CODEBRIX_PROC_TABLE_FUNCTION_COUNT: u32 = 252;
+pub const WGPU_CODEBRIX_PROC_TABLE_FUNCTION_COUNT: u32 = 257;
 /// FNV-1a 64 of every entry's C signature, in table order.
-pub const WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH: u64 = 0xA8B6E21BF6D91F71;
+pub const WGPU_CODEBRIX_PROC_TABLE_SIGNATURE_HASH: u64 = 0x801E39810F77EFD8;
 /// The layout version of WGPUCodebrixDeviceHandoff.
 pub const WGPU_CODEBRIX_DEVICE_HANDOFF_VERSION: u32 = 1;
 /// Set in flags when the device has an uncaptured-error handler (errors no scope catches are reported, not fatal).
@@ -2356,12 +2381,16 @@ pub struct WGPUCodebrixProcTable {
     pub bufferWriteMappedRange: Option<unsafe extern "C" fn(buffer: WGPUBuffer, offset: usize, data: *const c_void, size: usize) -> WGPUStatus>,
     /// wgpuCodebrixAdapterGetDownlevelCapabilities.
     pub codebrixAdapterGetDownlevelCapabilities: Option<unsafe extern "C" fn(adapter: WGPUAdapter, capabilities: *mut WGPUCodebrixDownlevelCapabilities) -> WGPUStatus>,
+    /// wgpuCodebrixAdapterGetPipelineCacheKey.
+    pub codebrixAdapterGetPipelineCacheKey: Option<unsafe extern "C" fn(adapter: WGPUAdapter, key: *mut WGPUStringView) -> WGPUStatus>,
     /// wgpuCodebrixAdapterGetTextureFormatFeatures.
     pub codebrixAdapterGetTextureFormatFeatures: Option<unsafe extern "C" fn(adapter: WGPUAdapter, format: WGPUTextureFormat, features: *mut WGPUCodebrixTextureFormatFeatures) -> WGPUStatus>,
     /// wgpuCodebrixCommandEncoderTransitionTexture.
     pub codebrixCommandEncoderTransitionTexture: Option<unsafe extern "C" fn(commandEncoder: WGPUCommandEncoder, texture: WGPUTexture, state: WGPUCodebrixTextureState) -> WGPUStatus>,
     /// wgpuCodebrixDeviceAddFaultListener.
     pub codebrixDeviceAddFaultListener: Option<unsafe extern "C" fn(device: WGPUDevice, callbacks: *const WGPUCodebrixFaultCallbacks) -> u64>,
+    /// wgpuCodebrixDeviceCreatePipelineCache.
+    pub codebrixDeviceCreatePipelineCache: Option<unsafe extern "C" fn(device: WGPUDevice, descriptor: *const WGPUCodebrixPipelineCacheDescriptor) -> WGPUCodebrixPipelineCache>,
     /// wgpuCodebrixDeviceCreateTextureFromD3d12Resource.
     pub codebrixDeviceCreateTextureFromD3d12Resource: Option<unsafe extern "C" fn(device: WGPUDevice, resource: *mut c_void, descriptor: *const WGPUTextureDescriptor, initialState: WGPUCodebrixTextureState) -> WGPUTexture>,
     /// wgpuCodebrixDeviceCreateTextureFromMetalTexture.
@@ -2392,6 +2421,12 @@ pub struct WGPUCodebrixProcTable {
     pub codebrixInstanceAdoptMetalDevice: Option<unsafe extern "C" fn(instance: WGPUInstance, descriptor: *const WGPUCodebrixMetalAdoptDescriptor, adapter: *mut WGPUAdapter, device: *mut WGPUDevice) -> WGPUStatus>,
     /// wgpuCodebrixInstanceAdoptVulkanDevice. ABORTS on the first uncaptured error: the adopted device has the default uncaptured-error handler (use error scopes).
     pub codebrixInstanceAdoptVulkanDevice: Option<unsafe extern "C" fn(instance: WGPUInstance, descriptor: *const WGPUCodebrixVulkanAdoptDescriptor, adapter: *mut WGPUAdapter, device: *mut WGPUDevice) -> WGPUStatus>,
+    /// wgpuCodebrixPipelineCacheAddRef.
+    pub codebrixPipelineCacheAddRef: Option<unsafe extern "C" fn(codebrixPipelineCache: WGPUCodebrixPipelineCache)>,
+    /// wgpuCodebrixPipelineCacheGetData.
+    pub codebrixPipelineCacheGetData: Option<unsafe extern "C" fn(codebrixPipelineCache: WGPUCodebrixPipelineCache, data: *mut c_void, dataSize: usize) -> usize>,
+    /// wgpuCodebrixPipelineCacheRelease.
+    pub codebrixPipelineCacheRelease: Option<unsafe extern "C" fn(codebrixPipelineCache: WGPUCodebrixPipelineCache)>,
     /// wgpuCodebrixSetMetalPreciseMath.
     pub codebrixSetMetalPreciseMath: Option<unsafe extern "C" fn(enabled: WGPUBool) -> WGPUStatus>,
     /// wgpuCodebrixTextureGetD3d12Info.
@@ -2871,7 +2906,7 @@ pub struct WGPUCodebrixFrameHandoff {
 
 /// The static status of every function-table entry, in table order (from the notes; the library's
 /// wgpuCodebrixGetProcStatus also reports WGPUCodebrixProcStatus_NotAvailableOnBackend).
-pub const WGPU_CODEBRIX_PROC_STATUS_TABLE: [WGPUCodebrixProcStatus; 252] = [
+pub const WGPU_CODEBRIX_PROC_STATUS_TABLE: [WGPUCodebrixProcStatus; 257] = [
     WGPUCodebrixProcStatus_Implemented,
     WGPUCodebrixProcStatus_Implemented,
     WGPUCodebrixProcStatus_Implemented,
@@ -2899,6 +2934,8 @@ pub const WGPU_CODEBRIX_PROC_STATUS_TABLE: [WGPUCodebrixProcStatus; 252] = [
     WGPUCodebrixProcStatus_AbortsUnimplemented,
     WGPUCodebrixProcStatus_Implemented,
     WGPUCodebrixProcStatus_AbortsUnimplemented,
+    WGPUCodebrixProcStatus_Implemented,
+    WGPUCodebrixProcStatus_Implemented,
     WGPUCodebrixProcStatus_Implemented,
     WGPUCodebrixProcStatus_Implemented,
     WGPUCodebrixProcStatus_Implemented,
@@ -2918,6 +2955,9 @@ pub const WGPU_CODEBRIX_PROC_STATUS_TABLE: [WGPUCodebrixProcStatus; 252] = [
     WGPUCodebrixProcStatus_Unsupported,
     WGPUCodebrixProcStatus_AbortsOnError,
     WGPUCodebrixProcStatus_AbortsOnError,
+    WGPUCodebrixProcStatus_Implemented,
+    WGPUCodebrixProcStatus_Implemented,
+    WGPUCodebrixProcStatus_Implemented,
     WGPUCodebrixProcStatus_Implemented,
     WGPUCodebrixProcStatus_Implemented,
     WGPUCodebrixProcStatus_Implemented,
@@ -3126,7 +3166,7 @@ pub const WGPU_CODEBRIX_PROC_STATUS_TABLE: [WGPUCodebrixProcStatus; 252] = [
     WGPUCodebrixProcStatus_AbortsUnimplemented,
 ];
 /// The backend every function-table entry needs (WGPUBackendType_Undefined for none), in table order.
-pub const WGPU_CODEBRIX_PROC_BACKEND_TABLE: [WGPUBackendType; 252] = [
+pub const WGPU_CODEBRIX_PROC_BACKEND_TABLE: [WGPUBackendType; 257] = [
     WGPUBackendType_Undefined,
     WGPUBackendType_Undefined,
     WGPUBackendType_Undefined,
@@ -3155,9 +3195,11 @@ pub const WGPU_CODEBRIX_PROC_BACKEND_TABLE: [WGPUBackendType; 252] = [
     WGPUBackendType_Undefined,
     WGPUBackendType_Undefined,
     WGPUBackendType_Undefined,
+    WGPUBackendType_Vulkan,
     WGPUBackendType_Undefined,
     WGPUBackendType_Undefined,
     WGPUBackendType_Undefined,
+    WGPUBackendType_Vulkan,
     WGPUBackendType_D3D12,
     WGPUBackendType_Metal,
     WGPUBackendType_Vulkan,
@@ -3173,6 +3215,9 @@ pub const WGPU_CODEBRIX_PROC_BACKEND_TABLE: [WGPUBackendType; 252] = [
     WGPUBackendType_D3D12,
     WGPUBackendType_Metal,
     WGPUBackendType_Vulkan,
+    WGPUBackendType_Undefined,
+    WGPUBackendType_Vulkan,
+    WGPUBackendType_Undefined,
     WGPUBackendType_Metal,
     WGPUBackendType_D3D12,
     WGPUBackendType_Vulkan,
@@ -3406,6 +3451,8 @@ const _: () = {
     assert!(core::mem::size_of::<WGPUCodebrixFaultCallbacks>() == 72 && core::mem::align_of::<WGPUCodebrixFaultCallbacks>() == 8);
     assert!(core::mem::size_of::<WGPUCodebrixMetalAdoptDescriptor>() == 24 && core::mem::align_of::<WGPUCodebrixMetalAdoptDescriptor>() == 8);
     assert!(core::mem::size_of::<WGPUCodebrixName>() == 16 && core::mem::align_of::<WGPUCodebrixName>() == 8);
+    assert!(core::mem::size_of::<WGPUCodebrixPipelineCacheDescriptor>() == 48 && core::mem::align_of::<WGPUCodebrixPipelineCacheDescriptor>() == 8);
+    assert!(core::mem::size_of::<WGPUCodebrixPipelineDescriptorExtras>() == 24 && core::mem::align_of::<WGPUCodebrixPipelineDescriptorExtras>() == 8);
     assert!(core::mem::size_of::<WGPUCodebrixTextureFormatFeatures>() == 16 && core::mem::align_of::<WGPUCodebrixTextureFormatFeatures>() == 8);
     assert!(core::mem::size_of::<WGPUCodebrixVulkanAdoptDescriptor>() == 96 && core::mem::align_of::<WGPUCodebrixVulkanAdoptDescriptor>() == 8);
     assert!(core::mem::size_of::<WGPUCodebrixVulkanAdoptRequirements>() == 32 && core::mem::align_of::<WGPUCodebrixVulkanAdoptRequirements>() == 8);
@@ -3512,7 +3559,7 @@ const _: () = {
     assert!(core::mem::size_of::<WGPUWaylandDisplayHandle>() == 8 && core::mem::align_of::<WGPUWaylandDisplayHandle>() == 8);
     assert!(core::mem::size_of::<WGPUXcbDisplayHandle>() == 16 && core::mem::align_of::<WGPUXcbDisplayHandle>() == 8);
     assert!(core::mem::size_of::<WGPUXlibDisplayHandle>() == 16 && core::mem::align_of::<WGPUXlibDisplayHandle>() == 8);
-    assert!(core::mem::size_of::<WGPUCodebrixProcTable>() == 2040 && core::mem::align_of::<WGPUCodebrixProcTable>() == 8);
+    assert!(core::mem::size_of::<WGPUCodebrixProcTable>() == 2080 && core::mem::align_of::<WGPUCodebrixProcTable>() == 8);
     assert!(core::mem::offset_of!(WGPUCodebrixProcTable, size) == 0);
     assert!(core::mem::offset_of!(WGPUCodebrixProcTable, apiVersion) == 4);
     assert!(core::mem::offset_of!(WGPUCodebrixProcTable, functionCount) == 8);
@@ -3593,9 +3640,11 @@ pub mod direct {
         /// ABORTS: not implemented by the engine (use wgpuBufferGetMappedRange).
         pub fn wgpuBufferWriteMappedRange(buffer: WGPUBuffer, offset: usize, data: *const c_void, size: usize) -> WGPUStatus;
         pub fn wgpuCodebrixAdapterGetDownlevelCapabilities(adapter: WGPUAdapter, capabilities: *mut WGPUCodebrixDownlevelCapabilities) -> WGPUStatus;
+        pub fn wgpuCodebrixAdapterGetPipelineCacheKey(adapter: WGPUAdapter, key: *mut WGPUStringView) -> WGPUStatus;
         pub fn wgpuCodebrixAdapterGetTextureFormatFeatures(adapter: WGPUAdapter, format: WGPUTextureFormat, features: *mut WGPUCodebrixTextureFormatFeatures) -> WGPUStatus;
         pub fn wgpuCodebrixCommandEncoderTransitionTexture(commandEncoder: WGPUCommandEncoder, texture: WGPUTexture, state: WGPUCodebrixTextureState) -> WGPUStatus;
         pub fn wgpuCodebrixDeviceAddFaultListener(device: WGPUDevice, callbacks: *const WGPUCodebrixFaultCallbacks) -> u64;
+        pub fn wgpuCodebrixDeviceCreatePipelineCache(device: WGPUDevice, descriptor: *const WGPUCodebrixPipelineCacheDescriptor) -> WGPUCodebrixPipelineCache;
         pub fn wgpuCodebrixDeviceCreateTextureFromD3d12Resource(device: WGPUDevice, resource: *mut c_void, descriptor: *const WGPUTextureDescriptor, initialState: WGPUCodebrixTextureState) -> WGPUTexture;
         pub fn wgpuCodebrixDeviceCreateTextureFromMetalTexture(device: WGPUDevice, texture: *mut c_void, descriptor: *const WGPUTextureDescriptor, initialState: WGPUCodebrixTextureState) -> WGPUTexture;
         pub fn wgpuCodebrixDeviceCreateTextureFromVulkanImage(device: WGPUDevice, image: *mut c_void, descriptor: *const WGPUTextureDescriptor, initialState: WGPUCodebrixTextureState) -> WGPUTexture;
@@ -3614,6 +3663,9 @@ pub mod direct {
         pub fn wgpuCodebrixInstanceAdoptMetalDevice(instance: WGPUInstance, descriptor: *const WGPUCodebrixMetalAdoptDescriptor, adapter: *mut WGPUAdapter, device: *mut WGPUDevice) -> WGPUStatus;
         /// ABORTS on the first uncaptured error: the adopted device has the default uncaptured-error handler (use error scopes).
         pub fn wgpuCodebrixInstanceAdoptVulkanDevice(instance: WGPUInstance, descriptor: *const WGPUCodebrixVulkanAdoptDescriptor, adapter: *mut WGPUAdapter, device: *mut WGPUDevice) -> WGPUStatus;
+        pub fn wgpuCodebrixPipelineCacheAddRef(codebrixPipelineCache: WGPUCodebrixPipelineCache);
+        pub fn wgpuCodebrixPipelineCacheGetData(codebrixPipelineCache: WGPUCodebrixPipelineCache, data: *mut c_void, dataSize: usize) -> usize;
+        pub fn wgpuCodebrixPipelineCacheRelease(codebrixPipelineCache: WGPUCodebrixPipelineCache);
         pub fn wgpuCodebrixSetMetalPreciseMath(enabled: WGPUBool) -> WGPUStatus;
         pub fn wgpuCodebrixTextureGetD3d12Info(texture: WGPUTexture, info: *mut WGPUCodebrixD3d12TextureInfo) -> WGPUStatus;
         pub fn wgpuCodebrixTextureGetVulkanInfo(texture: WGPUTexture, info: *mut WGPUCodebrixVulkanTextureInfo) -> WGPUStatus;

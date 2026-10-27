@@ -48,8 +48,18 @@ public class CodebrixHeaderCheckTests
             .Should().Contain(problem => problem.StartsWith("enum WGPUCodebrixTextureState", StringComparison.Ordinal));
 
     [Fact]
+    public void a_changed_extended_enum_value_is_reported()
+        => CheckWith("WGPUSType_CodebrixPipelineDescriptorExtras = 0x000C0001", "WGPUSType_CodebrixPipelineDescriptorExtras = 0x000C0002")
+            .Should().Contain(problem => problem.StartsWith("enum WGPUCodebrixSType", StringComparison.Ordinal));
+
+    [Fact]
+    public void a_missing_object_handle_is_reported()
+        => CheckWith("typedef struct WGPUCodebrixPipelineCacheImpl* WGPUCodebrixPipelineCache WGPU_OBJECT_ATTRIBUTE;", string.Empty)
+            .Should().Contain(problem => problem.Contains("WGPUCodebrixPipelineCacheImpl", StringComparison.Ordinal));
+
+    [Fact]
     public void a_different_api_version_is_reported()
-        => CheckWith("#define WGPU_CODEBRIX_API_VERSION (3)", "#define WGPU_CODEBRIX_API_VERSION (4)")
+        => CheckWith("#define WGPU_CODEBRIX_API_VERSION (4)", "#define WGPU_CODEBRIX_API_VERSION (5)")
             .Should().Contain(problem => problem.Contains("WGPU_CODEBRIX_API_VERSION", StringComparison.Ordinal));
 
     [Fact]

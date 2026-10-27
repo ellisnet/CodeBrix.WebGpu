@@ -334,4 +334,7 @@ public sealed class ApiHandle
 
     /// <summary>The YAML doc.</summary>
     public string Doc { get; set; }
+
+    /// <summary>The <c>name</c> of the specification file that declares the object.</summary>
+    public string SpecName { get; set; }
 }

@@ -1,0 +1,43 @@
+CodeBrix patch 0011 - pipeline caches for pipeline creation (wgpu-native/src/lib.rs)
+
+WHAT: wgpuDeviceCreateComputePipeline and wgpuDeviceCreateRenderPipeline pass wgpu-core the pipeline
+cache of a WGPUCodebrixPipelineDescriptorExtras chained onto their descriptor (sType
+WGPUSType_CodebrixPipelineDescriptorExtras, codebrix_wgpu.h) instead of the hard-coded `cache: None`
+behind upstream's `// TODO(wgpu.h)`. The chain is read by codebrix-wgpu/bridge/bridge.rs
+(pipeline_cache_of_chain), where the cache handle lives; no chained extras, or a NULL cache, is
+`None` exactly as before. wgpu.h's C API is unchanged (the new types and functions are
+codebrix_wgpu.h's: wgpuCodebrixDeviceCreatePipelineCache, wgpuCodebrixPipelineCacheGetData,
+wgpuCodebrixPipelineCacheAddRef / Release, wgpuCodebrixAdapterGetPipelineCacheKey).
+WHY: wgpu-native advertises WGPUNativeFeature_PipelineCache but gives no way to use it, so every
+first run on Vulkan recompiles every pipeline (seconds to a minute per material on Android, where no
+driver disk cache hides it). Required by CodeBrix.Graphics3D.Cycles (MAINTAINER-README.txt, BUMPING
+WGPU, decided 2026-10-22).
+UPSTREAM: open draft PR gfx-rs/wgpu-native #618 ("Implement pipeline caches", 2026-07-11, unmerged)
+does the same with wgpu.h types (WGPUPipelineCache, WGPUPipelineDescriptorExtras, sType 0x0003000C);
+the CodeBrix contract copies its shapes under CodeBrix names. When a vendored release contains it,
+drop this patch and move the binding to upstream's names.
+
+--- a/wgpu-native/src/lib.rs
++++ b/wgpu-native/src/lib.rs
+@@ -2165,8 +2165,8 @@
+             // wgpu's default is true too); `false` let shaders read stale shared memory.
+             zero_initialize_workgroup_memory: true,
+         },
+-        // TODO(wgpu.h)
+-        cache: None,
++        // CodeBrix (patches/0011): the pipeline cache of a chained WGPUCodebrixPipelineDescriptorExtras.
++        cache: codebrix_bridge::pipeline_cache_of_chain(descriptor.nextInChain),
+     };
+ 
+     let (compute_pipeline_id, error) =
+@@ -2454,8 +2454,8 @@
+             }),
+         // TODO(wgpu.h)
+         multiview_mask: None,
+-        // TODO(wgpu.h)
+-        cache: None,
++        // CodeBrix (patches/0011): the pipeline cache of a chained WGPUCodebrixPipelineDescriptorExtras.
++        cache: codebrix_bridge::pipeline_cache_of_chain(descriptor.nextInChain),
+     };
+ 
+     let (render_pipeline_id, error) = context.device_create_render_pipeline(device_id, &desc, None);

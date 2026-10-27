@@ -53,9 +53,42 @@ public static class CodebrixHeaderCheck
             if (!actual.SequenceEqual(expected)) problems.Add("enum " + value.CName + ": header [" + string.Join(", ", actual) + "] expected [" + string.Join(", ", expected) + "]");
         }
 
+        // Entries this specification adds to an enum declared elsewhere (s_type): their own enum, as wgpu.h
+        // declares WGPUNativeSType - named WGPUCodebrix + the enum's name.
+        foreach (ApiEnum value in model.Enums.Where(e => e.Values.Any(v => v.SpecName == "codebrix") && !e.Values.All(v => v.SpecName == "codebrix")))
+        {
+            string name = "WGPUCodebrix" + value.CsName;
+            enumNames.Add(name);
+            string body = Body(text, "typedef enum " + name + " {");
+            if (body == null)
+            {
+                problems.Add("missing enum " + name + " (the codebrix entries of " + value.CName + ")");
+                continue;
+            }
+
+            List<string> expected = value.Values.Where(v => v.SpecName == "codebrix")
+                .Select(v => v.CName + " = 0x" + v.Value.ToString("X8", CultureInfo.InvariantCulture))
+                .Append(name + "_Force32 = 0x7FFFFFFF").ToList();
+            List<string> actual = body.Split(',').Select(e => e.Trim()).Where(e => e.Length > 0).ToList();
+            if (!actual.SequenceEqual(expected)) problems.Add("enum " + name + ": header [" + string.Join(", ", actual) + "] expected [" + string.Join(", ", expected) + "]");
+        }
+
         foreach (Match match in Regex.Matches(text, @"typedef enum (\w+) \{"))
         {
             if (!enumNames.Contains(match.Groups[1].Value)) problems.Add("enum not in specs/codebrix.yml: " + match.Groups[1].Value);
+        }
+
+        HashSet<string> handleNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (ApiHandle value in model.Handles.Where(h => h.SpecName == "codebrix"))
+        {
+            handleNames.Add(value.CName);
+            string expected = "typedef struct " + value.CName + "Impl* " + value.CName + " WGPU_OBJECT_ATTRIBUTE;";
+            if (!text.Contains(Normalize(expected), StringComparison.Ordinal)) problems.Add("missing or different: " + expected);
+        }
+
+        foreach (Match match in Regex.Matches(text, @"typedef struct (\w+)Impl ?\* ?(\w+)"))
+        {
+            if (!handleNames.Contains(match.Groups[2].Value)) problems.Add("object not in specs/codebrix.yml: " + match.Groups[2].Value);
         }
 
         HashSet<string> structNames = new HashSet<string>(StringComparer.Ordinal);

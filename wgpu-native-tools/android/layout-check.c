@@ -36,4 +36,9 @@ _Static_assert(sizeof(WGPUCodebrixTextureFormatFeatures) == 16 && offsetof(WGPUC
 _Static_assert(sizeof(WGPUCodebrixVulkanAdoptRequirements) == 32 && offsetof(WGPUCodebrixVulkanAdoptRequirements, physicalDeviceFeatures2) == 16
                && offsetof(WGPUCodebrixVulkanAdoptRequirements, physicalDeviceApiVersion) == 24, "WGPUCodebrixVulkanAdoptRequirements");
 _Static_assert(sizeof(WGPUCodebrixFaultCallbacks) == 72 && offsetof(WGPUCodebrixFaultCallbacks, deviceLostCallbackInfo) == 32, "WGPUCodebrixFaultCallbacks");
+_Static_assert(sizeof(WGPUCodebrixPipelineCacheDescriptor) == 48 && offsetof(WGPUCodebrixPipelineCacheDescriptor, label) == 8
+               && offsetof(WGPUCodebrixPipelineCacheDescriptor, data) == 24 && offsetof(WGPUCodebrixPipelineCacheDescriptor, dataSize) == 32
+               && offsetof(WGPUCodebrixPipelineCacheDescriptor, fallback) == 40, "WGPUCodebrixPipelineCacheDescriptor");
+_Static_assert(sizeof(WGPUCodebrixPipelineDescriptorExtras) == 24 && offsetof(WGPUCodebrixPipelineDescriptorExtras, pipelineCache) == 16
+               && WGPUSType_CodebrixPipelineDescriptorExtras == 0x000C0001, "WGPUCodebrixPipelineDescriptorExtras");
 _Static_assert(sizeof(WGPUCodebrixTextureState) == 4 && WGPUCodebrixTextureState_Present == 0x000C0008, "WGPUCodebrixTextureState");

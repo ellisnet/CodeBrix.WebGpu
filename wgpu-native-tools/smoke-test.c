@@ -6,12 +6,13 @@
  * Loads the library BY PATH (dlopen / LoadLibrary, as .NET does) - it is never linked against it -
  * resolves every entry point it uses by name and, when given the expected-exports list, every
  * symbol in it. Then:
- *   - wgpuCodebrixGetApiVersion == WGPU_CODEBRIX_API_VERSION (3), wgpuGetVersion == 29.0.1.1 packed,
+ *   - wgpuCodebrixGetApiVersion == WGPU_CODEBRIX_API_VERSION (4), wgpuGetVersion == 29.0.1.1 packed,
  *     wgpuCodebrixGetBuildInfo (with a non-empty `patches` fix-set list);
  *   - wgpuCodebrixSetMetalPreciseMath: Success on a macOS build, Error elsewhere (patches/0010);
  *   - with the export list: wgpuCodebrixGetProcStatus by ordinal (WaitAny AbortsUnimplemented,
- *     DeviceCreateBuffer Implemented, the D3D12 getter NotAvailableOnBackend off Windows, past the
- *     end Unknown);
+ *     DeviceCreateBuffer Implemented, the D3D12 getter NotAvailableOnBackend off Windows,
+ *     DeviceCreatePipelineCache Implemented where Vulkan is compiled in (else NotAvailableOnBackend),
+ *     PipelineCacheRelease Implemented everywhere, past the end Unknown);
  *   - wgpuCodebrixGetStructLayout for well-known structs == sizeof / alignof here, unknown -> Error;
  *   - instance, wgpuInstanceEnumerateAdapters, request adapter + device. NO ADAPTER (a container,
  *     an emulator, a CI box without a GPU) => prints "SKIPPED: no adapter", releases, exits 0;
@@ -40,6 +41,17 @@
  *     submission index, and a FOREIGN index -> InvalidSubmissionIndex with the process alive;
  *   - fault listeners on a second device: an uncaptured error reaches the host callback FIRST and
  *     then the listener; after RemoveFaultListener only the host's; bad add/remove -> 0 / Error;
+ *   - pipeline caches (patches/0011): on a device WITHOUT WGPUNativeFeature_PipelineCache,
+ *     DeviceCreatePipelineCache is a Validation error (captured by a scope, process alive), its data
+ *     size is 0 and releasing it is fine. On an adapter that offers the feature (Vulkan): the
+ *     AdapterGetPipelineCacheKey key is "wgpu_pipeline_cache_vulkan_<vendor>_<device>"; on a device
+ *     with the feature an empty cache compiles the doubling pipeline through a chained
+ *     WGPUCodebrixPipelineDescriptorExtras (readback exact) and the cache's data GROWS (the fence of
+ *     patches/0011: without it the driver never sees the cache), GetData returns > 0 bytes (two-call
+ *     convention, a truncated second call still reports the full size), a cache created FROM those
+ *     bytes without fallback raises no error and serves another exact compute pass, and foreign bytes
+ *     with fallback are accepted (empty cache) while without fallback they are a Validation error;
+ *     elsewhere the key query returns Error;
  *   - wgpuCodebrixCommandEncoderTransitionTexture ColorTarget -> ShaderResource (Success, submitted),
  *     StorageReadWrite on a texture without storage usage and an invalid state -> Error;
  *   - no uncaptured device errors; everything released; wgpuGenerateReport shows no live object.
@@ -139,7 +151,13 @@ typedef void *(*PFN_wgpuTextureGetNativeMetalTexture)(WGPUTexture);
     X(wgpuCodebrixVulkanAdoptRequirementsFreeMembers, WGPUProcCodebrixVulkanAdoptRequirementsFreeMembers) \
     X(wgpuCodebrixDeviceAddFaultListener, WGPUProcCodebrixDeviceAddFaultListener) \
     X(wgpuCodebrixDeviceRemoveFaultListener, WGPUProcCodebrixDeviceRemoveFaultListener) \
-    X(wgpuCodebrixSetMetalPreciseMath, WGPUProcCodebrixSetMetalPreciseMath)
+    X(wgpuCodebrixSetMetalPreciseMath, WGPUProcCodebrixSetMetalPreciseMath) \
+    X(wgpuAdapterHasFeature, WGPUProcAdapterHasFeature) \
+    X(wgpuCodebrixDeviceCreatePipelineCache, WGPUProcCodebrixDeviceCreatePipelineCache) \
+    X(wgpuCodebrixAdapterGetPipelineCacheKey, WGPUProcCodebrixAdapterGetPipelineCacheKey) \
+    X(wgpuCodebrixPipelineCacheGetData, WGPUProcCodebrixPipelineCacheGetData) \
+    X(wgpuCodebrixPipelineCacheAddRef, WGPUProcCodebrixPipelineCacheAddRef) \
+    X(wgpuCodebrixPipelineCacheRelease, WGPUProcCodebrixPipelineCacheRelease)
 
 #define DECLARE(n, t) static t p_##n;
 FUNCS(DECLARE)
@@ -212,6 +230,44 @@ static WGPUDevice request_device_with(WGPUAdapter adapter, WGPUUncapturedErrorCa
 }
 static WGPUDevice request_device(WGPUAdapter adapter) { return request_device_with(adapter, on_uncaptured_error); }
 
+/* A device with one extra required feature (and the counting uncaptured-error handler). */
+static WGPUDevice request_device_with_feature(WGPUAdapter adapter, WGPUFeatureName feature) {
+    WGPUDevice device = NULL;
+    WGPUDeviceDescriptor dd = WGPU_DEVICE_DESCRIPTOR_INIT;
+    dd.uncapturedErrorCallbackInfo.callback = on_uncaptured_error;
+    dd.requiredFeatureCount = 1;
+    dd.requiredFeatures = &feature;
+    WGPURequestDeviceCallbackInfo cb = WGPU_REQUEST_DEVICE_CALLBACK_INFO_INIT;
+    cb.mode = WGPUCallbackMode_AllowSpontaneous;
+    cb.callback = on_device;
+    cb.userdata1 = &device;
+    p_wgpuAdapterRequestDevice(adapter, &dd, cb);
+    return device;
+}
+
+/* Pops the innermost error scope of `device`: the captured error type (WGPUErrorType_NoError when the
+   scope caught nothing, 0 when the pop itself failed). */
+static WGPUErrorType pop_scope(WGPUDevice device) {
+    WGPUErrorType captured = (WGPUErrorType)0;
+    WGPUPopErrorScopeCallbackInfo cb = WGPU_POP_ERROR_SCOPE_CALLBACK_INFO_INIT;
+    cb.mode = WGPUCallbackMode_AllowSpontaneous;
+    cb.callback = on_pop;
+    cb.userdata1 = &captured;
+    p_wgpuDevicePopErrorScope(device, cb);
+    return captured;
+}
+
+/* A pipeline cache from `data` (NULL = empty) with a debug label. */
+static WGPUCodebrixPipelineCache create_cache(WGPUDevice device, const void *data, size_t size, int fallback) {
+    WGPUCodebrixPipelineCacheDescriptor d;
+    memset(&d, 0, sizeof d);
+    d.label = sv("smoke-test cache");
+    d.data = data;
+    d.dataSize = size;
+    d.fallback = fallback ? 1u : 0u;
+    return p_wgpuCodebrixDeviceCreatePipelineCache(device, &d);
+}
+
 /* Creates (and releases) a MapRead|MapWrite buffer: an uncaptured validation error. */
 static void provoke_validation_error(WGPUDevice device) {
     WGPUBufferDescriptor bd = WGPU_BUFFER_DESCRIPTOR_INIT;
@@ -245,8 +301,9 @@ static const char *k_wgsl =
     "@compute @workgroup_size(64)\n"
     "fn main(@builtin(global_invocation_id) id: vec3<u32>) { data[id.x] = data[id.x] * 2u; }\n";
 
-/* The compute round trip: 256 u32 (3*i+1) doubled on the GPU and read back. 1 = all correct. */
-static int compute_doubling(WGPUDevice device) {
+/* The compute round trip: 256 u32 (3*i+1) doubled on the GPU and read back. 1 = all correct. With
+   `cache`, the pipeline is compiled through it (a chained WGPUCodebrixPipelineDescriptorExtras). */
+static int compute_doubling_cached(WGPUDevice device, WGPUCodebrixPipelineCache cache) {
     enum { N = 256 };
     uint32_t input[N];
     for (uint32_t i = 0; i < N; i++) input[i] = 3u * i + 1u;
@@ -261,6 +318,11 @@ static int compute_doubling(WGPUDevice device) {
     WGPUComputePipelineDescriptor cpd = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
     cpd.compute.module = module;
     cpd.compute.entryPoint = sv("main");
+    WGPUCodebrixPipelineDescriptorExtras extras;
+    memset(&extras, 0, sizeof extras);
+    extras.chain.sType = (WGPUSType)WGPUSType_CodebrixPipelineDescriptorExtras;
+    extras.pipelineCache = cache;
+    if (cache) cpd.nextInChain = &extras.chain;
     WGPUComputePipeline pipeline = p_wgpuDeviceCreateComputePipeline(device, &cpd);
 
     WGPUBufferDescriptor bd = WGPU_BUFFER_DESCRIPTOR_INIT;
@@ -307,6 +369,7 @@ static int compute_doubling(WGPUDevice device) {
     p_wgpuQueueRelease(queue);
     return ok;
 }
+static int compute_doubling(WGPUDevice device) { return compute_doubling_cached(device, NULL); }
 
 /* patches/0010: a NaN made on the GPU (0/0 from a buffer, so nothing folds it) compared with itself.
    Returns 1 when `x != x` held, 0 when it did not, -1 when the readback failed. */
@@ -515,7 +578,7 @@ int main(int argc, char **argv) {
     if (argc > 2) {
         FILE *f = fopen(argv[2], "r");
         int total = 0, missing = 0;
-        int ord_wait_any = -1, ord_create_buffer = -1, ord_d3d12_info = -1;
+        int ord_wait_any = -1, ord_create_buffer = -1, ord_d3d12_info = -1, ord_create_cache = -1, ord_release_cache = -1;
         char name[256];
         if (!f) { printf("FAIL: cannot open %s\n", argv[2]); return 1; }
         while (fgets(name, sizeof name, f)) {
@@ -525,6 +588,8 @@ int main(int argc, char **argv) {
             if (!strcmp(name, "wgpuInstanceWaitAny")) ord_wait_any = total;
             if (!strcmp(name, "wgpuDeviceCreateBuffer")) ord_create_buffer = total;
             if (!strcmp(name, "wgpuCodebrixDeviceGetD3d12Info")) ord_d3d12_info = total;
+            if (!strcmp(name, "wgpuCodebrixDeviceCreatePipelineCache")) ord_create_cache = total;
+            if (!strcmp(name, "wgpuCodebrixPipelineCacheRelease")) ord_release_cache = total;
             total++;
             if (!lib_sym(name)) { missing++; printf("  not exported: %s\n", name); }
         }
@@ -543,6 +608,15 @@ int main(int argc, char **argv) {
         check(ord_d3d12_info >= 0 && p_wgpuCodebrixGetProcStatus((uint32_t)ord_d3d12_info) == WGPUCodebrixProcStatus_NotAvailableOnBackend,
               "GetProcStatus(wgpuCodebrixDeviceGetD3d12Info) == NotAvailableOnBackend (no Direct3D 12 here)");
 #endif
+#if defined(__APPLE__)
+        check(ord_create_cache >= 0 && p_wgpuCodebrixGetProcStatus((uint32_t)ord_create_cache) == WGPUCodebrixProcStatus_NotAvailableOnBackend,
+              "GetProcStatus(wgpuCodebrixDeviceCreatePipelineCache) == NotAvailableOnBackend (no Vulkan here)");
+#else
+        check(ord_create_cache >= 0 && p_wgpuCodebrixGetProcStatus((uint32_t)ord_create_cache) == WGPUCodebrixProcStatus_Implemented,
+              "GetProcStatus(wgpuCodebrixDeviceCreatePipelineCache) == Implemented (Vulkan compiled in)");
+#endif
+        check(ord_release_cache >= 0 && p_wgpuCodebrixGetProcStatus((uint32_t)ord_release_cache) == WGPUCodebrixProcStatus_Implemented,
+              "GetProcStatus(wgpuCodebrixPipelineCacheRelease) == Implemented (every build)");
         check(p_wgpuCodebrixGetProcStatus((uint32_t)total) == WGPUCodebrixProcStatus_Unknown, "GetProcStatus(past the table) == Unknown");
     }
 
@@ -664,6 +738,80 @@ int main(int argc, char **argv) {
         check(st == WGPUStatus_Success && (ff.allowedUsages & want) == want && (ff.flags & WGPUCodebrixTextureFormatFeatureFlags_Filterable), line);
         check(p_wgpuCodebrixAdapterGetTextureFormatFeatures(adapter, (WGPUTextureFormat)0x7FFF0000, &ff) == WGPUStatus_Error,
               "AdapterGetTextureFormatFeatures(unknown format) -> Error");
+    }
+
+    {   /* pipeline caches (patches/0011) */
+        WGPUCodebrixPipelineCache invalid = NULL;
+        p_wgpuDevicePushErrorScope(device, WGPUErrorFilter_Validation);
+        invalid = create_cache(device, NULL, 0, 1);
+        WGPUErrorType captured = pop_scope(device);
+        snprintf(line, sizeof line, "DeviceCreatePipelineCache without the PipelineCache feature: Validation error captured (type %d), process alive", (int)captured);
+        check(invalid != NULL && captured == WGPUErrorType_Validation, line);
+        check(p_wgpuCodebrixPipelineCacheGetData(invalid, NULL, 0) == 0, "PipelineCacheGetData(invalid cache) == 0");
+        p_wgpuCodebrixPipelineCacheAddRef(invalid);
+        p_wgpuCodebrixPipelineCacheRelease(invalid);
+        p_wgpuCodebrixPipelineCacheRelease(invalid);
+        p_wgpuCodebrixPipelineCacheRelease(NULL);
+        check(p_wgpuCodebrixPipelineCacheGetData(NULL, NULL, 0) == 0, "PipelineCacheGetData(NULL) == 0, Release(NULL) is a no-op");
+        check(p_wgpuCodebrixDeviceCreatePipelineCache(device, NULL) == NULL, "DeviceCreatePipelineCache(NULL descriptor) -> NULL");
+
+        WGPUStringView key = { NULL, 0 };
+        WGPUStatus kst = p_wgpuCodebrixAdapterGetPipelineCacheKey(adapter, &key);
+        check(p_wgpuCodebrixAdapterGetPipelineCacheKey(NULL, &key) == WGPUStatus_Error, "AdapterGetPipelineCacheKey(NULL) -> Error");
+        int has_feature = p_wgpuAdapterHasFeature(adapter, (WGPUFeatureName)WGPUNativeFeature_PipelineCache) != 0;
+        if (adapter_info.backendType == WGPUBackendType_Vulkan) {
+            char expected[96];
+            snprintf(expected, sizeof expected, "wgpu_pipeline_cache_vulkan_%u_%u", (unsigned)adapter_info.vendorID, (unsigned)adapter_info.deviceID);
+            snprintf(line, sizeof line, "AdapterGetPipelineCacheKey == \"%s\" (got %.*s)", expected, (int)key.length, key.data ? key.data : "");
+            check(kst == WGPUStatus_Success && sv_eq(key, expected), line);
+            check(has_feature, "the Vulkan adapter offers WGPUNativeFeature_PipelineCache");
+        } else {
+            check(kst == WGPUStatus_Error, "AdapterGetPipelineCacheKey -> Error (not a Vulkan adapter)");
+        }
+
+        WGPUDevice cdev = has_feature ? request_device_with_feature(adapter, (WGPUFeatureName)WGPUNativeFeature_PipelineCache) : NULL;
+        if (has_feature) check(cdev != NULL, "request a device with WGPUNativeFeature_PipelineCache");
+        if (cdev) {
+            p_wgpuDevicePushErrorScope(cdev, WGPUErrorFilter_Validation);
+            WGPUCodebrixPipelineCache cold = create_cache(cdev, NULL, 0, 1);
+            check(cold != NULL && pop_scope(cdev) == WGPUErrorType_NoError, "DeviceCreatePipelineCache (empty, feature enabled): no error");
+            size_t empty = p_wgpuCodebrixPipelineCacheGetData(cold, NULL, 0);
+            check(compute_doubling_cached(cdev, cold), "compute pass through the EMPTY cache (readback exact)");
+            size_t size = p_wgpuCodebrixPipelineCacheGetData(cold, NULL, 0);
+            snprintf(line, sizeof line, "the chained cache grew when the pipeline compiled (patches/0011): %zu -> %zu bytes", empty, size);
+            check(size > empty, line);
+            uint8_t *blob = size ? (uint8_t *)malloc(size) : NULL;
+            size_t again = blob ? p_wgpuCodebrixPipelineCacheGetData(cold, blob, size) : 0;
+            uint8_t small[8];
+            size_t truncated = p_wgpuCodebrixPipelineCacheGetData(cold, small, sizeof small);
+            snprintf(line, sizeof line, "PipelineCacheGetData: %zu bytes, the fill call %zu, an 8-byte buffer still reports %zu", size, again, truncated);
+            check(size > 16 && again >= size && truncated >= size, line);
+            if (blob && again == size) {
+                p_wgpuDevicePushErrorScope(cdev, WGPUErrorFilter_Validation);
+                WGPUCodebrixPipelineCache warm = create_cache(cdev, blob, size, 0);
+                check(warm != NULL && pop_scope(cdev) == WGPUErrorType_NoError, "DeviceCreatePipelineCache FROM the saved bytes, no fallback: no error");
+                check(compute_doubling_cached(cdev, warm), "compute pass through the WARM cache (readback exact)");
+                check(p_wgpuCodebrixPipelineCacheGetData(warm, NULL, 0) > 16, "the warm cache has data");
+                p_wgpuCodebrixPipelineCacheRelease(warm);
+                /* Same length, wgpu's header damaged: foreign data. */
+                for (size_t i = 0; i < 16 && i < size; i++) blob[i] ^= 0x5A;
+                p_wgpuDevicePushErrorScope(cdev, WGPUErrorFilter_Validation);
+                WGPUCodebrixPipelineCache fresh = create_cache(cdev, blob, size, 1);
+                WGPUErrorType with_fallback = pop_scope(cdev);
+                p_wgpuDevicePushErrorScope(cdev, WGPUErrorFilter_Validation);
+                WGPUCodebrixPipelineCache rejected = create_cache(cdev, blob, size, 0);
+                WGPUErrorType without_fallback = pop_scope(cdev);
+                snprintf(line, sizeof line, "foreign bytes: with fallback no error (got %d), without fallback Validation (got %d)",
+                         (int)with_fallback, (int)without_fallback);
+                check(fresh && rejected && with_fallback == WGPUErrorType_NoError && without_fallback == WGPUErrorType_Validation, line);
+                check(compute_doubling_cached(cdev, fresh), "compute pass through the fallback (empty) cache (readback exact)");
+                p_wgpuCodebrixPipelineCacheRelease(rejected);
+                p_wgpuCodebrixPipelineCacheRelease(fresh);
+            }
+            free(blob);
+            p_wgpuCodebrixPipelineCacheRelease(cold);
+            p_wgpuDeviceRelease(cdev);
+        }
     }
 
     {   /* bounded, non-aborting poll */

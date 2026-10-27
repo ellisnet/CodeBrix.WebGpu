@@ -4,7 +4,7 @@
 //   d6079ccf2131cbc608f1d43cb41ee935b4b799b85dc3498f4f5b1a3ecae9e6a7  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/schema.json
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
-//   d2ffaba8efc2398b17d17ff452eb5a147cc93f6ca1a33a5cfe85b6e2ed9902fb  wgpu-native-tools/specs/codebrix.yml
+//   2784405e2cfa2600e8b0382ad2b80a4da3e0abc1a075dcae076408488c4ce4cb  wgpu-native-tools/specs/codebrix.yml
 //   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
 
 using System.Runtime.InteropServices;
@@ -650,6 +650,75 @@ public unsafe struct CodebrixName
     /// The name, as a string view.
     /// </summary>
     public StringView Name;
+}
+
+/// <summary>
+/// Describes a <see cref="CodebrixPipelineCache" /> for <see cref="WebGpu.CodebrixDeviceCreatePipelineCache" />. The
+/// shape of wgpu-native's (unmerged) upstream pipeline-cache proposal, gfx-rs/wgpu-native PR #618,
+/// under CodeBrix names.
+/// </summary>
+/// <remarks>C type: <c>WGPUCodebrixPipelineCacheDescriptor</c>.</remarks>
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct CodebrixPipelineCacheDescriptor
+{
+    /// <summary>
+    /// Pointer to the first extension struct in the chain, or null.
+    /// </summary>
+    public ChainedStruct* NextInChain;
+
+    /// <summary>
+    /// A debug label.
+    /// </summary>
+    public StringView Label;
+
+    /// <summary>
+    /// The bytes to start the cache from: what an earlier <see cref="WebGpu.CodebrixPipelineCacheGetData" />
+    /// returned. NULL (or <c>dataSize</c> 0) starts an empty cache. Cache data is specific to the
+    /// adapter, driver version and wgpu version that produced it: wgpu-core checks the header it puts
+    /// in front of the driver's data (and the driver checks its own). Data made on a DIFFERENT
+    /// adapter (another GPU or backend) is always a validation error, whatever <c>fallback</c> says - so
+    /// keep one cache per <see cref="WebGpu.CodebrixAdapterGetPipelineCacheKey" />. The bytes are copied during
+    /// the call.
+    /// </summary>
+    public void* Data;
+
+    /// <summary>
+    /// The number of bytes at <c>data</c>.
+    /// </summary>
+    public nuint DataSize;
+
+    /// <summary>
+    /// True (recommended): data that is truncated, corrupt, outdated (made before a driver or wgpu
+    /// update) or from a newer wgpu gives an EMPTY cache instead of an error. False: such data is a
+    /// validation error and the cache is invalid. Data from another adapter is an error either way.
+    /// </summary>
+    public uint Fallback;
+}
+
+/// <summary>
+/// Chained onto a <see cref="RenderPipelineDescriptor" /> or <see cref="ComputePipelineDescriptor" /> (sType
+/// <see cref="SType.CodebrixPipelineDescriptorExtras" />) to compile the pipeline through a pipeline cache:
+/// the driver reuses what the cache already holds for the pipeline's shaders and adds what it
+/// compiles. One struct for both descriptor types, as in gfx-rs/wgpu-native PR #618.
+/// </summary>
+/// <remarks>C type: <c>WGPUCodebrixPipelineDescriptorExtras</c>.</remarks>
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct CodebrixPipelineDescriptorExtras
+{
+    /// <summary>The <see cref="SType" /> value that identifies this struct in <see cref="ChainedStruct.SType" />.</summary>
+    public const SType StructType = SType.CodebrixPipelineDescriptorExtras;
+
+    /// <summary>
+    /// The chain header; its <c>sType</c> must be this struct's <see cref="SType" /> value (see <c>StructType</c>).
+    /// </summary>
+    public ChainedStruct Chain;
+
+    /// <summary>
+    /// The cache, created on the same device; NULL compiles without one (as if the struct were not
+    /// chained). An INVALID cache (one whose creation reported an error) makes the pipeline creation
+    /// a validation error.
+    /// </summary>
+    public CodebrixPipelineCache PipelineCache;
 }
 
 /// <summary>

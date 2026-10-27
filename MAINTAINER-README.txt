@@ -605,45 +605,44 @@ codebrix-wgpu/Cargo.toml [patch.crates-io] pointing cargo at the patched copy.
 BUMPING WGPU
 ============
 
-REQUIRED AT THE NEXT UPDATE OF THIS REPOSITORY, WHATEVER ITS REASON: ENABLE
-PIPELINE CACHING. Decided 2026-10-22. An audit of the shipped
-CodeBrix.WebGpu.Native (1.0.290.1433, wgpu-native v29.0.1.1) by the
-CodeBrix.Graphics3D.Cycles repository found that the native advertises
-WGPUNativeFeature_PipelineCache (adapters report it, a device can enable it)
-but exports nothing that can use it: no wgpuDeviceCreatePipelineCache /
-wgpuPipelineCacheGetData / AddRef / Release, no sType to chain a cache into
-WGPUComputePipelineDescriptor or WGPURenderPipelineDescriptor, and
-wgpuGetProcAddress aborts. wgpu-core's Vulkan HAL does implement pipeline
-caches (Device::create_pipeline_cache, PipelineCache::get_data,
-ComputePipelineDescriptor::cache, wgpu::util::pipeline_cache_key), so every
-first render on Linux and Android recompiles every pipeline (seconds to a
-minute per material; the Mesa disk cache hides it on Linux desktops, nothing
-does on Android). The next release of this package must add, through the
-normal wgpu-native-tools route (specs/wgpu.yml or codebrix.yml, the generator,
-the proc table, expected-exports.txt, smoke-test.c, the nine builds):
-  - WGPUPipelineCache (handle) and WGPUPipelineCacheDescriptor { nextInChain,
-    label, initial data pointer + size, fallback (WGPUBool: an invalid or
-    foreign blob yields an empty cache instead of an error) };
-    wgpuDeviceCreatePipelineCache(device, descriptor), requiring
-    WGPUNativeFeature_PipelineCache;
-  - wgpuPipelineCacheGetData(cache, data, size) as a two-call size/fill
-    query (or WGPUStatus plus an out size), wgpuPipelineCacheAddRef and
-    wgpuPipelineCacheRelease;
-  - chained WGPUComputePipelineDescriptorExtras { chain, cache } and the
-    render-pipeline equivalent, each with a new native sType;
-  - an adapter cache-key query returning wgpu's pipeline_cache_key string
-    (vendor, device, driver identity) so a host can name cache files per
-    adapter and driver;
-  - proc-table entries and wgpuCodebrixGetProcStatus rows for all of them:
-    Implemented on Vulkan, Unsupported (never abort) on Metal, D3D12 and GL.
-If upstream wgpu-native has added these in the meantime, adopt upstream's
-names and shapes rather than inventing ours. The consuming design (one cache
-file per runtime version, adapter key, module hash and specialization record,
-loaded with fallback, saved after compilation, reported in a capability
-report) is written up in CodeBrix.Graphics3D.Cycles/MAINTAINER-README.txt,
-"PIPELINE CACHE (AUDIT OF THE SHIPPED RUNTIME)"; that repository raises its
-pin to the first version that ships the exports. No code in this repository
-was changed when this note was written.
+PIPELINE CACHES (contract v4, patches/0011; added 2026-10-26). The audit of
+2026-10-22 by CodeBrix.Graphics3D.Cycles found that wgpu-native advertises
+WGPUNativeFeature_PipelineCache but exports nothing that can use it, so every
+first run on Vulkan recompiled every pipeline. Upstream has no release with
+pipeline caches; open draft PR gfx-rs/wgpu-native #618 (2026-07-11, unmerged)
+adds them to wgpu.h. Because the shipped include/wgpu.h must stay upstream's
+own bytes, the C API is in codebrix.yml / codebrix_wgpu.h under CodeBrix names
+with #618's shapes:
+  - WGPUCodebrixPipelineCache (object) and WGPUCodebrixPipelineCacheDescriptor
+    { nextInChain, label, data, dataSize, fallback };
+    wgpuCodebrixDeviceCreatePipelineCache, wgpuCodebrixPipelineCacheGetData
+    (two-call size / fill; returns the full size), AddRef, Release;
+  - WGPUCodebrixPipelineDescriptorExtras { chain, pipelineCache }, ONE struct
+    for compute and render pipeline descriptors (as #618), sType
+    WGPUSType_CodebrixPipelineDescriptorExtras = 0x000C0001 (codebrix.yml
+    extends s_type; the header declares it as enum WGPUCodebrixSType, the way
+    wgpu.h declares WGPUNativeSType);
+  - wgpuCodebrixAdapterGetPipelineCacheKey: Rust wgpu's pipeline_cache_key,
+    "wgpu_pipeline_cache_vulkan_<vendor>_<device>" (the driver version is not
+    in the key: wgpu-core's header and the driver validate it inside the data).
+patches/0011 is two lines in wgpu-native's pipeline creation (`cache: None`
+-> bridge::pipeline_cache_of_chain); the handle and the chain walk are in
+codebrix-wgpu/bridge/bridge.rs, the exports in src/codebrix.rs.
+Semantics worth knowing (wgpu-core 29.0.3): only Vulkan adapters offer the
+feature and creation requires it, so elsewhere creation is a Validation error
+and returns an invalid cache (never an abort); `fallback` turns truncated,
+corrupt, outdated and newer-wgpu data into an empty cache, but data from a
+DIFFERENT adapter is an error either way. Proc status: the generator's
+ModuleInterop.BackendOf treats "PipelineCache" symbols as Vulkan-backend
+functions (NotAvailableOnBackend on macOS) except AddRef / Release, which are
+Implemented everywhere. Fences: tests/.../PipelineCacheTests (the two
+"compiled_through_a_cache_fills_it" tests fail on the unpatched engine) and
+the smoke test's "chained cache grew" check. When a vendored release contains
+#618 (or its successor), drop 0011, move the binding to upstream's names and
+bump api_version. The consuming design is in
+CodeBrix.Graphics3D.Cycles/MAINTAINER-README.txt, "PIPELINE CACHE (AUDIT OF
+THE SHIPPED RUNTIME)"; that repository raises its pin to the first Native
+package that ships contract v4.
 
 The whole point of the tooling: a new wgpu-native release is a sequence of
 commands, with hand edits only where the C API itself changed.
