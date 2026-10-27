@@ -931,9 +931,18 @@ Per-platform backend table:
                  owned: Vulkan (PreferredBackend = Vulkan) - ZeroCopy
                  adopted: AdoptVulkan works like Linux; AdoptDirect3D always
                  unavailable (the native's adopt returns Error - known limit)
-  macOS          owned: Metal - ZeroCopy, UNTESTED here
+  macOS          owned: Metal - ZeroCopy, sharing the WebGPU device's own
+                 MTLCommandQueue (SharesQueueWithSkia = true); needs native
+                 patches 0012-0013 - before them the engine returned a null
+                 queue and CreateGrContext always returned null. Proven on
+                 Jeremy's Apple Silicon Mac (M2 Pro), 2026-10-27: every Skia
+                 test green (ZeroCopy 8056 / GpuCopy 9992 / Readback 728 fps,
+                 512x512), the Graphics SkiaSharing tests too.
                  adopted: AdoptMetal - wgpu gets its own MTLCommandQueue, so
-                 hand-overs wait (SharesQueueWithSkia = false), UNTESTED here
+                 hand-overs wait (SharesQueueWithSkia = false); proven on the
+                 same Mac (AdoptMetal_shares_the_applications_device). Intel
+                 Macs (osx-x64): same code, smoke-tested only under Rosetta 2
+                 on the Apple GPU - not yet run on an Intel GPU.
 
 What Jeremy runs on the other machines (from the repository root; add
 -p:UseLocalNativeProject=true to each command while the pinned Native is not

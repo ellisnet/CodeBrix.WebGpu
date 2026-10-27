@@ -605,6 +605,16 @@ PER-PLATFORM BACKENDS
   macOS           Metal -> ZeroCopy                AdoptMetal -> ZeroCopy/GpuCopy
   Anything else / OpenGL GRContext / raster      Readback
 
+  macOS owned route: the GRContext is built on the WebGPU device's own MTLDevice
+  AND MTLCommandQueue, so WebGPU and SkiaSharp submit to one queue
+  (SharesQueueWithSkia = true, no waits), as on Vulkan and Direct3D 12. That
+  needs a CodeBrix.WebGpu.Native whose natives carry the fix
+  0013-wgpu-native-metal-command-queue (CodeBrixWebGpuNative.BuildInfo.Patches
+  lists it); with an older native QueueGetNativeMetalCommandQueue returns null
+  and CreateGrContext returns null with that reason in GrContextReason. Proven on
+  Apple Silicon (M2 Pro, 2026-10-27): every ZeroCopy / GpuCopy / Readback test
+  passes; ZeroCopy ran about 11x the frame rate of Readback (skia-tier-timing.txt).
+
 
 LIMITS
 ======

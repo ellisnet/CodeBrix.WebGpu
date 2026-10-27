@@ -954,6 +954,11 @@ GpuTimer (CreateTimer(capacity = 16); needs FeatureName.TimestampQuery)
   frame.Submit();
   double[] ms = timer.ReadMilliseconds();
 
+  On Metal (macOS) GPU timings are UNRELIABLE: a slot can read 0.0 ms, always
+  for an empty pass or a slot written between commands, and now and then even
+  for a pass that draws. Treat 0.0 as "no measurement" (leave it out of
+  averages). Why, and what to do: LIMITS, "GPU timing on Metal".
+
 Indirect drawing
 ----------------
 Structs with the GPU layout: DrawIndirectArgs (16 bytes),
@@ -1045,7 +1050,8 @@ Native device interop
   TryGetVulkanInfo(out VulkanDeviceInfo)   instance, physical device, device,
         queue, family/index, API version, vkGetInstanceProcAddr, extensions
   TryGetD3D12Info(out D3D12DeviceInfo)     adapter, device, queue
-  MetalDevice (IntPtr), MetalCommandQueue (always zero on this engine)
+  MetalDevice (IntPtr), MetalCommandQueue (IntPtr; the queue the context
+        submits on - borrowed, zero off Metal)
   static AdoptVulkanDevice(VulkanDeviceInfo, requiredFeatures) /
          TryAdoptVulkanDevice(...)     a context over the APPLICATION'S VkDevice
   static AdoptMetalDevice(IntPtr mtlDevice, ...) / TryAdoptMetalDevice(...)
@@ -1379,6 +1385,42 @@ LIMITS
       - external textures (no creation path).
   * Destroying a query set early is not offered: on this engine a destroyed
     query set ends the process when it is released. Dispose it instead.
+  * GPU timing on Metal (macOS) is unreliable - GpuTimer, timestamp query
+    sets, PassTimestamps and WriteTimestamp. Nothing fails or crashes and
+    rendering is unaffected; the timestamps themselves go missing. Why: Metal
+    takes GPU timestamps only where the GPU supports sampling, and Apple GPUs
+    sample only at the boundaries of a pass's stages, not between draws or
+    dispatches. So NativeFeature.TimestampQueryInsidePasses is not offered
+    there (nor is PipelineStatisticsQuery, which wgpu's Metal backend does not
+    implement), and the engine (wgpu 29)
+    writes a render pass's timestamps at the start of its vertex stage and
+    the end of its fragment stage. Measured on an Apple M2 Pro (2026-10-27):
+      - a render pass with NO draws never gets its end timestamp (the raw
+        tick resolves to 0), so timing an empty pass always reads 0.0 ms;
+      - a timestamp written BETWEEN commands (GraphicsFrame.WriteTimestamp,
+        GpuTimer.WriteStart / WriteEnd on a frame) cannot be sampled where it
+        is written; the engine moves it to the next pass or to a placeholder
+        copy pass, which Metal does not reliably sample (the engine's own
+        Metal layer documents that Metal skips timestamps of a copy pass
+        that copies nothing). Around an empty pass such a slot read 0.0 ms
+        every time;
+      - INTERMITTENTLY, a timed pass that really draws read 0.0 ms when it
+        ran right after other timestamp work on the same device (about one
+        run in three); alone it never did. The cause is not identified; it
+        happens with and without this repository's native fixes.
+    Not seen on Vulkan: the same tests (GpuTimerTests, GpuQuerySetTests) pass
+    on Linux. Direct3D 12 and Intel Macs (which report different sampling
+    support) are not tested.
+    What the API gives you: GpuTimer returns 0.0 ms for any slot whose start
+    tick is 0 or whose end tick is not after its start - never a negative or
+    huge value. Raw ticks (GpuQuerySet resolves, GpuTimer.GetLastTicks) are 0
+    where a timestamp was not written: check end > start before subtracting,
+    or the unsigned subtraction wraps to an enormous number.
+    What to do: treat 0.0 as "no measurement" and leave it out of averages;
+    time whole passes that do real work (GpuTimer.Pass(slot)) rather than
+    slots between commands; never drive behaviour (dynamic resolution,
+    quality levels) from a single reading - use a filtered average of the
+    non-zero ones.
   * Adopting an existing Direct3D 12 device is impossible on this engine:
     TryAdoptD3D12Device always returns false with the reason. Create the
     context on Direct3D 12 and share it the other way (TryGetD3D12Info).
@@ -1388,8 +1430,6 @@ LIMITS
     use; the engine tracks initialisation per texture object, so a read of a
     texture object that was never written returns zeros.
   * Debug groups and markers inside render bundles are dropped by the engine.
-  * The Metal command queue is not exposed by the engine (MetalCommandQueue
-    is always zero).
   * Environments: OpenEXR is not read (convert to Radiance .hdr); panorama
     values above 65504 are clamped (RGBA16Float); building one takes tens
     of milliseconds of GPU work (build at load time, not per frame); the

@@ -960,7 +960,6 @@ an error scope can catch.
   * DeviceCreateShaderModuleSpirV (passthrough) needs a feature this engine
     does not expose; use ShaderModuleDescriptor + ShaderSourceSPIRV.
   * Debug groups and markers recorded into render bundles are dropped;
-    QueueGetNativeMetalCommandQueue always returns null;
     CodebrixInstanceAdoptD3d12Device always returns Status.Error (create the
     device here and share it the other way with CodebrixDeviceGetD3d12Info).
 

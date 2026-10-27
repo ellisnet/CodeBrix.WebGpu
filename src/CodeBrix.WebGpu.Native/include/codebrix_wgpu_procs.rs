@@ -5,7 +5,7 @@
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
 //   2784405e2cfa2600e8b0382ad2b80a4da3e0abc1a075dcae076408488c4ce4cb  wgpu-native-tools/specs/codebrix.yml
-//   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
+//   59fbcc4895d378814f4409a36e9864a722394dc4995a04cdc814702c66e10740  wgpu-native-tools/specs/proc-table-notes.txt
 //
 // The C ABI of the codebrix_wgpu library (webgpu.h + wgpu.h + codebrix_wgpu.h) for Rust native modules, with no
 // crates: every constant, handle, enum, bitflag, callback and struct (#[repr(C)], C member names), the function
@@ -2637,7 +2637,7 @@ pub struct WGPUCodebrixProcTable {
     pub querySetSetLabel: Option<unsafe extern "C" fn(querySet: WGPUQuerySet, label: WGPUStringView)>,
     /// wgpuQueueAddRef.
     pub queueAddRef: Option<unsafe extern "C" fn(queue: WGPUQueue)>,
-    /// wgpuQueueGetNativeMetalCommandQueue. UNSUPPORTED: always returns NULL with this engine.
+    /// wgpuQueueGetNativeMetalCommandQueue.
     pub queueGetNativeMetalCommandQueue: Option<unsafe extern "C" fn(queue: WGPUQueue) -> *mut c_void>,
     /// wgpuQueueGetTimestampPeriod.
     pub queueGetTimestampPeriod: Option<unsafe extern "C" fn(queue: WGPUQueue) -> f32>,
@@ -3063,7 +3063,7 @@ pub const WGPU_CODEBRIX_PROC_STATUS_TABLE: [WGPUCodebrixProcStatus; 257] = [
     WGPUCodebrixProcStatus_Implemented,
     WGPUCodebrixProcStatus_AbortsUnimplemented,
     WGPUCodebrixProcStatus_Implemented,
-    WGPUCodebrixProcStatus_Unsupported,
+    WGPUCodebrixProcStatus_Implemented,
     WGPUCodebrixProcStatus_Implemented,
     WGPUCodebrixProcStatus_Implemented,
     WGPUCodebrixProcStatus_Implemented,
@@ -3796,7 +3796,6 @@ pub mod direct {
         /// ABORTS: not implemented by the engine (set labels through the descriptors).
         pub fn wgpuQuerySetSetLabel(querySet: WGPUQuerySet, label: WGPUStringView);
         pub fn wgpuQueueAddRef(queue: WGPUQueue);
-        /// UNSUPPORTED: always returns NULL with this engine.
         pub fn wgpuQueueGetNativeMetalCommandQueue(queue: WGPUQueue) -> *mut c_void;
         pub fn wgpuQueueGetTimestampPeriod(queue: WGPUQueue) -> f32;
         pub fn wgpuQueueOnSubmittedWorkDone(queue: WGPUQueue, callbackInfo: WGPUQueueWorkDoneCallbackInfo) -> WGPUFuture;

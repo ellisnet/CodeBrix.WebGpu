@@ -355,12 +355,18 @@ public class GraphicsContextTests : IClassFixture<GraphicsGpuFixture>
             d3d12Info.Should().BeNull();
         }
 
-        if (context.Backend != BackendType.Metal)
+        if (context.Backend == BackendType.Metal)
+        {
+            // patches/0012-0013: the engine exposes the queue it submits on (Skia's Metal GRContext needs it).
+            context.MetalDevice.Should().NotBe(IntPtr.Zero);
+            context.MetalCommandQueue.Should().NotBe(IntPtr.Zero);
+        }
+        else
         {
             context.MetalDevice.Should().Be(IntPtr.Zero);
+            context.MetalCommandQueue.Should().Be(IntPtr.Zero);
         }
 
-        context.MetalCommandQueue.Should().Be(IntPtr.Zero);
         context.IsAdopted.Should().BeFalse();
     }
 

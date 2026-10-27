@@ -5,7 +5,7 @@
 //   f9e2ef6f1b5f91ad1c077c15c6fba5f55e6f52935af2adef40bc5597b06bb5ca  wgpu-native-tools/wgpu-native/ffi/webgpu-headers/webgpu.yml
 //   183a0ac74481dcfee98821d890058dec9e6ff167d95475e524ae2b6de674af51  wgpu-native-tools/specs/wgpu.yml
 //   2784405e2cfa2600e8b0382ad2b80a4da3e0abc1a075dcae076408488c4ce4cb  wgpu-native-tools/specs/codebrix.yml
-//   2a12ff12eacc83d78a5ca38004e330974b2cb9f886b83a30c361954ce13b6d4e  wgpu-native-tools/specs/proc-table-notes.txt
+//   59fbcc4895d378814f4409a36e9864a722394dc4995a04cdc814702c66e10740  wgpu-native-tools/specs/proc-table-notes.txt
 //
 // The static half of wgpuCodebrixGetProcStatus: one (WGPUCodebrixProcStatus, required backend) pair per
 // function-table ordinal (WGPUCodebrixProcTable order = the C symbols in ordinal order), from
@@ -172,7 +172,7 @@ pub static PROC_STATUS: [(u32, u8); 257] = [
     (0x000C0001, 0), // wgpuQuerySetRelease
     (0x000C0002, 0), // wgpuQuerySetSetLabel
     (0x000C0001, 0), // wgpuQueueAddRef
-    (0x000C0004, 3), // wgpuQueueGetNativeMetalCommandQueue
+    (0x000C0001, 3), // wgpuQueueGetNativeMetalCommandQueue
     (0x000C0001, 0), // wgpuQueueGetTimestampPeriod
     (0x000C0001, 0), // wgpuQueueOnSubmittedWorkDone
     (0x000C0001, 0), // wgpuQueueRelease

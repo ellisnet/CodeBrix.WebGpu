@@ -36,15 +36,22 @@ Common to every entry below
                     0008-wgpu-native-surface-usage-flags,
                     0009-wgpu-native-debugger-capture-wgpubool,
                     0010-wgpu-hal-metal-precise-math (wgpu-hal),
-                    0011-wgpu-native-pipeline-cache-chain - to a SCRATCH copy
+                    0011-wgpu-native-pipeline-cache-chain,
+                    0012-wgpu-hal-metal-queue-accessor (wgpu-hal),
+                    0013-wgpu-native-metal-command-queue - to a SCRATCH copy
                     only; see patches/README.txt. Every built library reports the
                     list in wgpuCodebrixGetBuildInfo's `patches`.
-  STALE ENTRIES    : the contract is API version 4 (patches 0001-0011) since
-                    2026-10-26. The five Linux / Android entries below were rebuilt for
-                    it that day; an entry whose "Contract / fixes" line still says API
-                    version 2 / patches 0001-0009 (win-x64, win-arm64, osx-arm64,
-                    osx-x64) describes the binary that is committed but MUST BE
-                    REBUILT before the next publish (the managed side refuses a v2
+  STALE ENTRIES    : the contract is API version 4 since 2026-10-26, and the fix set
+                    is patches 0001-0013 since 2026-10-27 (0012-0013: the Metal
+                    command queue; they change nothing off macOS, but every native
+                    reports the fix set and the Native test
+                    BuildInfo_patches_are_the_patches_folder_in_apply_order compares
+                    it with the patches folder). CURRENT: the two osx-* entries,
+                    rebuilt 2026-10-27 UTC (the evening of 2026-10-26 local) on
+                    Jeremy's Apple Silicon Mac. MUST BE REBUILT before the next
+                    publish: the five Linux / Android entries (API version 4,
+                    patches 0001-0011, built 2026-10-26) and win-x64 / win-arm64
+                    (API version 2, patches 0001-0009 - the managed side refuses a v2
                     native; the export set gained 6 functions).
   Profile         : release - opt-level 3, lto "fat", codegen-units 1, panic "abort",
                     debug true (stripped by the scripts, never by cargo)
@@ -71,16 +78,23 @@ Common to every entry below
   Smoke test      : smoke-test.c, built for the TARGET, run against the STAGED
                     (stripped) file, loaded by path - see README.txt "THE SMOKE TEST".
 
-                    77 checks with a Vulkan adapter (69 on GL only, 73 on Metal:
-                    the Metal wrap + adopt in place of the Vulkan-object checks;
-                    the count on a D3D12 adapter is not yet recorded - see the
-                    win-x64 known gap); without one (most containers) the GPU
-                    part prints SKIPPED and 31 checks run. All nine blocks below
-                    are current (contract v2, patches 0001-0009, 2026-10-17): the
-                    five Linux / Android RIDs built here, the four win-* / osx-*
-                    RIDs rebuilt the same day on Jeremy's machines; their API
-                    version 1 predecessors (45-check smoke test on macOS, 47 on
-                    Windows) shipped in 1.0.287.301 and are superseded.
+                    Patches 0001-0013: 88 checks on Metal (2026-10-27): the 85 below
+                    plus the queue getter's proc status and two Metal queue checks
+                    (non-null and stable; its -device is the device's MTLDevice).
+                    Off Metal 0012-0013 add the proc status and "NULL off Metal":
+                    99 expected with a Vulkan adapter, 35 without one, until the
+                    next Linux build measures them.
+                    Contract v4 (patches 0001-0011): 97 checks with a Vulkan
+                    adapter, 85 on Metal (the Metal wrap + adopt and the 0010
+                    precise-math NaN pass in place of the Vulkan-object and
+                    pipeline-cache GROWTH checks; the cache's missing-feature
+                    error path runs everywhere); without an adapter (most
+                    containers) the GPU part prints SKIPPED and 34 checks run.
+                    Contract v2 (still the two win-* blocks): 77 on Vulkan, 69 on
+                    GL only, 73 on Metal, 31 without an adapter; the count on a
+                    D3D12 adapter is not yet recorded - see the win-x64 known gap.
+                    The API version 1 binaries (45-check smoke test on macOS, 47
+                    on Windows) shipped in 1.0.287.301 and are superseded.
 
 Linux (the three linux-* entries)
 --------------------------------------------------------------------------------
@@ -614,7 +628,37 @@ macOS (the two osx-* entries)
                     The first REPRODUCIBLE=1 attempt (22:29 UTC) hit 1 and 2 and
                     adopted nothing; the records below are from the rerun with the
                     fixed script. Both RIDs then passed the complete gate.
-  Reproducibility : YES, from REPRODUCIBLE=1 on both RIDs (2026-10-17): two builds into
+  Third run       : 2026-10-27 01:18-01:25 UTC (the evening of 2026-10-26 local), both
+                    RIDs concurrently, REPRODUCIBLE=1, for contract v4 + patches
+                    0010-0011 and the vendored wgpu-hal/ (crates.io 29.0.3, checked
+                    `diff -r`-identical to upstream-downloads/wgpu-hal-29.0.3.crate the
+                    same evening). The first compile of patches/0010 anywhere: it edits
+                    wgpu-hal's Metal backend, which builds only for Apple targets, and
+                    codebrix.rs's wgpuCodebrixSetMetalPreciseMath under the Metal cfg.
+                    NO script or source change was needed: cargo built with 0 warnings
+                    on both RIDs (wgpu-hal is now a path dependency, so its warnings
+                    would show - there were none), both twins were byte-identical, the
+                    85-check smoke test passed first time on both (osx-x64 under
+                    Rosetta 2) including SetMetalPreciseMath(true) + a compute pass in
+                    which a NaN compares unequal to itself, and the remapped names of
+                    the vendored crate read wgpu-native-tools/wgpu-hal/src/...; the
+                    shipped dylibs carry no /tmp, /private/tmp or /Users string.
+  Fourth run      : 2026-10-27 02:01-02:05 UTC, both RIDs concurrently, REPRODUCIBLE=1,
+                    for patches/0012 (wgpu-hal: Queue::raw_queue) + 0013 (wgpu-native:
+                    wgpuQueueGetNativeMetalCommandQueue returns it) - the Metal command
+                    queue, without which SkiaSharp cannot build a Metal GRContext on the
+                    WebGPU device (the Skia owned route on macOS never worked before:
+                    every GRContext test skipped "returned null"). Written and checked
+                    here first: the series applied to a fresh copy equals the hand-edited
+                    tree, `cargo check` clean, the smoke test compiled for both arches
+                    and the non-Apple path; the binding generator rewrote
+                    applied-patches.txt and the status table (the proc-table note
+                    "UNSUPPORTED: always returns NULL" removed: Implemented on Metal).
+                    NO script change: 0 warnings, both twins byte-identical, the
+                    88-check smoke test passed on both (osx-x64 under Rosetta 2) - the
+                    queue's -device IS the device's MTLDevice - adopted.
+  Reproducibility : YES, from REPRODUCIBLE=1 on both RIDs (2026-10-17, and again 2026-10-27
+                    for contract v4, and for 0012-0013): two builds into
                     the same paths gave byte-identical unstripped dylibs (same sha256,
                     same LC_UUID). rustc links with the N_OSO stab timestamps ZEROED
                     (nm -ap shows 0 for all 3 OSO entries) and ld's UUID is content-
@@ -627,7 +671,78 @@ macOS (the two osx-* entries)
                     target/... for our cgu.0.rcgu.o, /Users/<name>/.rustup/... for
                     compiler_builtins) - 2-3 strings per RID, debugger material only;
                     the SHIPPED dylibs carry none (strings -a: 0 hits).
-  Managed tests   : 2026-10-17 (Second run), Release, -p:UseLocalNativeProject=true, one
+  Managed tests   : 2026-10-27 (Fourth run, patches 0001-0013), Release,
+                    -p:UseLocalNativeProject=true, one `dotnet test --project` per test
+                    project, against the adopted osx-arm64 dylib (sha256 5aa575ec... in
+                    all three GPU test outputs):
+                      BindingGenerator.Tests  98 passed
+                      Native.Tests            166 tests, 138 passed, 0 failed, 28 skipped
+                      Skia.Tests               90 tests,  80 passed, 0 failed, 10 skipped
+                      Graphics.Tests          418 tests, 393 passed, 3 failed, 22 skipped
+                    Native: the new MetalCommandQueueTests pass (the third, "null off
+                    Metal", skips here); against an unpatched 0001-0011 build both fail
+                    (proc status Unsupported, queue NULL) - the fence. Skia: every GRContext
+                    test now RUNS and passes - ZeroCopy / GpuCopy / Readback, the backing
+                    and async-readback tests, AdoptMetal_shares_the_applications_device
+                    and the Owned_device_gets_a_required_feature... test that failed in the
+                    Third run; the 10 skips are platform rules (Vulkan / Windows only, a
+                    "context on another backend" Metal cannot provide) and local-mode
+                    package checks. skia-tier-timing.txt, 512x512, Metal, Apple M2 Pro:
+                    ZeroCopy 5934-8056 fps, GpuCopy 6597-9992, Readback 728 (two runs),
+                    0 readbacks on the GPU tiers. Graphics: the 13 SkiaSharing tests now
+                    run and pass; Native_device_info_matches_the_backend now expects a
+                    non-zero MetalCommandQueue on Metal.
+                    The Graphics failures are the timestamp tests only, NOT from 0012-0013:
+                    Pass_timestamps_resolve_to_increasing_ticks and Timer_slots_between_
+                    commands_... fail every time (empty render passes, see the Third run),
+                    and Timer_measures_a_render_pass_and_a_compute_pass_in_milliseconds
+                    fails INTERMITTENTLY (0.0 ms for a 256x256 draw) when it runs with the
+                    other timestamp tests, never alone (5 of 5 passed). Compared like for
+                    like, five class runs each: an unpatched 0001-0011 RELEASE build failed
+                    it 2 of 5, the patched build 0 of 5 (3 of 5 in an earlier set) - a
+                    pre-existing Metal timestamp flake, left for Jeremy with the other two.
+                    Third run (2026-10-27), Release, -p:UseLocalNativeProject=true, one
+                    `dotnet test --project` per test project (the solution holds the
+                    Android sample and this Mac has no Android workload), against the
+                    adopted osx-arm64 dylib (each test output's copy has its sha256).
+                    The FIRST macOS run of the Skia and Graphics tests (they did not
+                    compile on 2026-10-17):
+                      BindingGenerator.Tests  98 passed
+                      Native.Tests            163 tests, 136 passed, 0 failed, 27 skipped
+                      Skia.Tests               90 tests,  47 passed, 1 failed, 42 skipped
+                      Graphics.Tests          418 tests, 381 passed, 2 failed, 35 skipped
+                    Native: every skip a platform rule, none for a missing adapter - the
+                    21 of the Second run, plus 5 PipelineCacheTests ("The adapter does
+                    not offer the required feature" PipelineCache: wgpu-core 29 offers
+                    it on Vulkan only) and the Linux library-name check. All three
+                    MetalPreciseMathTests PASSED (patches/0010's first managed proof).
+                    THE THREE FAILURES ARE NOT FROM THIS BUILD - each is upstream
+                    behaviour that no CodeBrix patch touches, seen for the first time
+                    because these tests first ran on macOS now (left for Jeremy):
+                    1. Skia DeviceRequirementsTests.Owned_device_gets_a_required_feature_
+                       a_native_feature_and_a_raised_limit expects a GRContext; 32 Skia
+                       and 13 Graphics (SkiaSharing) tests SKIP for the same reason:
+                       "wgpuDeviceGetNativeMetalDevice / wgpuQueueGetNativeMetalCommand-
+                       Queue returned null". The queue getter is null on EVERY call in
+                       wgpu-native v29.0.1.1 (src/lib.rs: "wgpu-hal v29 no longer
+                       exposes a public accessor for the raw MTLCommandQueue. Return null
+                       until upstream adds one back."), so the owned Metal route of the
+                       Skia package can never build a GRContext with this engine. A fix
+                       needs a new native capability (e.g. a patch or a bridge accessor
+                       for wgpu-hal's Metal queue) - a contract decision, not made here.
+                       (FIXED the same evening by patches/0012-0013, at Jeremy's request,
+                       with no change to the C API: see the Fourth run.)
+                    2. Graphics GpuQuerySetTests.Pass_timestamps_resolve_to_increasing_
+                       ticks: ticks[1] (end of pass) resolved to 0 for an EMPTY render
+                       pass, and 3. GpuTimerTests.Timer_slots_between_commands_measure_
+                       the_work_between_them: 0.0 ms around an empty render pass. wgpu-
+                       hal 29.0.3's Metal backend (unmodified; 0010 touches only shader
+                       compile options) samples a render pass at the start-of-vertex /
+                       end-of-fragment stage boundaries and defers encoder timestamps
+                       to a dummy blit encoder; on the M2 Pro an empty pass leaves the
+                       end sample unwritten. A test with real work in the pass, or a
+                       Metal-aware expectation, is a managed decision.
+                    Second run (2026-10-17), Release, -p:UseLocalNativeProject=true, one
                     `dotnet test --project` per test project because the solution now
                     holds the Android sample (net10.0-android) and this Mac has no
                     Android workload: BindingGenerator.Tests 96 passed;
@@ -677,8 +792,8 @@ macOS (the two osx-* entries)
 ================================================================================
 osx-arm64                                                         BUILT + PASSED
 ================================================================================
-Built            : 2026-10-17 22:36:57 UTC (157 s for two builds, REPRODUCIBLE=1)
-Contract / fixes : API version 2; patches 0001-0009; 251 exports (== specs/expected-exports.txt)
+Built            : 2026-10-27 02:04:28 UTC (167 s for two builds, REPRODUCIBLE=1)
+Contract / fixes : API version 4; patches 0001-0013; 257 exports (== specs/expected-exports.txt)
 Built by         : macos/build-osx-arm64.sh (route: native, Apple Silicon)
 Build host       : the Apple Silicon Mac above (macOS 27.0.1, arm64; Xcode 27.0, Apple
                    clang 21.0.0 clang-2100.3.34.2, macOS 27.0 SDK)
@@ -689,47 +804,59 @@ cargo            : MACOSX_DEPLOYMENT_TARGET=11.0 CARGO_TARGET_AARCH64_APPLE_DARW
                    macos/cc-exports.sh cargo +1.93 build --release --locked --target
                    aarch64-apple-darwin (rustflags: --remap-path-prefix <scratch> (both
                    /tmp and /private/tmp spellings), <cargo home>; ld -exported_symbols_list
-                   = specs/expected-exports.txt)
+                   = specs/expected-exports.txt); wgpu-hal from the patched scratch copy of
+                   wgpu-hal/ ([patch.crates-io])
 Profile          : release - opt-level 3, lto fat, codegen-units 1, panic abort, debug true
 File             : libcodebrix_wgpu.dylib - Mach-O 64-bit arm64, thin (lipo: non-fat);
                    install name @rpath/libcodebrix_wgpu.dylib; no LC_RPATH
 Minimum macOS    : 11.0 (checked: LC_BUILD_VERSION minos 11.0; 0 weak imports)
-Size (signed)    : 4270464 bytes (strip -x, then codesign --sign -; signature valid)
-SHA256           : 44197dcf1d0f5fc07c040af0b8e149c91514efb28fe413f5230418b1ad06c54d
-LC_UUID          : 07C11DCA-A60C-3881-91BD-2AD2C6D263F5 (equal in the stripped and the
+Size (signed)    : 4287360 bytes (strip -x, then codesign --sign -; signature valid)
+SHA256           : 5aa575ec6da1be79e8a2769ceb3a59d6c09dcd4a566215afc21dbbd52a9a748b
+LC_UUID          : 00399081-F326-3C72-AE01-D8BD1BFBDAB5 (equal in the stripped and the
                    unstripped file)
-Unstripped       : 5043288 bytes -> unstripped/osx-arm64/libcodebrix_wgpu.dylib (committed:
+Unstripped       : 5062792 bytes -> unstripped/osx-arm64/libcodebrix_wgpu.dylib (committed:
                    well under the 50 MB rule that kept the Windows PDBs out)
-                   sha256 99b8ed1e9e4e8b4f891ea650b9531b860b96d995c8d0356790546a557c804cad
-Exports          : exactly the 251 functions of specs/expected-exports.txt
+                   sha256 18f826c4393ebcc5d53816acd449df4092d4a97515aebd5d6053ee49188af6bb
+Exports          : exactly the 257 functions of specs/expected-exports.txt
 Dependencies     : /usr/lib/libSystem.B.dylib, /usr/lib/libobjc.A.dylib,
                    /usr/lib/libiconv.2.dylib, and the frameworks QuartzCore, Metal,
                    Foundation, CoreFoundation - nothing from Homebrew, no Vulkan / MoltenVK
 Embedded paths   : none from this machine (no /tmp, /private/tmp or /Users string; the
-                   wgpu-native source names read wgpu-native-tools/wgpu-native/src/...)
+                   source names read wgpu-native-tools/wgpu-native/src/... and
+                   wgpu-native-tools/wgpu-hal/src/...)
 Build warnings   : 0 (cargo log, both builds)
 Reproducible     : YES (REPRODUCIBLE=1) - two builds into the same paths gave identical
-                   unstripped bytes (see the macOS header, Second run)
-Smoke test       : PASSED on the build host (73 checks, 0 failed, SMOKE TEST PASSED, exit 0;
-                   Metal backend, Apple M2 Pro): proc status by ordinal, build info with
-                   the 0001-0009 fix set, 19 struct layouts, compute + render round trips,
-                   WHOLE_MAP_SIZE map at offset 8 (0006), foreign-index wgpuDevicePoll ->
-                   false + Validation scope (0007), downlevel + RGBA8 format capabilities,
-                   bounded poll, fault listeners, transitions, wgpu.h Metal getters,
-                   CreateTextureFromMetalTexture round trip, AdoptMetalDevice + compute,
-                   Vulkan / D3D12 functions -> Error, 0 live objects
-Managed proof    : 2026-10-17, Release, -p:UseLocalNativeProject=true, against this exact
-                   file (the copy in the test output has the sha256 above):
-                   Native.Tests 131 tests, 110 passed, 0 failed, 21 skipped (all platform
-                   rules, no "no adapter" skip - see the macOS header); BindingGenerator.Tests
-                   96 passed. Skia.Tests / Graphics.Tests NOT RUN: the Skia package does not
-                   compile at HEAD 7edd925 (see the header).
+                   unstripped bytes
+Smoke test       : PASSED on the build host (88 checks, 0 failed, SMOKE TEST PASSED, exit 0;
+                   Metal backend, Apple M2 Pro): the checks of the v2 round (proc status,
+                   build info - now the 0001-0013 fix set -, struct layouts, compute +
+                   render round trips, 0006 map, 0007 poll, capabilities, bounded poll,
+                   fault listeners, transitions, wgpu.h Metal getters, Metal texture wrap,
+                   AdoptMetalDevice + compute, Vulkan / D3D12 functions -> Error) plus:
+                   GetProcStatus(DeviceCreatePipelineCache) == NotAvailableOnBackend and
+                   (PipelineCacheRelease) == Implemented; DeviceCreatePipelineCache without
+                   the feature -> Validation error, process alive, empty data; the NULL
+                   cases; AdapterGetPipelineCacheKey -> Error (not Vulkan); SetMetal-
+                   PreciseMath(true) == Success and a compute pass in which a NaN compares
+                   unequal to itself (patches/0010), then back to the default;
+                   GetProcStatus(QueueGetNativeMetalCommandQueue) == Implemented and the
+                   queue non-null, the same on every call, its -device the device's
+                   MTLDevice (patches/0012-0013); 0 live objects
+Managed proof    : 2026-10-27, Release, -p:UseLocalNativeProject=true, against this exact
+                   file (each test output's copy has the sha256 above): BindingGenerator
+                   98 passed; Native 166 tests, 138 passed, 0 failed, 28 skipped (platform
+                   rules; MetalPreciseMathTests and MetalCommandQueueTests passed); Skia
+                   90 tests, 80 passed, 0 failed, 10 skipped (every GRContext test ran:
+                   ZeroCopy on the owned Metal route, AdoptMetal); Graphics 418 tests, 393
+                   passed, 3 failed, 22 skipped - the 3 are the Metal timestamp tests,
+                   upstream behaviour that predates 0012-0013 (see the macOS header,
+                   Managed tests, Fourth run).
 
 ================================================================================
 osx-x64                                                           BUILT + PASSED
 ================================================================================
-Built            : 2026-10-17 22:36:57 UTC (159 s for two builds, REPRODUCIBLE=1)
-Contract / fixes : API version 2; patches 0001-0009; 251 exports (== specs/expected-exports.txt)
+Built            : 2026-10-27 02:04:31 UTC (165 s for two builds, REPRODUCIBLE=1)
+Contract / fixes : API version 4; patches 0001-0013; 257 exports (== specs/expected-exports.txt)
 Built by         : macos/build-osx-x64.sh (route: cross-compiled on arm64 via --target
                    x86_64-apple-darwin, verified under Rosetta 2)
 Build host       : the Apple Silicon Mac above (macOS 27.0.1, arm64; Xcode 27.0, Apple
@@ -741,28 +868,30 @@ cargo            : MACOSX_DEPLOYMENT_TARGET=11.0 CARGO_TARGET_X86_64_APPLE_DARWI
                    macos/cc-exports.sh cargo +1.93 build --release --locked --target
                    x86_64-apple-darwin (rustflags: --remap-path-prefix <scratch> (both
                    /tmp and /private/tmp spellings), <cargo home>; ld -exported_symbols_list
-                   = specs/expected-exports.txt)
+                   = specs/expected-exports.txt); wgpu-hal from the patched scratch copy of
+                   wgpu-hal/ ([patch.crates-io])
 Profile          : release - opt-level 3, lto fat, codegen-units 1, panic abort, debug true
 File             : libcodebrix_wgpu.dylib - Mach-O 64-bit x86_64, thin (lipo: non-fat);
                    install name @rpath/libcodebrix_wgpu.dylib; no LC_RPATH
 Minimum macOS    : 11.0 (checked: LC_BUILD_VERSION minos 11.0; 0 weak imports)
-Size (signed)    : 4879664 bytes (strip -x, then codesign --sign -; signature valid)
-SHA256           : 3a3abcf9e67ff9a6d6c5c0ebea4e504ead7d21167858de631d4dc835f793c483
-LC_UUID          : CF12442A-06C8-3582-AFAD-EE9A766235DC (equal in the stripped and the
+Size (signed)    : 4892544 bytes (strip -x, then codesign --sign -; signature valid)
+SHA256           : 840a106d54fe479c255ecb98d51cee192a9044c3d0411fc1535f9ff0b8abbb82
+LC_UUID          : E2342A1C-F9CA-3582-BF21-B304130B64EC (equal in the stripped and the
                    unstripped file)
-Unstripped       : 5639192 bytes -> unstripped/osx-x64/libcodebrix_wgpu.dylib (committed)
-                   sha256 a2284a326a2347cbdd43a728ac5c77fad2f5e924b00cae6f9d9145e0a0cb8061
-Exports          : exactly the 251 functions of specs/expected-exports.txt
+Unstripped       : 5654984 bytes -> unstripped/osx-x64/libcodebrix_wgpu.dylib (committed)
+                   sha256 b18c44b335c0322f6d2c1288f7a69d13b424fb885469178fc7b22655308a1295
+Exports          : exactly the 257 functions of specs/expected-exports.txt
 Dependencies     : as osx-arm64 (libSystem, libobjc, libiconv, QuartzCore, Metal,
                    Foundation, CoreFoundation)
 Embedded paths   : none from this machine (as osx-arm64)
 Build warnings   : 0 (cargo log, both builds)
 Reproducible     : YES (REPRODUCIBLE=1) - two builds into the same paths gave identical
                    unstripped bytes
-Smoke test       : PASSED on the build host under Rosetta 2 (73 checks, 0 failed, SMOKE TEST
+Smoke test       : PASSED on the build host under Rosetta 2 (88 checks, 0 failed, SMOKE TEST
                    PASSED, exit 0): the x86_64 program and dylib ran translated and drove
                    the host's Metal device (Apple M2 Pro) through the same checks as
-                   osx-arm64
+                   osx-arm64, including the 0010 precise-math NaN pass and the 0012-0013 Metal
+                   command-queue checks
 Managed proof    : NOT RUN - this Mac has only the arm64 .NET SDK, which cannot load an
                    x86_64 dylib. An x64 .NET 10 SDK under Rosetta 2, or an Intel Mac, would
                    give the equivalent of the osx-arm64 line.

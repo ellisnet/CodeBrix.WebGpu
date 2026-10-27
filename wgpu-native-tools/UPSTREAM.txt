@@ -112,8 +112,12 @@ applied to a scratch copy by every script (see patches/README.txt):
   0011 pipeline caches for compute / render pipeline creation, through the chained
        WGPUCodebrixPipelineDescriptorExtras (CodeBrix, after the shapes of open draft
        PR #618; 2026-10-26)
-The same holds for wgpu-hal/: nothing in it is ever edited; patches/0010 is
-applied to the scratch copy.
+  0012 wgpu-hal's Metal Queue::raw_queue() accessor - the second patch of wgpu-hal/
+       (CodeBrix; 2026-10-27)
+  0013 wgpuQueueGetNativeMetalCommandQueue returns the queue instead of NULL, so
+       Skia's Metal GRContext can share the WebGPU device (CodeBrix; 2026-10-27)
+The same holds for wgpu-hal/: nothing in it is ever edited; patches/0010 and 0012
+are applied to the scratch copy.
 
 COMMITTING wgpu-native/: wgpu-native/.gitignore and
 wgpu-native/ffi/webgpu-headers/.gitignore are part of the archives; a nested

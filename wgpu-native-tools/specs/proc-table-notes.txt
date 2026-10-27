@@ -51,4 +51,3 @@ wgpuAdapterRequestDevice                    ABORTS on the first uncaptured error
 wgpuCodebrixInstanceAdoptVulkanDevice       ABORTS on the first uncaptured error: the adopted device has the default uncaptured-error handler (use error scopes).
 wgpuCodebrixInstanceAdoptMetalDevice        ABORTS on the first uncaptured error: the adopted device has the default uncaptured-error handler (use error scopes).
 wgpuCodebrixInstanceAdoptD3d12Device        UNSUPPORTED: always returns WGPUStatus_Error with this engine.
-wgpuQueueGetNativeMetalCommandQueue         UNSUPPORTED: always returns NULL with this engine.

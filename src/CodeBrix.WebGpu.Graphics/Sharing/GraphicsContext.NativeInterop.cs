@@ -29,8 +29,8 @@ public sealed unsafe partial class GraphicsContext
     }
 
     /// <summary>
-    /// The MTLCommandQueue behind the context on the Metal backend. Always <see cref="IntPtr.Zero" /> on this engine,
-    /// whose Metal layer no longer exposes the queue.
+    /// The MTLCommandQueue the context submits on, on the Metal backend (borrowed), or <see cref="IntPtr.Zero" />.
+    /// Work another Metal renderer commits to this queue is ordered with the context's own submissions.
     /// </summary>
     public IntPtr MetalCommandQueue
     {

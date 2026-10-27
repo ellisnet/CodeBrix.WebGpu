@@ -13,3 +13,5 @@
 0009-wgpu-native-debugger-capture-wgpubool
 0010-wgpu-hal-metal-precise-math
 0011-wgpu-native-pipeline-cache-chain
+0012-wgpu-hal-metal-queue-accessor
+0013-wgpu-native-metal-command-queue

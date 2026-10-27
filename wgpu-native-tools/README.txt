@@ -111,9 +111,11 @@ WHAT BUILDS WHERE
                                                                                2026-10-17, reproducible)
   win-arm64      windows/build-win-arm64.ps1     ARM64 Windows, or x64 cross   cross-built there 2026-10-17
                                                  (smoke test then UNRUN)       (reproducible); smoke UNRUN
-  osx-arm64      macos/build-osx-arm64.sh        Apple Silicon Mac             built (Jeremy's Apple Silicon Mac)
+  osx-arm64      macos/build-osx-arm64.sh        Apple Silicon Mac             built (Jeremy's Apple Silicon Mac,
+                                                                               2026-10-27 UTC, v4, reproducible)
   osx-x64        macos/build-osx-x64.sh          Intel Mac, or Apple Silicon   built there (cross, verified
-                                                 + Rosetta 2                   under Rosetta 2)
+                                                 + Rosetta 2                   under Rosetta 2; 2026-10-27 UTC,
+                                                                               v4, reproducible)
   (host)         build-host.sh                   this Linux dev box            NOT shipped
 
 The Windows and macOS scripts were written on Linux on 2026-10-11 from the
@@ -155,8 +157,18 @@ emptied target folder (ld writes the linked objects' paths into N_OSO stabs
 and LC_UUID, so a twin in a target-2 folder could never match), a differing
 twin is recorded instead of silently ending the script under set -e, and the
 physical /private/tmp scratch path is remapped as well (five wgpu-native
-source paths had been in both shipped dylibs). All nine RIDs are built. If a
-script breaks, fix it in the script and record it in BUILD-PROVENANCE.txt.
+source paths had been in both shipped dylibs). The third macOS round
+(2026-10-27 UTC, contract v4 + patches 0010-0011 + the vendored wgpu-hal/)
+needed no change at all: it was the first compile of patches/0010's Metal
+code, both RIDs built with 0 warnings, were byte-identical twice and passed
+the 85-check smoke test on Metal (including the precise-math NaN pass), and
+were adopted. A fourth round the same evening added patches/0012-0013 (the
+Metal command queue, so Skia's Metal GRContext can share the WebGPU device):
+again no script change, 0 warnings, byte-identical twice, 88 smoke-test checks
+on Metal, adopted. All nine RIDs are built; the seven non-macOS RIDs do not
+yet carry 0012-0013 in their fix set, and win-x64 / win-arm64 still carry
+contract v2 (BUILD-PROVENANCE.txt, STALE ENTRIES).
+If a script breaks, fix it in the script and record it in BUILD-PROVENANCE.txt.
 
 PREREQUISITES PER MACHINE
 --------------------------------------------------------------------------------
@@ -281,7 +293,8 @@ by name, then checks: wgpuCodebrixGetProcStatus at the export list's ordinals
 (WaitAny AbortsUnimplemented, DeviceCreateBuffer Implemented, the D3D12 getter
 NotAvailableOnBackend off Windows, DeviceCreatePipelineCache Implemented where
 Vulkan is compiled in and NotAvailableOnBackend on macOS, PipelineCacheRelease
-Implemented everywhere, past the end Unknown);
+Implemented everywhere, QueueGetNativeMetalCommandQueue Implemented on macOS and
+NotAvailableOnBackend elsewhere, past the end Unknown);
 wgpuCodebrixGetApiVersion == 4; wgpuCodebrixSetMetalPreciseMath (Success on a
 macOS build, Error elsewhere); wgpuGetVersion == 29.0.1.1 packed;
 wgpuCodebrixGetBuildInfo (+ a non-empty `patches` fix set); struct layouts (19
@@ -308,17 +321,22 @@ descriptor -> Error), TextureGetVulkanInfo
 read back through the ORIGINAL, and AdoptVulkanDevice of the same VkDevice into
 a second instance with a compute pass on it; D3D12: the same with
 GetD3d12Info / ID3D12Resource, AdoptD3d12Device -> Error; Metal: the same with
-wgpu.h's Metal getters and AdoptMetalDevice, then SetMetalPreciseMath(true) and a
+wgpu.h's Metal getters and AdoptMetalDevice, QueueGetNativeMetalCommandQueue
+non-null, the same on every call and an MTLCommandQueue whose -device IS the
+device's MTLDevice (patches/0012-0013, asked through the Objective-C runtime),
+then SetMetalPreciseMath(true) and a
 compute pass in which a NaN compares unequal to itself (patches/0010); every OTHER backend's functions
-return Error / NULL; pipeline caches (patches/0011): without the feature,
+return Error / NULL (QueueGetNativeMetalCommandQueue too); pipeline caches (patches/0011): without the feature,
 creation is a Validation error with the process alive and the data empty; on
 a Vulkan adapter the cache key is "wgpu_pipeline_cache_vulkan_<vendor>_<device>",
 a cache chained onto the doubling pipeline GROWS and the readback is exact, its
 saved bytes start a warm cache without fallback (no error, exact compute), and
 damaged bytes give an empty cache with fallback and a Validation error without;
 off Vulkan the key query returns Error; no uncaptured device errors; everything
-released and wgpuGenerateReport shows 0 live objects (97 checks on Vulkan;
-Metal not yet run with the pipeline-cache checks - 77 before them). "SMOKE TEST PASSED", exit 0.
+released and wgpuGenerateReport shows 0 live objects (88 checks on Metal,
+measured 2026-10-27; the patches/0012-0013 checks add 2 to the 97 last measured
+on Vulkan - 99 expected until the next Linux build measures it - and 1 to the
+no-adapter run). "SMOKE TEST PASSED", exit 0.
 
 THE LICENCE FILE (identical on all nine RIDs)
 --------------------------------------------------------------------------------
@@ -375,13 +393,13 @@ BUMPING WGPU (the exact recipe)
 FILES
 --------------------------------------------------------------------------------
   wgpu-native/            unmodified wgpu-native v29.0.1.1 + webgpu-headers (UPSTREAM.txt)
-  wgpu-hal/               unmodified wgpu-hal 29.0.3 crate, vendored for patches/0010 (UPSTREAM.txt)
+  wgpu-hal/               unmodified wgpu-hal 29.0.3 crate, vendored for patches/0010 + 0012 (UPSTREAM.txt)
   upstream-downloads/     the three archives + SHA256SUMS
   codebrix-wgpu/          OUR crate: Cargo.toml, Cargo.lock, build.rs, src/{lib,codebrix,
                           layouts,vk_format,proc_status}.rs, bridge/bridge.rs,
                           include/codebrix_wgpu.h, applied-patches.txt (proc_status.rs and
                           applied-patches.txt are written by the binding generator)
-  patches/                0001 rlib, 0002 bridge module, 0003-0011 behaviour fixes (+ README.txt)
+  patches/                0001 rlib, 0002 bridge module, 0003-0013 behaviour fixes (+ README.txt)
   specs/                  codebrix.yml (the contract), wgpu.yml, expected-exports.txt,
                           proc-table-notes.txt (per-function notes for the native-module
                           function table; read by the binding generator only)

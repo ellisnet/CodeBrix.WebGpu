@@ -30,7 +30,9 @@
  *               trip; AdoptD3d12Device -> Error (not supported by wgpu-hal 29, documented);
  *       Metal:  CreateTextureFromMetalTexture round trip, AdoptMetalDevice + compute, and with
  *               SetMetalPreciseMath on, a NaN compares unequal to itself in a compute pass (Metal's
- *               default fast math removes that check; patches/0010);
+ *               default fast math removes that check; patches/0010); wgpuQueueGetNativeMetalCommandQueue
+ *               returns an MTLCommandQueue whose -device IS the device's MTLDevice (patches/0012-0013;
+ *               Skia's Metal GRContext needs it); off Metal it returns NULL;
  *     and the functions of every OTHER backend return Error / NULL;
  *     plus Vulkan: InstanceApiVersion <= 1.3 (the apiVersion vkCreateInstance got), and
  *     VulkanGetAdoptRequirements (non-empty extension list wgpu's own device has, a
@@ -97,6 +99,7 @@ typedef size_t (*PFN_wgpuInstanceEnumerateAdapters)(WGPUInstance, WGPUInstanceEn
 typedef WGPUBool (*PFN_wgpuDevicePoll)(WGPUDevice, WGPUBool, WGPUSubmissionIndex const *);
 typedef WGPUSubmissionIndex (*PFN_wgpuQueueSubmitForIndex)(WGPUQueue, size_t, WGPUCommandBuffer const *);
 typedef void *(*PFN_wgpuDeviceGetNativeMetalDevice)(WGPUDevice);
+typedef void *(*PFN_wgpuQueueGetNativeMetalCommandQueue)(WGPUQueue);
 typedef void *(*PFN_wgpuTextureGetNativeMetalTexture)(WGPUTexture);
 
 /* X(name, pointer type) for every entry point used here. */
@@ -131,6 +134,7 @@ typedef void *(*PFN_wgpuTextureGetNativeMetalTexture)(WGPUTexture);
     X(wgpuGetVersion, PFN_wgpuGetVersion) X(wgpuGenerateReport, PFN_wgpuGenerateReport) \
     X(wgpuInstanceEnumerateAdapters, PFN_wgpuInstanceEnumerateAdapters) X(wgpuDevicePoll, PFN_wgpuDevicePoll) \
     X(wgpuDeviceGetNativeMetalDevice, PFN_wgpuDeviceGetNativeMetalDevice) \
+    X(wgpuQueueGetNativeMetalCommandQueue, PFN_wgpuQueueGetNativeMetalCommandQueue) \
     X(wgpuTextureGetNativeMetalTexture, PFN_wgpuTextureGetNativeMetalTexture) \
     X(wgpuCodebrixGetApiVersion, WGPUProcCodebrixGetApiVersion) X(wgpuCodebrixGetBuildInfo, WGPUProcCodebrixGetBuildInfo) \
     X(wgpuCodebrixGetStructLayout, WGPUProcCodebrixGetStructLayout) X(wgpuCodebrixDeviceGetBackend, WGPUProcCodebrixDeviceGetBackend) \
@@ -579,6 +583,7 @@ int main(int argc, char **argv) {
         FILE *f = fopen(argv[2], "r");
         int total = 0, missing = 0;
         int ord_wait_any = -1, ord_create_buffer = -1, ord_d3d12_info = -1, ord_create_cache = -1, ord_release_cache = -1;
+        int ord_metal_queue = -1;
         char name[256];
         if (!f) { printf("FAIL: cannot open %s\n", argv[2]); return 1; }
         while (fgets(name, sizeof name, f)) {
@@ -590,6 +595,7 @@ int main(int argc, char **argv) {
             if (!strcmp(name, "wgpuCodebrixDeviceGetD3d12Info")) ord_d3d12_info = total;
             if (!strcmp(name, "wgpuCodebrixDeviceCreatePipelineCache")) ord_create_cache = total;
             if (!strcmp(name, "wgpuCodebrixPipelineCacheRelease")) ord_release_cache = total;
+            if (!strcmp(name, "wgpuQueueGetNativeMetalCommandQueue")) ord_metal_queue = total;
             total++;
             if (!lib_sym(name)) { missing++; printf("  not exported: %s\n", name); }
         }
@@ -611,7 +617,11 @@ int main(int argc, char **argv) {
 #if defined(__APPLE__)
         check(ord_create_cache >= 0 && p_wgpuCodebrixGetProcStatus((uint32_t)ord_create_cache) == WGPUCodebrixProcStatus_NotAvailableOnBackend,
               "GetProcStatus(wgpuCodebrixDeviceCreatePipelineCache) == NotAvailableOnBackend (no Vulkan here)");
+        check(ord_metal_queue >= 0 && p_wgpuCodebrixGetProcStatus((uint32_t)ord_metal_queue) == WGPUCodebrixProcStatus_Implemented,
+              "GetProcStatus(wgpuQueueGetNativeMetalCommandQueue) == Implemented (Metal compiled in; patches/0013)");
 #else
+        check(ord_metal_queue >= 0 && p_wgpuCodebrixGetProcStatus((uint32_t)ord_metal_queue) == WGPUCodebrixProcStatus_NotAvailableOnBackend,
+              "GetProcStatus(wgpuQueueGetNativeMetalCommandQueue) == NotAvailableOnBackend (no Metal here)");
         check(ord_create_cache >= 0 && p_wgpuCodebrixGetProcStatus((uint32_t)ord_create_cache) == WGPUCodebrixProcStatus_Implemented,
               "GetProcStatus(wgpuCodebrixDeviceCreatePipelineCache) == Implemented (Vulkan compiled in)");
 #endif
@@ -979,6 +989,26 @@ int main(int argc, char **argv) {
         check(vk_status == WGPUStatus_Error && dx_status == WGPUStatus_Error, "GetVulkanInfo / GetD3d12Info on a Metal device -> Error");
         void *mtl_texture = p_wgpuTextureGetNativeMetalTexture(texture);
         check(metal_device != NULL && mtl_texture != NULL, "wgpu.h Metal getters: device + texture non-null");
+        {
+            /* patches/0012-0013: the queue's MTLCommandQueue, borrowed. Asked for its -device through the
+               Objective-C runtime the library already loaded (libobjc is one of its dependencies), so this
+               program needs no -lobjc. */
+            WGPUQueue q = p_wgpuDeviceGetQueue(device);
+            void *mtl_queue = p_wgpuQueueGetNativeMetalCommandQueue(q);
+            int same_twice = mtl_queue != NULL && p_wgpuQueueGetNativeMetalCommandQueue(q) == mtl_queue;
+            void *queue_device = NULL;
+#if defined(__APPLE__)
+            typedef void *(*PFN_objc_msgSend_id)(void *, void *);
+            typedef void *(*PFN_sel_registerName)(const char *);
+            PFN_objc_msgSend_id msg_send = (PFN_objc_msgSend_id)(uintptr_t)dlsym(RTLD_DEFAULT, "objc_msgSend");
+            PFN_sel_registerName sel_register = (PFN_sel_registerName)(uintptr_t)dlsym(RTLD_DEFAULT, "sel_registerName");
+            if (mtl_queue && msg_send && sel_register) queue_device = msg_send(mtl_queue, sel_register("device"));
+#endif
+            check(mtl_queue != NULL && same_twice, "QueueGetNativeMetalCommandQueue: non-null, the same queue on every call");
+            check(queue_device != NULL && queue_device == metal_device,
+                  "QueueGetNativeMetalCommandQueue: the MTLCommandQueue belongs to the device's MTLDevice (-device == GetNativeMetalDevice)");
+            p_wgpuQueueRelease(q);
+        }
         WGPUTextureDescriptor wd = rt_descriptor();
         check_wrapped_texture(device, texture,
                               p_wgpuCodebrixDeviceCreateTextureFromMetalTexture(device, mtl_texture, &wd, WGPUCodebrixTextureState_Undefined),
@@ -1027,6 +1057,9 @@ int main(int argc, char **argv) {
         if (backend != WGPUBackendType_Metal) {
             check(p_wgpuCodebrixDeviceCreateTextureFromMetalTexture(device, (void *)(uintptr_t)0x1000, &wd, WGPUCodebrixTextureState_Undefined) == NULL,
                   "CreateTextureFromMetalTexture on a non-Metal device -> NULL");
+            WGPUQueue q = p_wgpuDeviceGetQueue(device);
+            check(p_wgpuQueueGetNativeMetalCommandQueue(q) == NULL, "QueueGetNativeMetalCommandQueue on a non-Metal queue -> NULL");
+            p_wgpuQueueRelease(q);
             WGPUInstance other = p_wgpuCreateInstance(NULL);
             WGPUCodebrixMetalAdoptDescriptor md;
             memset(&md, 0, sizeof md);

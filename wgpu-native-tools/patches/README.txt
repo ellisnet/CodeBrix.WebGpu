@@ -5,8 +5,8 @@ fails loudly when one stops applying) to a SCRATCH COPY of wgpu-native/ and
 wgpu-hal/ - never to the vendored trees, which stay byte-identical to their
 archives. Unified diffs relative to wgpu-native-tools/ with a/ b/ prefixes:
 `patch -p1` (bash), `git apply -p1` (Windows), in name order. 0001 and 0002 make
-the build possible; 0003-0009 and 0011 fix behaviour inside wgpu-native's own
-source and 0010 inside wgpu-hal's (the reason wgpu-hal/ is vendored), one concern each, and
+the build possible; 0003-0009, 0011 and 0013 fix behaviour inside wgpu-native's own
+source and 0010 and 0012 inside wgpu-hal's (the reason wgpu-hal/ is vendored), one concern each, and
 carry their upstream provenance in the text above the diff (both tools ignore
 it). Every behaviour patch is fenced by a test in tests/CodeBrix.WebGpu.Native.Tests
 that fails on the unpatched engine.
@@ -131,5 +131,32 @@ that fails on the unpatched engine.
     0x0003000C); the CodeBrix contract copies its shapes under CodeBrix names.
     When a vendored release contains it, drop this patch and move the binding to
     upstream's names.
+
+0012-wgpu-hal-metal-queue-accessor.patch
+    wgpu-hal/src/metal/mod.rs: a public Queue::raw_queue() returning the
+    MTLCommandQueue the Metal backend submits on (borrowed), the mirror of
+    Device::raw_device(). wgpu-hal 29 keeps the queue in a private field
+    (QueueShared::raw) with no accessor; its pre-objc2 Metal backend had one
+    (Queue::as_raw). 0013 is its only user. Re-check on every bump; drop it with
+    0013 when upstream exposes the queue again.
+
+0013-wgpu-native-metal-command-queue.patch
+    wgpu-native/src/lib.rs: wgpuQueueGetNativeMetalCommandQueue returns that
+    queue (wgpu-core's queue_as_hal + raw_queue, borrowed like
+    wgpuDeviceGetNativeMetalDevice's MTLDevice) instead of logging a warning and
+    returning NULL ("Return null until upstream adds one back"). Off Metal it is
+    still NULL; wgpu.h is unchanged. WHY: SkiaSharp's Metal GRContext needs the
+    device AND a command queue, so without it the CodeBrix.WebGpu.Skia owned route
+    on macOS (Create + CreateGrContext -> ZeroCopy) could not work at all. With the
+    WebGPU device's own queue, Skia and WebGPU submit on one MTLCommandQueue and
+    Metal orders their work (SharesQueueWithSkia, no waits), as on Vulkan and
+    Direct3D 12. Fenced by MetalCommandQueueTests (the queue is non-null and its
+    -device is the device's MTLDevice; the unpatched engine returns NULL -
+    verified 2026-10-27), the Skia tests that build a GRContext on a WebGPU device
+    (they skipped with "returned null" before), the Graphics
+    Native_device_info_matches_the_backend test and the smoke test's
+    "MTLCommandQueue belongs to the device's MTLDevice" check. The proc-table note
+    "UNSUPPORTED: always returns NULL" was removed with it (GetProcStatus:
+    Implemented on Metal builds, NotAvailableOnBackend elsewhere).
 
 Record a new patch in UPSTREAM.txt and BUILD-PROVENANCE.txt.

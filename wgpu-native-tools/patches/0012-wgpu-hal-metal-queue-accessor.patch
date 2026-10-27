@@ -1,0 +1,28 @@
+CodeBrix patch 0012 - wgpu-hal's Metal queue exposes its MTLCommandQueue (wgpu-hal/src/metal/mod.rs)
+
+WHAT: a public accessor, Queue::raw_queue(), returning the MTLCommandQueue the Metal backend submits
+on (borrowed), the mirror of Device::raw_device(). Nothing else changes; patches/0013 is its one user.
+WHY: wgpu-hal 29 keeps the queue in a private field (QueueShared::raw) with no accessor, so
+wgpu-native's wgpuQueueGetNativeMetalCommandQueue returns NULL ("Return null until upstream adds one
+back"). Without the queue, SkiaSharp cannot build a Metal GRContext on the WebGPU device, and the
+CodeBrix.WebGpu.Skia owned route on macOS (Create + CreateGrContext -> ZeroCopy) cannot work.
+UPSTREAM: wgpu-hal 29.0.3 has no such accessor (its pre-objc2 Metal backend had Queue::as_raw);
+re-check on every bump and drop this patch when upstream exposes the queue again.
+
+--- a/wgpu-hal/src/metal/mod.rs
++++ b/wgpu-hal/src/metal/mod.rs
+@@ -484,6 +484,14 @@
+             }),
+             timestamp_period,
+         }
++    }
++
++    /// CodeBrix (patches/0012): the `MTLCommandQueue` this queue submits on, borrowed - never release it.
++    /// wgpu-native's `wgpuQueueGetNativeMetalCommandQueue` returns it (patches/0013), so another Metal
++    /// renderer on the same device (Skia's Metal backend) can submit on the SAME queue and be ordered with
++    /// wgpu's work by Metal itself. The mirror of `Device::raw_device`.
++    pub fn raw_queue(&self) -> &ProtocolObject<dyn MTLCommandQueue> {
++        &self.shared.raw
+     }
+ }
+ 

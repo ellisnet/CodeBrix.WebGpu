@@ -1,0 +1,40 @@
+CodeBrix patch 0013 - wgpuQueueGetNativeMetalCommandQueue returns the queue (wgpu-native/src/lib.rs)
+
+WHAT: the Metal branch of wgpuQueueGetNativeMetalCommandQueue returns the queue's MTLCommandQueue
+through wgpu-core's queue_as_hal and wgpu-hal's Queue::raw_queue (patches/0012) - borrowed, exactly
+like wgpuDeviceGetNativeMetalDevice's MTLDevice - instead of logging a warning and returning NULL.
+Off Metal it still returns NULL. wgpu.h's C API is unchanged.
+WHY: SkiaSharp's Metal GRContext needs the device AND a command queue. With the WebGPU device's own
+queue, Skia and WebGPU submit on one MTLCommandQueue and Metal orders their work, so the
+CodeBrix.WebGpu.Skia owned route on macOS reaches ZeroCopy with no waits (SharesQueueWithSkia), as
+it does on Vulkan and Direct3D 12. Fenced by the Skia tests that build a GRContext on a WebGPU device
+(they skipped with "returned null" before), the Graphics MetalCommandQueue test, and the smoke test's
+"MTLCommandQueue belongs to the device" check.
+UPSTREAM: wgpu-native v29.0.1.1 returns NULL here with the comment "wgpu-hal v29 no longer exposes a
+public accessor for the raw MTLCommandQueue. Return null until upstream adds one back." Drop this
+patch (with 0012) when a vendored release returns the queue.
+
+--- a/wgpu-native/src/lib.rs
++++ b/wgpu-native/src/lib.rs
+@@ -3228,12 +3228,15 @@
+     #[cfg(all(any(target_os = "ios", target_os = "macos"), feature = "metal"))]
+     {
+         let queue = queue.as_ref().expect("invalid queue");
+-        // wgpu-hal v29 no longer exposes a public accessor for the raw
+-        // MTLCommandQueue. Return null until upstream adds one back.
+-        log::warn!(
+-            "wgpuQueueGetNativeMetalCommandQueue: not available in current wgpu-hal version"
+-        );
+-        let _ = queue;
++        // CodeBrix (patches/0013): wgpu-hal v29 dropped the public accessor for the raw
++        // MTLCommandQueue; patches/0012 adds `raw_queue` back. Borrowed, like the device getter's.
++        let hal_queue = queue
++            .queue
++            .context
++            .queue_as_hal::<hal::api::Metal>(queue.queue.id);
++        if let Some(hal_queue) = hal_queue {
++            return hal_queue.raw_queue() as *const _ as *mut c_void;
++        }
+         std::ptr::null_mut()
+     }
+     #[cfg(not(all(any(target_os = "ios", target_os = "macos"), feature = "metal")))]
