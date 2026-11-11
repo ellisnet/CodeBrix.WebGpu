@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>VenusMusicVideo</RootNamespace>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CodeBrix.WebGpu.Graphics\CodeBrix.WebGpu.Graphics.csproj" />
+    <ProjectReference Include="..\..\src\CodeBrix.WebGpu.Skia\CodeBrix.WebGpu.Skia.csproj" />
+  </ItemGroup>
+
+  <!--
+    CodeBrix.Sdl3 opens the preview window; CodeBrix.Audio plays the song in step with the flight in the preview.
+    The video itself is encoded by the installed ffmpeg (frames are piped to it, with the song laid in after the
+    lead-in). SkiaSharp draws the preview's information overlay (and, later, the video's titles).
+  -->
+  <ItemGroup>
+    <PackageReference Include="CodeBrix.Sdl3.ZlibLicenseForever" Version="1.0.275.85" />
+    <PackageReference Include="CodeBrix.Audio.MitLicenseForever" Version="1.0.283.1382" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.153.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.153.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.153.1" />
+  </ItemGroup>
+
+  <!-- Same native-library handling as samples/WebGpuModelViewer (see the comment there). -->
+  <ItemGroup>
+    <None Remove="..\..\src\CodeBrix.WebGpu.Native\runtimes\**\*" />
+    <None Include="..\..\src\CodeBrix.WebGpu.Native\runtimes\**\*" Link="runtimes\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="_DropCommittedNativesWhenNativePackageResolved" AfterTargets="ResolvePackageAssets">
+    <ItemGroup>
+      <_WebGpuNativePackageAsset Include="@(RuntimeTargetsCopyLocalItems->WithMetadataValue('NuGetPackageId', 'CodeBrix.WebGpu.Native.MitLicenseForever'))" />
+      <_WebGpuNativePackageAsset Include="@(NativeCopyLocalItems->WithMetadataValue('NuGetPackageId', 'CodeBrix.WebGpu.Native.MitLicenseForever'))" />
+      <_WebGpuNativePackageAsset Include="@(RuntimeCopyLocalItems->WithMetadataValue('NuGetPackageId', 'CodeBrix.WebGpu.Native.MitLicenseForever'))" />
+      <None Remove="..\..\src\CodeBrix.WebGpu.Native\runtimes\**\*" Condition="'@(_WebGpuNativePackageAsset)' != ''" />
+    </ItemGroup>
+  </Target>
+
+  <!-- The planet shader. The song and flight.json are read from the source assets folder (so edits reload live). -->
+  <ItemGroup>
+    <EmbeddedResource Include="Rendering\Venus.wgsl" LogicalName="Venus.wgsl" />
+    <None Remove="Output\**" />
+    <Compile Remove="Output\**" />
+  </ItemGroup>
+
+</Project>

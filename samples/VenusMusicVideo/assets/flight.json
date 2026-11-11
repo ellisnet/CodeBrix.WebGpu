@@ -1,0 +1,70 @@
+{
+  // Venus music video - the flight. Saved changes reload live in the preview.
+  // Times "t" are SONG times ("m:ss.s" or seconds; negative = the descent before the music).
+  // "over": a place name or [lat, lon] = be above that point of the SURFACE at that moment.
+  // "lat"/"lon" (instead of "over") = a direction in SPACE: the planet turns beneath.
+  // "alt" km.  "gaze": 0 = look at the planet's centre, 1 = look ahead.  "pitch": degrees below the horizon.
+  // Every setting except the position ("over"/"lat"/"lon" and "alt"/"fill") carries over to later keys.
+  // A key with no position is a timing-only key: it just changes settings (e.g. "labels") at that moment.
+  // { "t": "0:38", "label": "Ishtar Terra" } pins that place's label to appear at exactly that moment.
+  // { "t": "1:30", "holdLabels": ["Dekla Tessera"] } keeps those places unlabelled until then (next pass).
+  // "fill" (instead of "alt"): the planet's width as a fraction of the frame's width (1.1 = a little too wide).
+  // "roll": bank, degrees.  "note": shown in the preview.
+  // "spin": the planet's spin, degrees per second (carries over to later keys until changed).
+  // "sunlight": 0 = even studio light, 1 = real sunlight with a dark night side (carries over).
+  // "phase": the sun's angle around the planet as seen from the camera, degrees: 0 full, 90 half, 180 new,
+  //          360 full again (carries over).
+  // "heading": the view's angle from the direction of travel, degrees (90 = looking to the right of travel;
+  //            carries over).  "labels": 1 = label places on their first pass through the view (carries over).
+  // "horizonLeft": 1 = when looking ahead, we fly toward screen-left: the horizon and haze run down the left of
+  //            the frame and the ground streams left to right (carries over).
+  // Spin is NEGATIVE (prograde) so the surface streams left to right across the frame.
+  "leadInSeconds": 2,
+  "tailSeconds": 6,
+  "fps": 30,
+  "width": 1080,
+  "height": 1920,
+  "fieldOfViewDegrees": 55,
+  "travelSmoothingSeconds": 2.5,
+  "spinDegreesPerSecond": -24,
+  "fadeInSeconds": 1.0,
+  "fadeOutSeconds": 2.5,
+  "look": {
+    "reliefExaggeration": 14,
+    "ambient": 0.38,
+    "diffuse": 0.85,
+    "exposure": 1.1,
+    "hazeThicknessKm": 380,
+    "hazeDensity": 1.6,
+    "hazeGlow": 1.15,
+    "hazeLow": [1.0, 0.42, 0.10],
+    "hazeHigh": [0.75, 0.10, 0.55],
+    "starBrightness": 0.55,
+    "starDensity": 0.07
+  },
+  "keys": [
+    { "t": "-0:02", "lat": 6, "lon": 170, "alt": 70000, "gaze": 0, "spin": -24, "sunlight": 0, "phase": 0, "heading": 0, "horizonLeft": 1, "labels": 0, "note": "rushing in toward a spinning Venus" },
+    { "t": "0:00", "lat": 6, "lon": 170, "fill": 1.12, "gaze": 0, "sunlight": 1, "phase": 0, "note": "music: the sun takes over - full" },
+    { "t": "0:10", "lat": 6, "lon": 170, "fill": 1.12, "gaze": 0, "sunlight": 1, "phase": 360, "note": "one whole cycle of phases" },
+    { "t": "0:11.5", "lat": 6, "lon": 170, "fill": 1.12, "gaze": 0, "sunlight": 0, "note": "studio light back" },
+    { "t": "0:18", "over": [30, 120], "alt": 1300, "gaze": 1, "pitch": 9, "spin": -2.5, "note": "down in the north, curving toward Ishtar" },
+    { "t": "0:27.9", "labels": 0 },
+    { "t": "0:28.6", "labels": 1, "note": "labels begin" },
+    { "t": "0:47", "holdLabels": ["Dekla Tessera", "Aranyani Chasma", "Laima Tessera", "Semuni Dorsa"], "note": "these wait for a later pass" },
+    { "t": "0:35.5", "over": [48, 100], "alt": 1350 },
+    { "t": "0:45.5", "over": [62, 75], "alt": 1350 },
+    { "t": "0:38", "label": "Ishtar Terra", "note": "the singer comes in: Ishtar Terra's label" },
+    { "t": "0:56", "over": [68, 38], "alt": 1300, "note": "over Ishtar Terra" },
+    { "t": "1:02", "over": [67, 4], "alt": 1200, "note": "Maxwell Montes" },
+    { "t": "1:14", "over": [60, -25], "alt": 1250, "note": "Lakshmi Planum, turning south" },
+    { "t": "1:30", "over": [36, -50], "alt": 1300 },
+    { "t": "1:46", "over": [10, -72], "alt": 1300 },
+    { "t": "2:02", "over": [-8, -95], "alt": 1200, "note": "along the equatorial band" },
+    { "t": "2:32", "over": [-8, -170], "alt": 1200 },
+    { "t": "3:02", "over": [-8, 115], "alt": 1200, "note": "Aphrodite Terra" },
+    { "t": "3:32", "over": [-8, 40], "alt": 1200 },
+    { "t": "4:05.8", "labels": 1 },
+    { "t": "4:06", "over": [-8, -45], "alt": 1200, "labels": 0, "note": "the zoom-out begins: no more labels" },
+    { "t": "4:25", "over": [-8, -88], "alt": 400000, "gaze": 0, "spin": -24, "note": "pull away" }
+  ]
+}

@@ -1,0 +1,5 @@
+# Rendered videos and stills
+Output/
+# The Magellan data and the maps built from it: downloaded and built by the app on its first run, never committed
+downloaded/
+.DS_Store
