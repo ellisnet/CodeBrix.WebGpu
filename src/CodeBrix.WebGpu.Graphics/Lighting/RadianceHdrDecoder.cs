@@ -16,7 +16,8 @@ namespace CodeBrix.WebGpu.Graphics;
 public static class RadianceHdrDecoder
 {
     // Provenance note: the decoding logic (header handling, old-style and new-style RLE scanlines, the RGBE-to-float
-    // conversion) follows the public-domain stb_image.h HDR loader (stb_image is public domain / MIT-0), rewritten in C#.
+    // conversion) follows the stb_image.h HDR loader, rewritten in C#. stb_image is offered under two licences, the MIT
+    // License or public domain (the Unlicense); it is used here under the public-domain choice.
 
     private static readonly float[] ExponentScale = CreateExponentTable();
 
